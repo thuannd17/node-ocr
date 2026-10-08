@@ -20,6 +20,8 @@ const router = Router();
 
 const folderPath = path.resolve(__dirname, '..', 'fake-data');
 const labelsPath = path.resolve(__dirname, '..', 'labels');
+// Neither folder is in git (roster data stays local): create them on a fresh clone.
+for (const dir of [folderPath, labelsPath]) fs.mkdirSync(dir, { recursive: true });
 const md5 = (buf) => crypto.createHash('md5').update(buf).digest('hex');
 // Identifies what produced a prediction: recognition model, detector limit and
 // parser code. A cached prediction from an older model/parser is not reused.
