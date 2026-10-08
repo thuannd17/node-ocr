@@ -1,0 +1,6 @@
+{
+  "version": "stock",
+  "name": "en_PP-OCRv3 (unmodified)",
+  "status": "baseline",
+  "notes": "Original PaddleOCR recognizer; baseline for comparisons and guard against exporting the pretrained weights by mistake."
+}

@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Benchmark — Roster OCR</title>
+  <link rel="stylesheet" href="/assets/app.css">
+  <style>
+    .controls {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 24px;
+      background: white;
+      padding: 16px;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    }
+    .controls select {
+      padding: 8px 12px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      font-size: 14px;
+    }
+    .controls input[type="number"] {
+      width: 90px;
+      padding: 8px 10px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      font-size: 14px;
+    }
+    .controls button {
+      background: var(--primary);
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    .controls button:hover { background: var(--primary-dark); }
+    .controls button:disabled { background: #ccc; cursor: not-allowed; }
+    .summary {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+      margin-bottom: 24px;
+    }
+    .stat-card {
+      background: white;
+      padding: 16px 24px;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+      text-align: center;
+      min-width: 140px;
+    }
+    .stat-value { font-size: 26px; font-weight: bold; color: #1976d2; }
+    .stat-label { font-size: 12px; color: #666; margin-top: 4px; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: white;
+      font-size: 13px;
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+      margin-bottom: 24px;
+    }
+    th, td {
+      padding: 10px 12px;
+      border: 1px solid #e5e5e5;
+      text-align: left;
+    }
+    th { background: #2b3a55; color: white; font-weight: 600; }
+    tr:nth-child(even) { background: #fafafa; }
+    .section-title { color: #2b3a55; margin: 24px 0 12px 0; }
+    .error { color: #d32f2f; background: #ffebee; padding: 15px; border-radius: 6px; display: none; }
+    .error.visible { display: block; }
+    .empty { color: #999; font-style: italic; padding: 30px; text-align: center; background: white; border-radius: 8px; }
+    pre.detail {
+      font-size: 11px;
+      white-space: pre-wrap;
+      max-height: 300px;
+      overflow-y: auto;
+      background: #f7f7f7;
+      padding: 8px;
+      border-radius: 4px;
+    }
+    details summary { cursor: pointer; color: #4a90e2; }
+  </style>
+</head>
+<body>
+  <script src="/assets/nav.js"></script>
+  <main class="page">
+  <div class="page-header">
+    <h1>📊 Benchmark Accuracy</h1>
+    <p class="subtitle">So sánh kết quả OCR với ground-truth trong <code>labels/</code></p>
+  </div>
+
+  <div class="controls">
+    <label for="strategySelect"><b>Strategy:</b></label>
+    <select id="strategySelect">
+      <option value="paddleocr" selected>PaddleOCR (offline, nhanh, khuyen dung)</option>
+      <option value="vlm">VLM — Gemini</option>
+    </select>
+    <span style="font-size:12px;color:#666;background:#eef;padding:3px 8px;border-radius:4px;display:inline">Stability mode: single worker</span>
+    <button id="runBtn">▶ Chạy benchmark</button>
+    <span id="status" style="color:#888;font-size:13px"></span>
+  </div>
+
+  <div id="error" class="error"></div>
+  <div id="result">
+    <div class="empty">Chọn strategy rồi bấm <b>Chạy benchmark</b> để bắt đầu.</div>
+  </div>
+
+  </main>
+
+  <script>
+    const FIELDS = ['date', 'day', 'duty', 'dep', 'begin', 'end', 'arr'];
+    let benchmarkRunning = false;
+    let stopRequested = false;
+    let currentRunId = null;
+    let currentEventSource = null;
+    let legacyAbortController = null;
+
+    const $ = (id) => document.getElementById(id);
+
+    function setRunButtonState() {
+      const btn = $('runBtn');
+      if (!benchmarkRunning) {
+        btn.textContent = '▶ Chạy benchmark';
+        btn.title = '';
+        return;
+      }
+      if (stopRequested) {
+        btn.textContent = '⏳ Đang dừng...';
+        btn.title = 'Đang chờ job hiện tại hoàn tất rồi dừng';
+        return;
+      }
+      btn.textContent = '■ Dừng benchmark';
+      btn.title = 'Dừng benchmark và trả report tại thời điểm dừng';
+    }
+
+    function escapeHtml(s) {
+      const m = { 38: 'amp', 60: 'lt', 62: 'gt', 34: 'quot', 39: '#039' };
+      return String(s).replace(/[&<>"']/g, (c) => '&' + m[c.charCodeAt(0)] + ';');
+    }
+
+    function pct(n, total) {
+      if (!total) return '—';
+      return ((n / total) * 100).toFixed(1) + '%';
+    }
+
+    async function runBenchmark() {
+      if (benchmarkRunning) {
+        await stopBenchmark();
+        return;
+      }
+
+      const strategy = $('strategySelect').value;
+      const errDiv = $('error');
+      const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+
+      benchmarkRunning = true;
+      stopRequested = false;
+      currentRunId = runId;
+      setRunButtonState();
+
+      errDiv.classList.remove('visible');
+      $('status').textContent = 'Đang chạy... (có thể mất vài phút)';
+      $('result').innerHTML = '';
+
+      if (!window.EventSource) {
+        await runBenchmarkLegacy(strategy, errDiv);
+        return;
+      }
+
+      const liveRows = [];
+      const renderLive = (progress, extra = '') => {
+        const p = progress?.total ? `${progress.current}/${progress.total}` : '0/0';
+        const pctText = progress?.total ? `${((progress.current / progress.total) * 100).toFixed(1)}%` : '0.0%';
+        $('result').innerHTML = `
+          <div class="summary">
+            <div class="stat-card"><div class="stat-value">${pctText}</div><div class="stat-label">Tiến độ benchmark</div></div>
+            <div class="stat-card"><div class="stat-value">${p}</div><div class="stat-label">Đã xử lý / Tổng</div></div>
+          </div>
+          <h3 class="section-title">Realtime progress ${extra ? `— ${escapeHtml(extra)}` : ''}</h3>
+          <table>
+            <tr><th>File</th><th>Pub (pred/exp)</th><th>Plan (pred/exp)</th><th>Row match</th><th>Field errors</th></tr>
+            ${liveRows.map((r) => `<tr>
+              <td>${escapeHtml(r.file || '-')}</td>
+              <td>${r.published ? `${r.published.predCount}/${r.published.expCount}` : '-'}</td>
+              <td>${r.planned ? `${r.planned.predCount}/${r.planned.expCount}` : '-'}</td>
+              <td>${r.error ? 'ERROR' : `${r.rowMatch}/${r.rowTotal} (${pct(r.rowMatch, r.rowTotal)})`}</td>
+              <td>${r.error ? escapeHtml(r.error) : (r.fieldErrors ?? 0)}</td>
+            </tr>`).join('')}
+          </table>`;
+      };
+
+      const es = new EventSource(`/api/benchmark/stream?strategy=${encodeURIComponent(strategy)}&runId=${encodeURIComponent(runId)}`);
+      currentEventSource = es;
+
+      es.addEventListener('start', (ev) => {
+        const data = JSON.parse(ev.data || '{}');
+        $('status').textContent = `Đang chạy ${data.labeledCount || 0} ảnh...`;
+        renderLive(data.progress, 'starting');
+      });
+
+      es.addEventListener('file', (ev) => {
+        const data = JSON.parse(ev.data || '{}');
+        if (data.file) liveRows.push(data.file);
+        $('status').textContent = `Đang chạy... ${data.progress?.current || 0}/${data.progress?.total || 0}`;
+        renderLive(data.progress, data.file?.file || 'processing');
+      });
+
+      es.addEventListener('done', (ev) => {
+        const data = JSON.parse(ev.data || '{}');
+        es.close();
+        if (currentEventSource === es) currentEventSource = null;
+        if (data.result) {
+          render(data.result);
+          $('status').textContent = data.result.stopped
+            ? `Đã dừng. Report tạm thời: ${data.result.processedCount || 0}/${data.result.labeledCount || 0} ảnh.`
+            : 'Xong.';
+        } else {
+          $('status').textContent = '';
+        }
+        benchmarkRunning = false;
+        stopRequested = false;
+        currentRunId = null;
+        setRunButtonState();
+      });
+
+      es.addEventListener('error', async () => {
+        es.close();
+        if (currentEventSource === es) currentEventSource = null;
+        if (stopRequested) {
+          $('status').textContent = 'Đã ngắt kết nối stream khi dừng benchmark.';
+          benchmarkRunning = false;
+          stopRequested = false;
+          currentRunId = null;
+          setRunButtonState();
+          return;
+        }
+        // Fallback to old non-stream endpoint if stream fails
+        await runBenchmarkLegacy(strategy, errDiv);
+      });
+    }
+
+    async function stopBenchmark() {
+      if (!benchmarkRunning || stopRequested) return;
+      stopRequested = true;
+      setRunButtonState();
+      $('status').textContent = 'Đang gửi yêu cầu dừng benchmark...';
+
+      // Legacy fetch mode: abort ngay request HTTP.
+      if (legacyAbortController) {
+        legacyAbortController.abort();
+      }
+
+      if (!currentRunId) return;
+      try {
+        await fetch(`/api/benchmark/stop?runId=${encodeURIComponent(currentRunId)}`, { method: 'POST' });
+        $('status').textContent = 'Đang dừng... chờ hoàn tất các ảnh đang xử lý.';
+      } catch (e) {
+        $('status').textContent = `Không gửi được lệnh dừng: ${e.message}`;
+      }
+    }
+
+    async function runBenchmarkLegacy(strategy, errDiv) {
+      legacyAbortController = new AbortController();
+      try {
+        const res = await fetch(`/api/benchmark?strategy=${encodeURIComponent(strategy)}`, {
+          signal: legacyAbortController.signal,
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
+        render(data);
+        $('status').textContent = '';
+      } catch (e) {
+        if (e.name === 'AbortError') {
+          $('status').textContent = 'Đã dừng benchmark (legacy mode).';
+        } else {
+          errDiv.textContent = 'Lỗi: ' + e.message;
+          errDiv.classList.add('visible');
+          $('status').textContent = '';
+        }
+      } finally {
+        legacyAbortController = null;
+        benchmarkRunning = false;
+        stopRequested = false;
+        currentRunId = null;
+        setRunButtonState();
+      }
+    }
+
+    function render(result) {
+      const out = $('result');
+
+      if (result.message) {
+        out.innerHTML = `<div class="empty">${escapeHtml(result.message)}</div>`;
+        return;
+      }
+
+      const agg = result.aggregate || {};
+      const perField = agg.perField || {};
+
+      // Summary cards
+      const cards = `
+        <div class="summary">
+          <div class="stat-card">
+            <div class="stat-value">${pct(agg.rowMatches || 0, agg.rowTotal || 0)}</div>
+            <div class="stat-label">Row exact match</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value">${agg.rowMatches || 0}/${agg.rowTotal || 0}</div>
+            <div class="stat-label">Rows match</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value">${result.labeledCount}</div>
+            <div class="stat-label">Ảnh đã label</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value">${result.skipped}</div>
+            <div class="stat-label">Ảnh bỏ qua (chưa label)</div>
+          </div>
+        </div>`;
+
+      // Per-field accuracy table
+      const fieldHead = FIELDS.map((f) => {
+        const v = perField[f] || { matches: 0, total: 0 };
+        return `<th>${f}<br/><small>${pct(v.matches, v.total)}</small></th>`;
+      }).join('');
+      const fieldRow = FIELDS.map((f) => {
+        const v = perField[f] || { matches: 0, total: 0, levSum: 0 };
+        const levAvg = v.total ? (v.levSum / v.total).toFixed(2) : '0.00';
+        return `<td>${v.matches}/${v.total}<br/><small>lev avg: ${levAvg}</small></td>`;
+      }).join('');
+
+      const perFieldTable = `
+        <h3 class="section-title">Per-field accuracy (strategy=${escapeHtml(result.strategy || 'auto')})</h3>
+        <table>
+          <tr>${fieldHead}</tr>
+          <tr>${fieldRow}</tr>
+        </table>`;
+
+      const insights = Array.isArray(result.errorInsights) && result.errorInsights.length > 0
+        ? `
+          <h3 class="section-title">Top accuracy issues</h3>
+          <table>
+            <tr><th>#</th><th>Insight</th></tr>
+            ${result.errorInsights.map((s, i) => `<tr><td>${i + 1}</td><td>${escapeHtml(s)}</td></tr>`).join('')}
+          </table>`
+        : '';
+
+      // Per-file table
+      const fileRows = (result.files || []).map((r) => {
+        if (r.error) {
+          return `<tr style="color:#d32f2f"><td>${escapeHtml(r.file)}</td><td colspan="6">${escapeHtml(r.error)}</td></tr>`;
+        }
+        const pub = r.sections.published;
+        const plan = r.sections.planned;
+        const rowMatch = pub.rowMatches + plan.rowMatches;
+        const rowTotal = pub.rowTotal + plan.rowTotal;
+        const errors = pub.rowErrors.concat(plan.rowErrors);
+        return `
+          <tr>
+            <td>${escapeHtml(r.file)}</td>
+            <td>${pub.predCount}/${pub.expCount}</td>
+            <td>${plan.predCount}/${plan.expCount}</td>
+            <td>${rowMatch}/${rowTotal} (${pct(rowMatch, rowTotal)})</td>
+            <td>${errors.length}</td>
+            <td>
+              <a href="/upload?review=${encodeURIComponent(r.file)}" target="_blank" rel="noopener" title="Mở kết quả OCR với các ô sai được đánh dấu để sửa và lưu nhãn">Xem &amp; sửa</a>
+              <details><summary style="font-size:12px">JSON</summary><pre class="detail">${escapeHtml(JSON.stringify(errors, null, 2))}</pre></details>
+            </td>
+          </tr>`;
+      }).join('');
+
+      const perFileTable = `
+        <h3 class="section-title">Per-file results</h3>
+        <table>
+          <tr><th>File</th><th>Pub (pred/exp)</th><th>Plan (pred/exp)</th><th>Row match</th><th>Field errors</th><th>Detail</th></tr>
+          ${fileRows}
+        </table>`;
+
+      out.innerHTML = cards + perFieldTable + insights + perFileTable;
+    }
+
+    $('runBtn').onclick = runBenchmark;
+    setRunButtonState();
+  </script>
+</body>
+</html>

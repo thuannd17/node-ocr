@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Roster Label Tool</title>
+  <link rel="stylesheet" href="/assets/app.css">
+  <style>
+    .page-header .todo { font-size: 13px; color: var(--muted); }
+    .label-nav { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 12px 16px; margin-bottom: 12px; }
+    .label-nav .progress { font-size: 13px; color: var(--muted); min-width: 60px; text-align: center; }
+    .label-nav select { padding: 6px 8px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px; max-width: 420px; }
+    button { cursor: pointer; border: none; border-radius: 6px; padding: 6px 12px; font-size: 14px; background: var(--primary); color: white; }
+    button:hover { background: var(--primary-dark); }
+    button.secondary { background: var(--secondary); }
+    button.secondary:hover { background: var(--secondary-dark); }
+    button.danger { background: var(--danger); }
+    button.danger:hover { background: var(--danger-dark); }
+    input.json-input { width: 100%; }
+    .label-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    @media (max-width: 900px) { .label-grid { grid-template-columns: 1fr; } }
+    .panel { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+    .panel h2 { margin: 0; font-size: 14px; color: #555; font-weight: 600; }
+    .panel img { max-width: 100%; object-fit: contain; align-self: center; border: 1px solid #eee; }
+    .editor-wrap { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+    textarea { flex: 1; width: 100%; font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 12px; resize: none; padding: 8px; border: 1px solid #ddd; border-radius: 6px; }
+    .toolbar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+    .toolbar select { padding: 4px 8px; border: 1px solid #ddd; border-radius: 4px; }
+    .status { font-size: 12px; padding: 4px 8px; min-height: 18px; }
+    .status.ok { color: #2a7d2a; }
+    .status.err { color: #c33; }
+    .status.busy { color: #888; }
+    .button-row { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+    .labeled-badge { display: inline-block; padding: 1px 6px; border-radius: 8px; font-size: 10px; font-weight: 600; }
+    .labeled-badge.yes { background: #d3f3d3; color: #2a7d2a; }
+    .labeled-badge.no  { background: #ffe0e0; color: #c33; }
+
+    /* Autocomplete select for jumping */
+    .file-select { flex: 1; }
+  </style>
+</head>
+<body>
+  <script src="/assets/nav.js"></script>
+  <main class="page">
+  <div class="page-header">
+    <h1>🏷️ Label Tool</h1>
+    <span class="todo" id="todoCount"></span>
+    <p class="subtitle">Nhãn chuẩn (ground truth) để đo độ chính xác và train model.</p>
+  </div>
+
+  <div class="card label-nav">
+    <button class="secondary" id="prev">← Prev</button>
+    <span class="progress" id="progress">0 / 0</span>
+    <button id="next">Next →</button>
+    <select class="file-select" id="fileSelect"></select>
+    <button id="autoFill">⚡ Auto-fill từ OCR</button>
+  </div>
+
+  <div class="label-grid">
+    <div class="panel">
+      <h2>Ảnh roster (fake-data/<span id="currentFile">—</span>) <span class="labeled-badge no" id="labeledBadge">chưa label</span></h2>
+      <img id="rosterImg" alt="roster" />
+    </div>
+
+    <div class="panel">
+      <h2>Ground-truth JSON</h2>
+       <div class="toolbar">
+         <button class="secondary" id="prettyBtn">Pretty</button>
+         <button class="secondary" id="clearBtn">Clear</button>
+         <button class="secondary" id="copyBtn">Copy</button>
+         <span class="file-size" id="fileSize" style="margin-left: auto;"></span>
+       </div>
+      <div class="editor-wrap">
+        <textarea id="labelArea" spellcheck="false" placeholder='{
+  "published": [
+    { "date": "12 Jun 20", "day": "FRI", "duty": "OFF(Z)", "dep": "HAN", "begin": "00:00 Z", "end": "23:59 Z", "arr": "HAN" }
+  ],
+  "planned": []
+}'></textarea>
+        <span class="status" id="status"></span>
+        <div class="button-row">
+          <button class="secondary" id="reloadBtn">Reload</button>
+          <button id="saveBtn">💾 Lưu label</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  </main>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const files = [];
+    let currentIdx = 0;
+
+    function setBusy(msg) {
+      const s = $('status');
+      s.className = 'status busy';
+      s.textContent = msg || '';
+    }
+    function setStatus(ok, msg) {
+      const s = $('status');
+      s.className = 'status ' + (ok ? 'ok' : 'err');
+      s.textContent = msg || '';
+    }
+
+    function escapeHtml(s){
+      const m = { 38: 'amp', 60: 'lt', 62: 'gt', 34: 'quot', 39: '#039' };
+      return String(s).replace(/[&<>"']/g, (c) => '&' + m[c.charCodeAt(0)] + ';');
+    }
+
+    function updateProgress() {
+      $('progress').textContent = `${currentIdx + 1} / ${files.length}`;
+      const file = files[currentIdx];
+      $('currentFile').textContent = file;
+      $('fileSelect').value = String(currentIdx);
+      $('rosterImg').src = `/api/raw?name=${encodeURIComponent(file)}`;
+      loadLabel(file);
+      updateBadge(file);
+    }
+
+    function updateBadge(file) {
+      fetch(`/api/labels?name=${encodeURIComponent(file)}`)
+        .then((r) => r.status === 200)
+        .then((has) => {
+          const b = $('labeledBadge');
+          b.className = 'labeled-badge ' + (has ? 'yes' : 'no');
+          b.textContent = has ? 'đã label' : 'chưa label';
+        });
+    }
+
+    async function loadLabel(file) {
+      try {
+        const res = await fetch(`/api/labels?name=${encodeURIComponent(file)}`);
+        if (res.status === 404) {
+          $('labelArea').value = '';
+          setStatus(false, 'Chưa có label. Sử dụng Auto-fill để VLM đề xuất.');
+          return;
+        }
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        $('labelArea').value = JSON.stringify(data, null, 2);
+        setStatus(true, 'Đã load label.');
+      } catch (e) {
+        setStatus(false, 'Lỗi load: ' + e.message);
+      }
+    }
+
+    async function saveLabel() {
+      const file = files[ currentIdx ];
+      const raw = $('labelArea').value.trim();
+
+      if (!raw) {
+        setStatus(false, 'Nothing to save.');
+        return;
+      }
+      let parsed;
+      try { parsed = JSON.parse(raw); }
+      catch (e) { setStatus(false, 'JSON không hợp lệ: ' + e.message); return; }
+
+      try {
+        setBusy('Đang lưu...');
+
+        const url = `/api/labels?name=${encodeURIComponent(file)}`;
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(parsed)
+        });
+
+        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || ('HTTP ' + res.status));
+
+        setStatus(true, 'Đã lưu labels/' + file + '.json');
+        updateBadge(file);
+      } catch (e) {
+        setStatus(false, 'Lỗi lưu: ' + e.message);
+      }
+    }
+
+    async function autoFill() {
+      const file = files[ currentIdx ];
+      try {
+        setBusy('Đang chạy OCR để đề xuất nhãn...');
+        const res = await fetch(`/api/predict?name=${encodeURIComponent(file)}`);
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        const strip = (rows) => (rows || []).map(({ date, day, duty, dep, begin, end, arr }) => ({ date, day, duty, dep, begin, end, arr }));
+        $('labelArea').value = JSON.stringify({ published: strip(data.published), planned: strip(data.planned) }, null, 2);
+        setStatus(true, 'OCR đã đề xuất. Đối chiếu với ảnh, sửa rồi Lưu.');
+      } catch (e) {
+        setStatus(false, 'Lỗi OCR: ' + e.message);
+      }
+    }
+
+    function gotoIdx(i) {
+      if (i < 0) i = 0;
+      if (i >= files.length) i = files.length - 1;
+      currentIdx = i;
+      updateProgress();
+    }
+
+    function next() { gotoIdx(currentIdx + 1); }
+    function prev() { gotoIdx(currentIdx - 1); }
+
+    function pretty() {
+      const v = $('labelArea').value.trim();
+      if (!v) return;
+      try { $('labelArea').value = JSON.stringify(JSON.parse(v), null, 2); setStatus(true, 'Pretty OK.'); }
+      catch (e) { setStatus(false, 'JSON lỗi: ' + e.message); }
+    }
+    function clearLabel() { $('labelArea').value = ''; setStatus(false, 'Cleared.'); }
+    function copyLabel() {
+      const v = $('labelArea').value;
+      if (!v) return;
+      navigator.clipboard.writeText(v).then(() => setStatus(true, 'Copied.'));
+    }
+
+    async function init() {
+      const res = await fetch('/api/files');
+      const data = await res.json();
+      // One entry per distinct image (byte-identical copies hidden); images that
+      // still need a label come first, so new uploads are easy to find.
+      const items = (data.items || data.files.map(name => ({ name, labeled: false, duplicateOf: null })))
+        .filter(i => !i.duplicateOf);
+      const labeledCopy = new Set((data.items || []).filter(i => i.duplicateOf && i.labeled).map(i => i.duplicateOf));
+      for (const i of items) i.done = i.labeled || labeledCopy.has(i.name);
+      items.sort((a, b) => (a.done - b.done) || a.name.localeCompare(b.name));
+      files.push(...items.map(i => i.name));
+      const sel = $('fileSelect');
+      items.forEach((it, i) => {
+        const o = document.createElement('option');
+        o.value = String(i);
+        o.textContent = (it.done ? '✅ ' : '🆕 ') + it.name;
+        sel.appendChild(o);
+      });
+      const todo = items.filter(i => !i.done).length;
+      $('todoCount').textContent = todo ? `— ${todo} ảnh chưa có nhãn` : '— tất cả đã có nhãn';
+      updateProgress();
+    }
+
+    $('prev').onclick = prev;
+    $('next').onclick = next;
+    $('saveBtn').onclick = saveLabel;
+    $('autoFill').onclick = autoFill;
+    $('prettyBtn').onclick = pretty;
+    $('clearBtn').onclick = clearLabel;
+    $('copyBtn').onclick = copyLabel;
+    $('reloadBtn').onclick = () => loadLabel(files[currentIdx]);
+    $('fileSelect').onchange = (e) => gotoIdx(Number(e.target.value));
+
+    document.addEventListener('keydown', (e) => {
+      if (e.target.tagName === 'TEXTAREA') return;
+      if (e.key === 'ArrowLeft') prev();
+      if (e.key === 'ArrowRight') next();
+      if (e.key === 's' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); saveLabel(); }
+    });
+
+    init();
+  </script>
+</body>
+</html>

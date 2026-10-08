@@ -1,0 +1,52 @@
+# ---- Secrets / local config ----
+.env
+.env.*
+!.env.example
+google_vision.json
+*.pem
+*.key
+
+# ---- Dependencies / environments ----
+node_modules/
+.venv/
+__pycache__/
+*.pyc
+
+# ---- Editors / OS / tools ----
+.idea/
+.vscode/
+.claude/settings.local.json
+.DS_Store
+Thumbs.db
+# Stray file created by a Windows "> nul" redirect in a POSIX shell
+nul
+
+# ---- Generated data (rebuilt by the scripts) ----
+tmp/
+cache/
+exports/
+*.log
+
+# ---- Roster data (real crew rosters: personal data; the repo is public) ----
+# Images and their ground-truth labels stay local.
+fake-data/
+labels/
+
+# ---- Models ----
+# Keep only what the app needs to run + small metadata:
+#   models/parser-patterns.json, models/dict/, models/rec/train-template.yml,
+#   models/rec/*/model.json, and the inference weights of
+#   models/rec/stock (baseline for retrain-check) and models/rec/v4 (deployed, see .env).
+models/pretrained/
+models/kfold/
+models/rec/_pending/
+models/rec/*/checkpoint/
+# Training splits list roster image names (personal data)
+models/rec/*/split.json
+# Rejected versions (see their local model.json); their metadata lists image names
+models/rec/v5/
+models/rec/v6/
+models/rec/v7/
+models/rec/*/infer/
+!models/rec/stock/infer/
+!models/rec/v4/infer/

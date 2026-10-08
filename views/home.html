@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Roster OCR — Home</title>
+  <link rel="stylesheet" href="/assets/app.css">
+  <style>
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 20px;
+    }
+    a.card {
+      padding: 24px;
+      margin-bottom: 0;
+      text-decoration: none;
+      color: inherit;
+      transition: transform 0.15s, box-shadow 0.15s;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    a.card:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+    }
+    .card .icon { font-size: 36px; }
+    .card h2 { margin: 0; font-size: 18px; color: #2b3a55; }
+    .card p { margin: 0; font-size: 14px; color: #666; line-height: 1.5; }
+    .card .url {
+      font-family: Consolas, Menlo, monospace;
+      font-size: 12px;
+      color: #4a90e2;
+      background: #f0f6ff;
+      padding: 4px 8px;
+      border-radius: 4px;
+      align-self: flex-start;
+    }
+    .badge {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 10px;
+      align-self: flex-start;
+    }
+    .badge.green { background: #d3f3d3; color: #2a7d2a; }
+    .badge.orange { background: #ffe8cc; color: #b26a00; }
+    footer { margin-top: 40px; font-size: 13px; color: #999; }
+    footer a { color: #4a90e2; }
+  </style>
+</head>
+<body>
+  <script src="/assets/nav.js"></script>
+  <main class="page">
+  <div class="page-header">
+    <h1>📋 Roster OCR</h1>
+    <p class="subtitle">Trích xuất 2 bảng "Published roster" và "Rest of this roster is planned" từ ảnh eCrew — PaddleOCR (model nhận dạng đã fine-tune) + parser; Gemini chỉ là phương án dự phòng.</p>
+  </div>
+
+  <div class="grid">
+    <a class="card" href="/upload">
+      <div class="icon">📤</div>
+      <h2>Upload &amp; OCR</h2>
+      <p>Upload ảnh roster (kéo-thả hoặc chọn file), xem kết quả Published/Planned dạng bảng, sửa và lưu thành nhãn.</p>
+      <span class="url">/upload</span>
+      <span class="badge green">PaddleOCR</span>
+    </a>
+
+    <a class="card" href="/label">
+      <div class="icon">🏷️</div>
+      <h2>Label Tool</h2>
+      <p>Gán nhãn (ground truth) cho từng ảnh trong <code>fake-data/</code>, có Auto-fill từ OCR để sửa tay.</p>
+      <span class="url">/label</span>
+      <span class="badge green">Dữ liệu</span>
+    </a>
+
+    <a class="card" href="/benchmark">
+      <div class="icon">📊</div>
+      <h2>Benchmark</h2>
+      <p>Độ chính xác từng ô (date, duty, dep, begin, end, arr…) so với nhãn trong <code>labels/</code>. Không dùng Gemini khi chấm.</p>
+      <span class="url">/benchmark</span>
+      <span class="badge orange">Đo lường</span>
+    </a>
+  </div>
+
+  <footer>
+    API endpoints:
+    <a href="/api/files">/api/files</a> ·
+    <a href="/api/predict?name=">/api/predict?name=</a> ·
+    <a href="/api/benchmark">/api/benchmark</a> ·
+    POST /api/ocr/upload ·
+    POST /api/labels?name=
+  </footer>
+  </main>
+</body>
+</html>

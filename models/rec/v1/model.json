@@ -1,0 +1,8 @@
+{
+  "version": "v1",
+  "name": "first-finetune",
+  "createdAt": "2026-09-22",
+  "status": "retired",
+  "retiredAt": "2026-09-25",
+  "notes": "First real fine-tune (dataset current). Replaced by v2."
+}

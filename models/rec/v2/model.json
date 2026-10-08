@@ -1,0 +1,9 @@
+{
+  "version": "v2",
+  "name": "anchor",
+  "createdAt": "2026-09-25",
+  "status": "retired",
+  "deployedAt": "2026-09-25",
+  "retiredAt": "2026-10-01",
+  "notes": "Deduped anchor-paired dataset incl. planned rows; benchmark 19.4->27.6% vs v1 (old parser). Replaced by v4."
+}

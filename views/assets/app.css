@@ -1,0 +1,92 @@
+/* Shared look for all Roster OCR pages (home, upload, label, benchmark). */
+:root {
+  --nav-bg: #2b3a55;
+  --nav-fg: #e8edf5;
+  --primary: #4a90e2;
+  --primary-dark: #357ab8;
+  --secondary: #6b7a90;
+  --secondary-dark: #55637a;
+  --danger: #d9534f;
+  --danger-dark: #b52b27;
+  --bg: #f5f6f8;
+  --card: #ffffff;
+  --text: #222;
+  --muted: #666;
+  --border: #e3e6eb;
+  --radius: 8px;
+  --shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  --nav-h: 52px;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+/* ---- Top navigation ---- */
+.topnav {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  height: var(--nav-h);
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 0 20px;
+  background: var(--nav-bg);
+  color: var(--nav-fg);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
+}
+.topnav .brand {
+  color: white;
+  font-weight: 700;
+  font-size: 16px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.topnav .menu { display: flex; gap: 4px; overflow-x: auto; }
+.topnav .menu a {
+  color: var(--nav-fg);
+  text-decoration: none;
+  font-size: 14px;
+  padding: 7px 12px;
+  border-radius: 6px;
+  white-space: nowrap;
+  opacity: 0.85;
+}
+.topnav .menu a:hover { background: rgba(255, 255, 255, 0.1); opacity: 1; }
+.topnav .menu a.active { background: rgba(255, 255, 255, 0.18); opacity: 1; font-weight: 600; }
+
+/* ---- Page container + header ---- */
+.page { padding: 20px 24px 40px; }
+
+.page-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+.page-header h1 { margin: 0; font-size: 22px; color: var(--nav-bg); }
+.page-header .subtitle { flex-basis: 100%; margin: 0; color: var(--muted); font-size: 14px; }
+.page-header .header-extra { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+
+/* ---- Common building blocks ---- */
+.card {
+  background: var(--card);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 20px;
+  margin-bottom: 20px;
+}
+.card > h2:first-child { margin-top: 0; font-size: 17px; color: var(--nav-bg); }
+
+@media (max-width: 700px) {
+  .topnav { gap: 12px; padding: 0 12px; }
+  .topnav .brand { font-size: 14px; }
+  .page { padding: 16px 12px 32px; }
+}

@@ -1,0 +1,28 @@
+{
+  "name": "node-ocr",
+  "version": "1.0.0",
+  "description": "Test OCR",
+  "main": "index.js",
+  "type": "module",
+  "dependencies": {
+    "@google/genai": "^2.16.0",
+    "express": "^5.2.1",
+    "form-data": "^4.0.6",
+    "multer": "^2.2.0",
+    "sharp": "^0.35.3"
+  },
+  "scripts": {
+    "start": "node --env-file=.env index.js",
+    "test": "node --test --test-concurrency=1 tests",
+    "ocr-server": ".\\.venv\\Scripts\\python -u scripts/ocr_server.py",
+    "ocr:check": ".\\.venv\\Scripts\\python scripts/ocr_healthcheck.py",
+    "audit-labels": "node --env-file=.env scripts/audit-labels.mjs",
+    "benchmark": "node --env-file=.env scripts/benchmark.mjs",
+    "build-recognition-groundtruth": "node --env-file=.env scripts/build-recognition-groundtruth.mjs",
+    "kfold-recognition": "node --env-file=.env scripts/kfold-recognition.mjs",
+    "retrain-check": "node --env-file=.env scripts/retrain-check.mjs",
+    "use-model": "node scripts/use-model.mjs"
+  },
+  "author": "ThuanND",
+  "license": "ISC"
+}

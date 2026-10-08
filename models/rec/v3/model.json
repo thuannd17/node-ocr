@@ -1,0 +1,11 @@
+{
+  "version": "v3",
+  "name": "table-only",
+  "createdAt": "2026-09-30",
+  "status": "retired",
+  "recipe": {
+    "general": "table",
+    "tightCrops": false
+  },
+  "notes": "Never deployed: published 58.4->64.4% but planned 26.8->23.6% on val; 5-fold CV 30.4% vs v4 50.8%."
+}

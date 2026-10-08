@@ -1,0 +1,1239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Upload OCR Roster</title>
+  <link rel="stylesheet" href="/assets/app.css">
+  <style>
+    .card { padding: 24px; }
+    .upload-area {
+      border: 2px dashed #ddd;
+      border-radius: 8px;
+      padding: 40px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.3s;
+    }
+    .upload-area:hover {
+      border-color: #4CAF50;
+      background: #f9f9f9;
+    }
+    .upload-area.dragover {
+      border-color: #4CAF50;
+      background: #e8f5e9;
+    }
+    .upload-icon {
+      font-size: 48px;
+      color: #999;
+      margin-bottom: 15px;
+    }
+    #fileInput { display: none; }
+    .btn {
+      background: var(--primary);
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 16px;
+      margin-top: 15px;
+      transition: background 0.3s;
+    }
+    .btn:hover { background: var(--primary-dark); }
+    .btn:disabled { background: #ccc; cursor: not-allowed; }
+    .btn-secondary {
+      background: var(--secondary);
+    }
+    .btn-secondary:hover { background: var(--secondary-dark); }
+    .btn-danger {
+      background: #f44336;
+      padding: 4px 8px;
+      font-size: 12px;
+      margin-top: 0;
+    }
+    .btn-danger:hover { background: #d32f2f; }
+    .btn-insert {
+      background: #4CAF50;
+      padding: 4px 8px;
+      font-size: 12px;
+      margin-top: 0;
+      margin-right: 3px;
+    }
+    .btn-insert:hover { background: #388E3C; }
+    .btn-small {
+      background: #ff9800;
+      padding: 6px 12px;
+      font-size: 13px;
+      margin-top: 0;
+      margin-left: 5px;
+    }
+    .btn-small:hover { background: #f57c00; }
+
+    .suspicious-cell {
+      background: #fff2f2 !important;
+      box-shadow: inset 0 0 0 2px #e57373;
+      color: #a33;
+      position: relative;
+    }
+    .suspicious-cell::after {
+      content: '⚠';
+      position: absolute;
+      right: 6px;
+      top: 50%;
+      transform: translateY(-50%);
+      font-size: 12px;
+      color: #c62828;
+      pointer-events: none;
+    }
+    .suspicious-row { background: #fffafa !important; }
+
+    /* Review mode (/upload?review=<file>): OCR result compared with the saved label */
+    .review-diff { background: #fff3cd !important; box-shadow: inset 0 0 0 2px #f0ad4e; font-weight: 600; }
+    .review-done { background: #e8f5e9 !important; box-shadow: inset 0 0 0 1px #81c784; }
+    tr.review-row-missing td[contenteditable] { background: #e3f2fd; }
+    tr.review-row-extra td[contenteditable] { background: #fdecea; text-decoration: line-through; color: #a33; }
+    tr.review-row-extra.review-done-row td[contenteditable] { text-decoration: none; color: inherit; background: #e8f5e9; }
+    tr.review-label-row td { font-size: 11px; color: #555; background: #fafafa; padding-top: 0; padding-bottom: 4px; border-top: none; }
+    tr.review-label-row td.review-label-diff { color: #8a5a00; cursor: pointer; text-decoration: underline dotted; }
+    tr.review-label-row td.review-label-diff:hover { background: #fff3cd; }
+    tr.review-label-row td.review-label-used { color: #2e7d32; text-decoration: none; cursor: default; }
+    .review-note { font-size: 13px; color: #5d4037; background: #fff8e1; border: 1px solid #ffe082; border-radius: 6px; padding: 8px 10px; margin: 8px 0 0; }
+    .review-note .btn { padding: 4px 10px; margin: 0 0 0 8px; }
+    .suspicious-note {
+      font-size: 12px;
+      color: #b45309;
+      background: #fff7ed;
+      border: 1px solid #fed7aa;
+      border-radius: 6px;
+      padding: 8px 10px;
+      margin: 8px 0 0;
+    }
+
+    .result-section { display: none; }
+    .result-section.visible { display: block; }
+
+    .error {
+      color: #d32f2f;
+      background: #ffebee;
+      padding: 15px;
+      border-radius: 6px;
+      margin-top: 15px;
+      display: none;
+    }
+    .error.visible { display: block; }
+
+    .success {
+      color: #2e7d32;
+      background: #e8f5e9;
+      padding: 15px;
+      border-radius: 6px;
+      margin-top: 15px;
+      display: none;
+    }
+    .success.visible { display: block; }
+
+    .stats {
+      background: #e3f2fd;
+      padding: 15px;
+      border-radius: 6px;
+      margin-bottom: 20px;
+    }
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 15px;
+    }
+    .stat-item {
+      background: white;
+      padding: 10px;
+      border-radius: 4px;
+      text-align: center;
+    }
+    .stat-value { font-size: 24px; font-weight: bold; color: #1976d2; }
+    .stat-label { font-size: 12px; color: #666; }
+
+    /* Side-by-side layout */
+    .split-layout {
+      display: flex;
+      gap: 20px;
+      align-items: flex-start;
+    }
+    .split-left {
+      flex: 0 0 45%;
+      position: sticky;
+      top: calc(var(--nav-h) + 16px);
+      max-height: calc(100vh - var(--nav-h) - 32px);
+      overflow-y: auto;
+    }
+    .split-right {
+      flex: 1;
+      min-width: 0;
+    }
+    .preview {
+      width: 100%;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+
+    .table-container {
+      overflow-x: auto;
+      margin-top: 10px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    th, td {
+      padding: 8px 10px;
+      border: 1px solid #ddd;
+      text-align: left;
+    }
+    th {
+      background: #f5f5f5;
+      font-weight: 600;
+    }
+    tr:nth-child(even) { background: #f9f9f9; }
+    tr:hover { background: #f0f0f0; }
+
+    /* Editable cells */
+    td[contenteditable="true"] {
+      cursor: text;
+      outline: none;
+      min-width: 40px;
+    }
+    td[contenteditable="true"]:focus {
+      background: #fff9c4 !important;
+      box-shadow: inset 0 0 0 2px #ffc107;
+    }
+    td[contenteditable="true"]:hover {
+      background: #fff3e0;
+    }
+
+    /* Drag handle */
+    .drag-handle {
+      cursor: grab;
+      color: #999;
+      text-align: center;
+      width: 30px;
+      user-select: none;
+      font-size: 14px;
+    }
+    .drag-handle:hover {
+      color: #333;
+      background: #e0e0e0;
+    }
+    .drag-handle:active {
+      cursor: grabbing;
+    }
+
+    /* Row crop preview (expand to check OCR against the source image) */
+    .crop-toggle {
+      cursor: pointer;
+      text-align: center;
+      width: 26px;
+      user-select: none;
+      font-size: 11px;
+      color: #666;
+      background: none;
+      border: none;
+      padding: 2px;
+    }
+    .crop-toggle:hover { color: #1976d2; }
+    /* Crop column: hidden when no row in the table has a source-image box
+       (e.g. the result is a saved label, which stores text only). */
+    th.col-crop { white-space: nowrap; width: 1%; text-align: center; }
+    td.col-crop { text-align: center; }
+    table.no-crop .col-crop { display: none; }
+    .crop-toggle.disabled { visibility: hidden; cursor: default; }
+    tr.crop-row td {
+      padding: 6px 8px;
+      background: #fafafa;
+      border-top: none;
+    }
+    /* width:0 + min-width:100% keeps this frame at the table's available
+       width instead of letting its canvas child's native pixel size force
+       the <td colspan> (and the whole table) to grow — a scaled-up crop can
+       easily be 1000px+ wide even though max-width:100% is set on the
+       canvas itself, because a table cell otherwise sizes to fit its
+       content's intrinsic width first. */
+    .crop-row .crop-frame {
+      width: 0;
+      min-width: 100%;
+      overflow-x: auto;
+    }
+    .crop-row canvas {
+      display: block;
+      max-width: 100%;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      background: #fff;
+    }
+    .crop-row .crop-missing {
+      font-size: 12px;
+      color: #999;
+      font-style: italic;
+    }
+
+    /* Drag states */
+    tr.dragging {
+      opacity: 0.4;
+      background: #e3f2fd !important;
+    }
+    tr.drag-over {
+      border-top: 3px solid #2196F3;
+    }
+    tr.drag-over-bottom {
+      border-bottom: 3px solid #2196F3;
+    }
+
+    .section-header {
+      font-size: 18px;
+      font-weight: bold;
+      margin: 20px 0 10px 0;
+      color: #333;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .section-header.planned { color: #ff9800; }
+    .empty-section {
+      color: #999;
+      font-style: italic;
+      padding: 20px;
+      text-align: center;
+    }
+
+    .action-bar {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-top: 20px;
+      padding: 15px;
+      background: #f5f5f5;
+      border-radius: 6px;
+    }
+    .action-bar .spacer { flex: 1; }
+
+    .file-info {
+      font-size: 13px;
+      color: #666;
+      margin-bottom: 10px;
+    }
+    .file-info strong { color: #333; }
+
+    /* Responsive: stack on small screens */
+    @media (max-width: 900px) {
+      .split-layout {
+        flex-direction: column;
+      }
+      .split-left {
+        position: static;
+        max-height: none;
+        flex: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <script src="/assets/nav.js"></script>
+  <main class="page">
+  <div class="page-header">
+    <h1>📤 Upload &amp; OCR</h1>
+    <p class="subtitle">Upload ảnh roster, xem kết quả Published / Planned, sửa trực tiếp trong bảng và lưu thành nhãn.</p>
+  </div>
+
+
+  <div class="card">
+    <h2>Upload Image</h2>
+    <div class="upload-area" id="uploadArea">
+      <div class="upload-icon">📁</div>
+      <p>Kéo và thả file vào đây hoặc click để chọn</p>
+      <p style="color: #999; font-size: 14px; margin-top: 10px;">Support: JPG, PNG, BMP, JFIF</p>
+      <button class="btn" id="uploadBtn">Chọn ảnh</button>
+      <input type="file" id="fileInput" accept="image/jpeg,image/png,image/bmp,image/jfif">
+    </div>
+
+    <div id="error" class="error"></div>
+  </div>
+
+  <div id="resultSection" class="result-section">
+    <div class="card">
+      <h2>📊 Kết quả OCR</h2>
+      <div class="file-info" id="fileInfo"></div>
+      <div id="reviewNote" class="review-note" style="display:none;">
+        <span id="reviewNoteText"></span>
+        <button class="btn btn-secondary" onclick="useAllLabelValues()">Lấy giá trị nhãn cho các ô còn lại</button>
+      </div>
+      <div id="vlmSuggest" class="suspicious-note" style="display:none;">
+        <span id="vlmSuggestText"></span>
+        <button class="btn btn-secondary" style="margin-left:8px; padding:4px 10px;" onclick="reparseImage('vlm')">Thử bằng Gemini</button>
+      </div>
+
+      <div class="stats">
+        <div class="stats-grid">
+          <div class="stat-item">
+            <div class="stat-value" id="totalLines">0</div>
+            <div class="stat-label">Total Lines</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-value" id="publishedCount">0</div>
+            <div class="stat-label">Published Rows</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-value" id="plannedCount">0</div>
+            <div class="stat-label">Planned Rows</div>
+          </div>
+        </div>
+      </div>
+
+      <div id="suspiciousNote" class="suspicious-note" style="display:none;"></div>
+      <div class="suspicious-note" style="margin-top:8px;">Tip: ô đỏ là giá trị có định dạng lạ (mã sân bay, giờ, ngày…); rê chuột để xem lý do rồi sửa tay.</div>
+
+      <div class="split-layout">
+        <!-- Left: Image preview (sticky) -->
+        <div class="split-left">
+          <img id="preview" class="preview" alt="Preview" src="">
+        </div>
+
+        <!-- Right: Tables -->
+        <div class="split-right">
+          <div id="publishedSection">
+            <div class="section-header">
+              Published
+              <button class="btn btn-small" onclick="addRow('published')">&plus; Thêm dòng</button>
+            </div>
+            <div class="table-container">
+              <table id="publishedTable">
+                <thead>
+                  <tr>
+                    <th style="width:30px"></th>
+                    <th class="col-crop" title="Bấm ▶ để xem crop ảnh gốc của dòng này">Ảnh crop?</th>
+                    <th>Date</th>
+                    <th>Day</th>
+                    <th>Duty</th>
+                    <th>Dep</th>
+                    <th>Begin</th>
+                    <th>End</th>
+                    <th>Arr</th>
+                    <th style="width:70px"></th>
+                  </tr>
+                </thead>
+                <tbody id="publishedBody"></tbody>
+              </table>
+              <div id="publishedEmpty" class="empty-section" style="display: none;">Không có dòng nào</div>
+            </div>
+          </div>
+
+          <div id="plannedSection">
+            <div class="section-header planned">
+              Planned
+              <button class="btn btn-small" onclick="addRow('planned')">&plus; Thêm dòng</button>
+            </div>
+            <div class="table-container">
+              <table id="plannedTable">
+                <thead>
+                  <tr>
+                    <th style="width:30px"></th>
+                    <th class="col-crop" title="Bấm ▶ để xem crop ảnh gốc của dòng này">Ảnh crop?</th>
+                    <th>Date</th>
+                    <th>Day</th>
+                    <th>Duty</th>
+                    <th>Dep</th>
+                    <th>Begin</th>
+                    <th>End</th>
+                    <th>Arr</th>
+                    <th style="width:70px"></th>
+                  </tr>
+                </thead>
+                <tbody id="plannedBody"></tbody>
+              </table>
+              <div id="plannedEmpty" class="empty-section" style="display: none;">Không có dòng nào</div>
+            </div>
+          </div>
+
+          <div class="action-bar">
+            <button class="btn btn-secondary" id="saveLabelBtn" onclick="saveAsLabel()">Save as Label</button>
+            <button class="btn btn-secondary" onclick="reparseImage('paddleocr')">Re-parse</button>
+            <button class="btn btn-secondary" onclick="reparseImage('vlm')">Re-parse (VLM)</button>
+            <span id="saveStatus" style="font-size:13px; color:#666;"></span>
+            <div class="spacer"></div>
+            <button class="btn" id="resetBtn">Upload ảnh khác</button>
+          </div>
+
+          <div id="successMsg" class="success"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  </main>
+
+  <script>
+    const uploadArea = document.getElementById('uploadArea');
+    const fileInput = document.getElementById('fileInput');
+    const uploadBtn = document.getElementById('uploadBtn');
+    const errorDiv = document.getElementById('error');
+    const resultSection = document.getElementById('resultSection');
+    const previewImg = document.getElementById('preview');
+    const DEFAULT_STRATEGY = 'paddleocr';
+    const suspiciousNote = document.getElementById('suspiciousNote');
+
+    const AIRPORT_STOPWORDS = new Set(['THE', 'FOR', 'APP', 'DAY', 'PLEASE', 'READ', 'ROSTER', 'RESPONSIBILITY']);
+    const GENERIC_NOISE_RE = /^(PLEASE|READ|APP|DAY|THE|FOR|AND|OR|TO|OF|IN|ON|AT|BY|WITH|FROM)$/i;
+
+    let currentFileName = ''; // Store uploaded filename for label saving
+
+    // Upload area click
+    uploadBtn.addEventListener('click', () => fileInput.click());
+
+    // Drag & drop
+    uploadArea.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      uploadArea.classList.add('dragover');
+    });
+
+    uploadArea.addEventListener('dragleave', () => {
+      uploadArea.classList.remove('dragover');
+    });
+
+    uploadArea.addEventListener('drop', (e) => {
+      e.preventDefault();
+      uploadArea.classList.remove('dragover');
+      if (e.dataTransfer.files.length > 0) {
+        handleFile(e.dataTransfer.files[0]);
+      }
+    });
+
+    // File input change
+    fileInput.addEventListener('change', (e) => {
+      if (e.target.files.length > 0) {
+        handleFile(e.target.files[0]);
+      }
+    });
+
+    // Reset
+    document.getElementById('resetBtn').addEventListener('click', () => {
+      resultSection.classList.remove('visible');
+      errorDiv.classList.remove('visible');
+      fileInput.value = '';
+      uploadBtn.disabled = false;
+      currentFileName = '';
+      suspiciousNote.style.display = 'none';
+      suspiciousNote.textContent = '';
+      document.getElementById('vlmSuggest').style.display = 'none';
+      reviewMode = false;
+      document.getElementById('reviewNote').style.display = 'none';
+      if (new URLSearchParams(location.search).has('review')) history.replaceState(null, '', '/upload');
+    });
+
+    async function handleFile(file, forceReparse = false, strategy = DEFAULT_STRATEGY) {
+      reviewMode = false;
+      document.getElementById('reviewNote').style.display = 'none';
+      errorDiv.classList.remove('visible');
+      resultSection.classList.remove('visible');
+      uploadBtn.disabled = true;
+
+      // Validate file type
+      if (!file.type.startsWith('image/')) {
+        showError('Vui lòng chọn file ảnh (JPG, PNG, BMP)');
+        uploadBtn.disabled = false;
+        return;
+      }
+
+      // Preview
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        previewImg.src = e.target.result;
+        previewImg.style.display = 'block';
+      };
+      reader.readAsDataURL(file);
+
+      // Upload to server
+      try {
+        const formData = new FormData();
+        formData.append('image', file);
+
+        const forceParam = forceReparse ? '&force=true' : '';
+        const response = await fetch(`/api/ocr/upload?strategy=${encodeURIComponent(strategy)}${forceParam}`, {
+          method: 'POST',
+          body: formData
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || 'Lỗi khi upload');
+        }
+
+        const result = await response.json();
+        currentFileName = result.fileName || file.name;
+        displayResult(result);
+        // Say where the rows came from: a Gemini fallback or a stored label
+        // deserves a closer look than a plain OCR result.
+        const notes = [];
+        const sourceNote = {
+          'vlm-fallback': '⚠ OCR đọc được quá ít dòng nên kết quả này là của Gemini (VLM), hãy kiểm tra kỹ trước khi lưu nhãn.',
+          'vlm': 'Kết quả từ Gemini (VLM).',
+        }[result.source] || (/label/.test(result.source || '') ? 'Đây là nhãn đã kiểm tra trước đó cho ảnh này.' : '');
+        if (sourceNote) notes.push(sourceNote);
+        if (result.newRoster) {
+          notes.push(`🆕 Roster mới — đã lưu vào fake-data/${result.fileName}. Kiểm tra bảng rồi bấm "Save as Label" để nó được dùng khi train/đo lần sau.`);
+        } else if (result.fileName && result.fileName !== file.name) {
+          notes.push(`Ảnh này đã có trong dữ liệu (fake-data/${result.fileName}), không lưu thêm bản trùng.`);
+        }
+        if (!result.labeled && result.quality && result.quality.confidence < 0.55) {
+          notes.push(`Độ tin cậy OCR thấp (${Math.round(result.quality.confidence * 100)}%), nên kiểm tra kỹ.`);
+        }
+        if (notes.length) showSuccess(notes.join(' '));
+      } catch (err) {
+        showError(err.message || 'Đã có lỗi xảy ra');
+      } finally {
+        uploadBtn.disabled = false;
+      }
+    }
+
+    // Re-parse current image (bypass cache)
+    async function reparseImage(strategy = DEFAULT_STRATEGY) {
+      if (!currentFileName) {
+        showError('Không có file để re-parse');
+        return;
+      }
+
+      const status = document.getElementById('saveStatus');
+      status.textContent = strategy === 'vlm' ? 'Đang re-parsing bằng VLM...' : 'Đang re-parsing bằng PaddleOCR...';
+
+      try {
+        // Get the file from fake-data via /api/raw
+        const response = await fetch(`/api/raw?name=${encodeURIComponent(currentFileName)}`);
+        if (!response.ok) {
+          throw new Error('Không tìm thấy file trong fake-data');
+        }
+
+        const blob = await response.blob();
+        const file = new File([blob], currentFileName, { type: blob.type });
+
+        await handleFile(file, true, strategy); // force=true
+        showSuccess(strategy === 'vlm' ? '✓ Đã re-parse bằng VLM thành công' : '✓ Đã re-parse bằng PaddleOCR thành công');
+      } catch (err) {
+        showError('Lỗi re-parse: ' + err.message);
+      } finally {
+        status.textContent = '';
+      }
+    }
+
+    function showError(msg) {
+      errorDiv.textContent = msg;
+      errorDiv.classList.add('visible');
+    }
+
+    let successTimer = null;
+    function showSuccess(msg, ms = Math.max(5000, msg.length * 60)) {
+      const el = document.getElementById('successMsg');
+      el.textContent = msg;
+      el.classList.add('visible');
+      clearTimeout(successTimer);
+      successTimer = setTimeout(() => el.classList.remove('visible'), ms);
+    }
+
+    function normalizeToken(value) {
+      return String(value || '').replace(/[^A-Za-z]/g, '').toUpperCase();
+    }
+
+    function isSuspiciousAirportToken(value) {
+      const raw = String(value || '').trim();
+      const token = normalizeToken(raw);
+      if (!token) return false;
+      if (!/^[A-Z]{3}$/.test(token)) return true;
+      if (AIRPORT_STOPWORDS.has(token)) return true;
+      if (GENERIC_NOISE_RE.test(token)) return true;
+      if (raw !== raw.toUpperCase()) return true;
+      if (/^[A-Z]{3}$/.test(token) && /^(OFF|SBY|RST|TRG|SIM|CAB|DHY)$/.test(token)) return true;
+      return false;
+    }
+
+    function getCellIssue(field, value, row = {}) {
+      const text = String(value || '').trim();
+      if (!text) return null;
+
+      switch (field) {
+        case 'arr':
+        case 'dep': {
+          if (isSuspiciousAirportToken(text)) return `Suspicious ${field.toUpperCase()} token: "${text}"`;
+          return null;
+        }
+        case 'day': {
+          if (!/^(MON|TUE|WED|THU|FRI|SAT|SUN)$/i.test(text)) return `Unexpected day token: "${text}"`;
+          return null;
+        }
+        case 'date': {
+          if (!/^\d{1,2}\s+[A-Za-z]{3}\s+\d{2}$/.test(text)) return `Unexpected date token: "${text}"`;
+          return null;
+        }
+        case 'begin':
+        case 'end': {
+          if (!/^\d{2}:\d{2}\s+Z$/i.test(text)) return `Unexpected time token: "${text}"`;
+          return null;
+        }
+        case 'duty': {
+          if (GENERIC_NOISE_RE.test(text)) return `Suspicious duty token: "${text}"`;
+          return null;
+        }
+        default:
+          return null;
+      }
+    }
+
+    function refreshRowSuspicion(tr, rowData = {}) {
+      const cells = tr.querySelectorAll('td[contenteditable]');
+      let issueCount = 0;
+      const issues = [];
+
+      cells.forEach((td) => {
+        const field = td.dataset.field;
+        const value = td.textContent.trim();
+        const issue = getCellIssue(field, value, rowData);
+        td.classList.toggle('suspicious-cell', !!issue);
+        if (issue) {
+          td.title = issue;
+          issueCount += 1;
+          issues.push(issue);
+        } else {
+          td.title = '';
+        }
+      });
+
+      tr.classList.toggle('suspicious-row', issueCount > 0);
+      tr.dataset.suspiciousCount = String(issueCount);
+      return issues;
+    }
+
+    function refreshSuspiciousSummary() {
+      const rows = [...document.querySelectorAll('#publishedBody tr, #plannedBody tr')];
+      let totalIssues = 0;
+      let suspiciousRows = 0;
+      rows.forEach((tr) => {
+        const count = Number(tr.dataset.suspiciousCount || 0);
+        totalIssues += count;
+        if (count > 0) suspiciousRows += 1;
+      });
+
+      if (totalIssues > 0) {
+        suspiciousNote.style.display = 'block';
+        suspiciousNote.textContent = `Detected ${totalIssues} suspicious token(s) across ${suspiciousRows} row(s). Hover cells to see why they were flagged.`;
+      } else {
+        suspiciousNote.style.display = 'none';
+        suspiciousNote.textContent = '';
+      }
+    }
+
+    function displayResult(result) {
+      // Update file info
+      const cacheInfo = result.fromCache ? ' | <span style="color:#4CAF50">✓ From cache</span>' : '';
+      // Per-step times when this request ran OCR/Gemini, so a slow upload shows where the time went.
+      const fmtMs = (ms) => (ms >= 1000 ? `${(ms / 1000).toFixed(1)} s` : `${ms} ms`);
+      const t = result.timings;
+      const steps = t ? [['OCR', t.ocrMs], ['parse', t.parseMs], ['Gemini', t.vlmMs], ['tổng', t.totalMs]]
+        .filter(([, ms]) => Number.isFinite(ms)).map(([k, ms]) => `${k} ${fmtMs(ms)}`).join(' · ') : '';
+      const timeInfo = steps ? ` | <span style="color:#666">${steps}</span>`
+        : (result.totalMs ? ` | <span style="color:#666">${fmtMs(result.totalMs)}</span>` : '');
+      document.getElementById('fileInfo').innerHTML =
+        `File: <strong>${currentFileName}</strong> | Strategy: <strong>${(result.strategy || '').toUpperCase()}</strong>${cacheInfo}${timeInfo}`;
+
+      // Update stats
+      document.getElementById('totalLines').textContent = result.totalLines || 0;
+      document.getElementById('publishedCount').textContent = result.published?.length || 0;
+      document.getElementById('plannedCount').textContent = result.planned?.length || 0;
+
+      // Render Published (editable)
+      const publishedBody = document.getElementById('publishedBody');
+      const publishedEmpty = document.getElementById('publishedEmpty');
+      publishedBody.innerHTML = '';
+
+      if (result.published && result.published.length > 0) {
+        publishedEmpty.style.display = 'none';
+        result.published.forEach((row, idx) => {
+          addEditableRow(publishedBody, row, idx);
+        });
+      } else {
+        publishedEmpty.style.display = 'block';
+      }
+
+      // Render Planned (editable)
+      const plannedBody = document.getElementById('plannedBody');
+      const plannedEmpty = document.getElementById('plannedEmpty');
+      plannedBody.innerHTML = '';
+
+      if (result.planned && result.planned.length > 0) {
+        plannedEmpty.style.display = 'none';
+        result.planned.forEach((row, idx) => {
+          addEditableRow(plannedBody, row, idx);
+        });
+      } else {
+        plannedEmpty.style.display = 'block';
+      }
+
+      refreshSuspiciousSummary();
+      updateCropColumns();
+
+      // OCR looked poor: offer Gemini instead of making the upload wait for it.
+      const vlmSuggest = document.getElementById('vlmSuggest');
+      if (result.vlmSuggested) {
+        const why = result.quality?.reason ? ` (${result.quality.reason})` : '';
+        document.getElementById('vlmSuggestText').textContent =
+          `Kết quả OCR có vẻ chưa tốt${why}. Có thể thử đọc lại bằng Gemini (thường mất 10–30 s).`;
+        vlmSuggest.style.display = 'block';
+      } else {
+        vlmSuggest.style.display = 'none';
+      }
+
+      resultSection.classList.add('visible');
+    }
+
+    // Add an editable row to a table body
+    function addEditableRow(tbody, row, idx, insertAfterTr) {
+      const tr = document.createElement('tr');
+      tr.draggable = true;
+      tr._box = row.box || null; // pixel box in the source image, from services/roster-parser.js
+
+      // Drag handle (first cell)
+      const dragHandle = document.createElement('td');
+      dragHandle.className = 'drag-handle';
+      dragHandle.innerHTML = '⋮⋮';
+      dragHandle.title = 'Kéo để sắp xếp';
+      tr.appendChild(dragHandle);
+
+      // Crop-preview toggle (second cell) — expand to see the source image
+      // region this row was extracted from, to check OCR against it.
+      const tdToggle = document.createElement('td');
+      tdToggle.className = 'col-crop';
+      const cropBtn = document.createElement('button');
+      cropBtn.className = 'crop-toggle' + (tr._box ? '' : ' disabled');
+      cropBtn.textContent = '▶';
+      cropBtn.title = tr._box ? 'Xem ảnh gốc của dòng này' : 'Không có tọa độ crop cho dòng này';
+      cropBtn.type = 'button';
+      cropBtn.disabled = !tr._box;
+      cropBtn.addEventListener('click', () => toggleRowCrop(tr, cropBtn));
+      tdToggle.appendChild(cropBtn);
+      tr.appendChild(tdToggle);
+
+      // Data fields
+      const fields = ['date', 'day', 'duty', 'dep', 'begin', 'end', 'arr'];
+      fields.forEach(field => {
+        const td = document.createElement('td');
+        td.contentEditable = 'true';
+        td.dataset.field = field;
+        td.textContent = row[field] || '';
+        td.addEventListener('input', () => {
+          refreshRowSuspicion(tr, row);
+          refreshSuspiciousSummary();
+        });
+        td.addEventListener('blur', () => {
+          refreshRowSuspicion(tr, row);
+          refreshSuspiciousSummary();
+        });
+        tr.appendChild(td);
+      });
+
+      // Action buttons: insert below + delete
+      const tdActions = document.createElement('td');
+      tdActions.innerHTML = '<button class="btn btn-insert" onclick="insertRowBelow(this)" title="Chèn dòng dưới">&plus;</button>' +
+        '<button class="btn btn-danger" onclick="deleteRow(this)" title="Xóa dòng">&times;</button>';
+      tr.appendChild(tdActions);
+
+      // Setup drag events
+      setupRowDrag(tr);
+
+      refreshRowSuspicion(tr, row);
+
+      if (insertAfterTr) {
+        insertAfterTr.after(tr);
+      } else {
+        tbody.appendChild(tr);
+      }
+    }
+
+    // Expand/collapse the crop-preview row below `tr`, drawing the box
+    // (services/roster-parser.js's per-row `box`, in original-image pixels)
+    // out of the already-loaded #preview <img> via canvas — no extra
+    // network fetch, no server-side cropping needed.
+    function toggleRowCrop(tr, btn) {
+      const existing = tr.nextElementSibling;
+      if (existing && existing.classList.contains('crop-row') && existing._forTr === tr) {
+        existing.remove();
+        btn.textContent = '▶';
+        return;
+      }
+      // Collapse any other open crop row in the same table for less clutter.
+      tr.parentElement.querySelectorAll('tr.crop-row').forEach(r => r.remove());
+      tr.parentElement.querySelectorAll('.crop-toggle').forEach(b => { if (b !== btn) b.textContent = '▶'; });
+
+      const box = tr._box;
+      const colCount = tr.children.length;
+      const cropTr = document.createElement('tr');
+      cropTr.className = 'crop-row';
+      cropTr._forTr = tr;
+      const td = document.createElement('td');
+      td.colSpan = colCount;
+
+      const img = document.getElementById('preview');
+      if (!img || !img.naturalWidth) {
+        td.innerHTML = '<span class="crop-missing">Chưa tải được ảnh gốc để crop.</span>';
+      } else {
+        const pad = 4;
+        const sx = Math.max(0, box.left - pad);
+        const sy = Math.max(0, box.top - pad);
+        const sw = Math.min(img.naturalWidth - sx, (box.right - box.left) + pad * 2);
+        const sh = Math.min(img.naturalHeight - sy, (box.bottom - box.top) + pad * 2);
+        if (sw <= 0 || sh <= 0) {
+          td.innerHTML = '<span class="crop-missing">Tọa độ crop không hợp lệ.</span>';
+        } else {
+          // Upscale short rows so text is actually legible.
+          const scale = Math.min(4, Math.max(1, 70 / sh));
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.round(sw * scale);
+          canvas.height = Math.round(sh * scale);
+          const ctx = canvas.getContext('2d');
+          ctx.imageSmoothingEnabled = false;
+          ctx.drawImage(img, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+          const frame = document.createElement('div');
+          frame.className = 'crop-frame';
+          frame.appendChild(canvas);
+          td.appendChild(frame);
+        }
+      }
+
+      cropTr.appendChild(td);
+      tr.after(cropTr);
+      btn.textContent = '▼';
+    }
+
+    // Setup drag and drop for a row
+    let draggedRow = null;
+
+    function setupRowDrag(tr) {
+      // Only the drag handle initiates drag
+      const handle = tr.querySelector('.drag-handle');
+      if (!handle) return;
+
+      handle.addEventListener('mousedown', () => {
+        tr.draggable = true;
+      });
+
+      // Disable draggable on non-handle cells so text selection works normally
+      tr.querySelectorAll('td:not(.drag-handle)').forEach(td => {
+        td.addEventListener('mousedown', () => {
+          tr.draggable = false;
+        });
+      });
+
+      tr.addEventListener('dragstart', (e) => {
+        if (!tr.draggable) {
+          e.preventDefault();
+          return;
+        }
+        draggedRow = tr;
+        tr.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', '');
+      });
+
+      tr.addEventListener('dragend', () => {
+        tr.classList.remove('dragging');
+        tr.draggable = true; // reset
+        document.querySelectorAll('.drag-over, .drag-over-bottom').forEach(el => {
+          el.classList.remove('drag-over', 'drag-over-bottom');
+        });
+        draggedRow = null;
+      });
+
+      tr.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        if (draggedRow === tr) return;
+
+        e.dataTransfer.dropEffect = 'move';
+
+        const rect = tr.getBoundingClientRect();
+        const midY = rect.top + rect.height / 2;
+
+        tr.classList.remove('drag-over', 'drag-over-bottom');
+
+        if (e.clientY < midY) {
+          tr.classList.add('drag-over');
+        } else {
+          tr.classList.add('drag-over-bottom');
+        }
+      });
+
+      tr.addEventListener('dragleave', () => {
+        tr.classList.remove('drag-over', 'drag-over-bottom');
+      });
+
+      tr.addEventListener('drop', (e) => {
+        e.preventDefault();
+        if (!draggedRow || draggedRow === tr) return;
+
+        const rect = tr.getBoundingClientRect();
+        const midY = rect.top + rect.height / 2;
+
+        tr.classList.remove('drag-over', 'drag-over-bottom');
+
+        if (e.clientY < midY) {
+          tr.before(draggedRow);
+        } else {
+          tr.after(draggedRow);
+        }
+      });
+    }
+
+    // Add a new empty row at the end
+    function addRow(section) {
+      const tbody = document.getElementById(section + 'Body');
+      const empty = document.getElementById(section + 'Empty');
+      empty.style.display = 'none';
+      const emptyRow = { date: '', day: '', duty: '', dep: '', begin: '', end: '', arr: '' };
+      addEditableRow(tbody, emptyRow, tbody.children.length);
+      updateCounts();
+      refreshSuspiciousSummary();
+    }
+
+    // Insert a new empty row below the clicked row
+    function insertRowBelow(btn) {
+      const tr = btn.closest('tr');
+      const tbody = tr.parentElement;
+      const emptyRow = { date: '', day: '', duty: '', dep: '', begin: '', end: '', arr: '' };
+      addEditableRow(tbody, emptyRow, 0, tr);
+      updateCounts();
+      refreshSuspiciousSummary();
+      // Focus the first cell of the new row for quick editing
+      const newTr = tr.nextElementSibling;
+      const firstCell = newTr.querySelector('td[contenteditable]');
+      if (firstCell) firstCell.focus();
+    }
+
+    // Delete a row
+    function deleteRow(btn) {
+      const tr = btn.closest('tr');
+      const next = tr.nextElementSibling;
+      if (next && next.classList.contains('crop-row') && next._forTr === tr) next.remove();
+      if (tr._labelRow) tr._labelRow.remove();
+      tr.remove();
+      refreshReviewNote();
+      updateCounts();
+      refreshSuspiciousSummary();
+    }
+
+    // Show the "Ảnh crop?" column only in tables where some row has a crop box.
+    function updateCropColumns() {
+      for (const sec of ['published', 'planned']) {
+        const rows = document.getElementById(sec + 'Body').children;
+        const hasBox = Array.from(rows).some(tr => tr._box);
+        document.getElementById(sec + 'Table').classList.toggle('no-crop', !hasBox);
+      }
+    }
+
+    // Update row counts
+    function updateCounts() {
+      updateCropColumns();
+      const pubCount = document.getElementById('publishedBody').querySelectorAll('tr:not(.crop-row):not(.review-label-row)').length;
+      const planCount = document.getElementById('plannedBody').querySelectorAll('tr:not(.crop-row):not(.review-label-row)').length;
+      document.getElementById('publishedCount').textContent = pubCount;
+      document.getElementById('plannedCount').textContent = planCount;
+      document.getElementById('totalLines').textContent = pubCount + planCount;
+    }
+
+    // Collect data from editable table
+    function collectTableData(tbodyId) {
+      const tbody = document.getElementById(tbodyId);
+      const rows = [];
+      for (const tr of tbody.querySelectorAll('tr')) {
+        const cells = tr.querySelectorAll('td[contenteditable]');
+        if (cells.length === 0) continue;
+        const row = {};
+        cells.forEach(td => {
+          row[td.dataset.field] = td.textContent.trim();
+        });
+        // Skip completely empty rows
+        if (Object.values(row).some(v => v)) {
+          rows.push(row);
+        }
+      }
+      return rows;
+    }
+
+    // Save as Label
+    async function saveAsLabel() {
+      if (!currentFileName) {
+        showError('Không có file name để save label');
+        return;
+      }
+
+      if (reviewMode) {
+        const open = countOpenReviewItems();
+        if (open > 0 && !confirm(`Còn ${open} chỗ OCR khác nhãn cũ mà bạn chưa sửa hay chọn.\n`
+          + 'Lưu bây giờ sẽ ghi giá trị OCR đang hiện vào nhãn (ghi đè nhãn cũ ở các chỗ đó). Vẫn lưu?')) return;
+      }
+
+      const btn = document.getElementById('saveLabelBtn');
+      const status = document.getElementById('saveStatus');
+      btn.disabled = true;
+      status.textContent = 'Đang saving...';
+
+      try {
+        const published = collectTableData('publishedBody');
+        const planned = collectTableData('plannedBody');
+
+        const labelData = { published, planned };
+
+        // POST to /api/labels?name=filename
+        const response = await fetch(`/api/labels?name=${encodeURIComponent(currentFileName)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(labelData)
+        });
+
+        if (!response.ok) {
+          const errData = await response.json();
+          throw new Error(errData.error || 'Failed to save label');
+        }
+
+        status.textContent = '';
+        showSuccess(`✓ Đã save label cho "${currentFileName}" (${published.length} published, ${planned.length} planned)`);
+      } catch (err) {
+        showError('Lỗi khi save label: ' + err.message);
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    // ── Review mode: /upload?review=<file> (from the benchmark's "Xem" link) ──
+    // Shows the OCR result for an already-labeled image with every cell that
+    // differs from the saved label marked; the old label value sits in a small
+    // row underneath (click it to take it). Rows only in the label are filled in
+    // from it (blue); rows only in the OCR are struck through (red) until edited.
+    let reviewMode = false;
+    const REVIEW_FIELDS = ['date', 'day', 'duty', 'dep', 'begin', 'end', 'arr'];
+
+    function markReviewDone(td) {
+      if (!td.classList.contains('review-diff')) return;
+      td.classList.remove('review-diff');
+      td.classList.add('review-done');
+    }
+
+    function addLabelSubRow(tr, label, diff) {
+      const sub = document.createElement('tr');
+      sub.className = 'review-label-row';
+      sub.innerHTML = '<td></td><td class="col-crop" style="white-space:nowrap">nhãn cũ</td>';
+      REVIEW_FIELDS.forEach((f) => {
+        const td = document.createElement('td');
+        td.textContent = label[f] || '';
+        if (diff.includes(f)) {
+          td.className = 'review-label-diff';
+          td.title = 'Bấm để dùng giá trị này';
+          if (!td.textContent) td.textContent = '(trống)';
+          td.addEventListener('click', () => {
+            if (td.className !== 'review-label-diff') return;
+            const cell = tr.querySelector(`td[data-field="${f}"]`);
+            cell.textContent = label[f] || '';
+            markReviewDone(cell);
+            td.className = 'review-label-used';
+            cell.dispatchEvent(new Event('blur'));
+            refreshReviewNote();
+          });
+        }
+        sub.appendChild(td);
+      });
+      sub.appendChild(document.createElement('td'));
+      tr._labelRow = sub;
+      tr.after(sub);
+    }
+
+    function countOpenReviewItems() {
+      const cells = document.querySelectorAll('#publishedBody td.review-diff, #plannedBody td.review-diff').length;
+      const extra = document.querySelectorAll('#publishedBody tr.review-row-extra:not(.review-done-row), #plannedBody tr.review-row-extra:not(.review-done-row)').length;
+      return cells + extra;
+    }
+
+    function refreshReviewNote() {
+      if (!reviewMode) return;
+      const open = countOpenReviewItems();
+      const s = window._reviewSummary || {};
+      document.getElementById('reviewNoteText').textContent =
+        `So với nhãn đã lưu: ${s.diffCells} ô khác (vàng), ${s.missingRows} dòng OCR bỏ sót (xanh, đã điền từ nhãn), `
+        + `${s.extraRows} dòng OCR thừa (gạch đỏ). `
+        + (open ? `Còn ${open} chỗ chưa xem.` : 'Đã xem hết, có thể Save as Label.');
+      document.getElementById('reviewNote').style.display = 'block';
+    }
+
+    function useAllLabelValues() {
+      document.querySelectorAll('tr.review-label-row td.review-label-diff').forEach(td => td.click());
+    }
+
+    function renderReview(data) {
+      currentFileName = data.fileName;
+      window._reviewSummary = data;
+      displayResult({ published: [], planned: [], totalLines: 0, strategy: 'paddleocr', fromCache: data.fromCache, totalMs: data.totalMs });
+      reviewMode = true;
+      for (const sec of ['published', 'planned']) {
+        const tbody = document.getElementById(sec + 'Body');
+        const items = data.sections[sec] || [];
+        document.getElementById(sec + 'Empty').style.display = items.length ? 'none' : 'block';
+        for (const it of items) {
+          addEditableRow(tbody, it.row || it.label, tbody.children.length);
+          const tr = tbody.lastElementChild;
+          if (it.kind === 'diff') {
+            for (const f of it.diff) {
+              const td = tr.querySelector(`td[data-field="${f}"]`);
+              td.classList.add('review-diff');
+              td.title = `Nhãn cũ: ${it.label[f] || '(trống)'}`;
+              td.addEventListener('input', () => { markReviewDone(td); refreshReviewNote(); });
+            }
+            addLabelSubRow(tr, it.label, it.diff);
+          } else if (it.kind === 'missing') {
+            tr.classList.add('review-row-missing');
+            tr.title = 'OCR bỏ sót dòng này; đã điền từ nhãn cũ';
+          } else if (it.kind === 'extra') {
+            tr.classList.add('review-row-extra');
+            tr.title = 'Dòng này không có trong nhãn cũ: xóa nếu thừa, hoặc sửa để giữ lại';
+            tr.querySelectorAll('td[contenteditable]').forEach(td => td.addEventListener('input', () => {
+              tr.classList.add('review-done-row'); refreshReviewNote();
+            }));
+          }
+        }
+      }
+      updateCounts();
+      refreshSuspiciousSummary();
+      refreshReviewNote();
+      document.getElementById('fileInfo').innerHTML +=
+        ' | <span style="color:#8a5a00">Đang xem lại so với nhãn</span>';
+      resultSection.classList.add('visible');
+    }
+
+    async function openReview(name) {
+      try {
+        previewImg.src = `/api/raw?name=${encodeURIComponent(name)}`;
+        previewImg.style.display = 'block';
+        uploadBtn.disabled = true;
+        const res = await fetch(`/api/review?name=${encodeURIComponent(name)}`);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || res.statusText);
+        renderReview(data);
+      } catch (err) {
+        showError(`Không mở được "${name}" để xem lại: ${err.message}`);
+      } finally {
+        uploadBtn.disabled = false;
+      }
+    }
+
+    {
+      const reviewName = new URLSearchParams(location.search).get('review');
+      if (reviewName) {
+        document.title = `Xem lại: ${reviewName}`;
+        openReview(reviewName);
+      }
+    }
+
+  </script>
+</body>
+</html>

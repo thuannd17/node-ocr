@@ -1,0 +1,320 @@
+{
+  "version": "v4",
+  "name": "tight",
+  "createdAt": "2026-10-01",
+  "status": "deployed",
+  "deployedAt": "2026-10-01",
+  "recipe": {
+    "template": "models/rec/train-template.yml",
+    "epochs": 15,
+    "general": "table",
+    "tightCrops": true,
+    "linesDir": "cache/ocr-det1920-stock",
+    "exportedCheckpoint": "latest"
+  },
+  "dataset": "exports/recognition-groundtruth/tight-all",
+  "trainedOn": [
+    {
+      "hash": "050b57ce021ea664edd5ba4620569770",
+      "name": "1 (1).jfif"
+    },
+    {
+      "hash": "5bbcfa7035d5ecd21c14a9c139e1eb92",
+      "name": "1 (1).jpeg"
+    },
+    {
+      "hash": "ba77440612e7069c84f921bea8c94185",
+      "name": "1 (1).jpg"
+    },
+    {
+      "hash": "308feedae990adef3b78cd531f585239",
+      "name": "1 (10).jpeg"
+    },
+    {
+      "hash": "a138b21c7788c5d25a6a72048ab9a516",
+      "name": "1 (10).jpg"
+    },
+    {
+      "hash": "94f1b51e5cd45a7ea39bba685188665c",
+      "name": "1 (11).jpeg"
+    },
+    {
+      "hash": "def46915f733dd9e83236982f5a95838",
+      "name": "1 (11).jpg"
+    },
+    {
+      "hash": "72ee6281319e0c3133189d5617e9f8f3",
+      "name": "1 (12).jpg"
+    },
+    {
+      "hash": "26968d1bf79aac529f85f3cee002bc2b",
+      "name": "1 (13).jpeg"
+    },
+    {
+      "hash": "bab3c68953bb240e8a6cbee8e459ab87",
+      "name": "1 (13).jpg"
+    },
+    {
+      "hash": "4692a2d8470ab64b3fca05ca86a047ad",
+      "name": "1 (14).jpeg"
+    },
+    {
+      "hash": "840613a300e2fee690e5029b3582fa08",
+      "name": "1 (15).jpeg"
+    },
+    {
+      "hash": "46209dec9c581a9faeeedb407886d239",
+      "name": "1 (15).jpg"
+    },
+    {
+      "hash": "6027fdc72c5e8d022463c8cf5ef9686a",
+      "name": "1 (16).jpeg"
+    },
+    {
+      "hash": "a2de23a3bad0b265d01d0e1dc04dfdd1",
+      "name": "1 (17).jpeg"
+    },
+    {
+      "hash": "3981fa80ae3c53cfeb5c4f797af49b81",
+      "name": "1 (17).jpg"
+    },
+    {
+      "hash": "c6b0d8df753f96db56c46d50338867e0",
+      "name": "1 (18).jpeg"
+    },
+    {
+      "hash": "6b8b0cecf7a405c3d26cc6d7d568c1f7",
+      "name": "1 (18).jpg"
+    },
+    {
+      "hash": "b6c7a882b36ce04452d2e0d71c6d504e",
+      "name": "1 (19).jpeg"
+    },
+    {
+      "hash": "a1c2c069647d8293761b0ac0b8392372",
+      "name": "1 (2).jpeg"
+    },
+    {
+      "hash": "be6b10f9972dcf7a3acdb113e80966bf",
+      "name": "1 (2).jpg"
+    },
+    {
+      "hash": "8d569f95c1e732187d2cebf13447d018",
+      "name": "1 (20).jpeg"
+    },
+    {
+      "hash": "28d2b6218b6938951f76f2d5c0077a7c",
+      "name": "1 (20).jpg"
+    },
+    {
+      "hash": "4f5c065609aa2e0502f7d7fc338eaf90",
+      "name": "1 (21).jpeg"
+    },
+    {
+      "hash": "40121a832d0c822a0e903727988aca04",
+      "name": "1 (21).jpg"
+    },
+    {
+      "hash": "2f23f4ce28622e682dbd922124dcb29b",
+      "name": "1 (22).jpeg"
+    },
+    {
+      "hash": "2875f1c0efa743499b493e585c9ca420",
+      "name": "1 (22).jpg"
+    },
+    {
+      "hash": "aa032c2c6356b1c0c9fba5a903dd2002",
+      "name": "1 (23).jpeg"
+    },
+    {
+      "hash": "fc0f022b895da89d8e1cb1f9893bcff7",
+      "name": "1 (24).jpeg"
+    },
+    {
+      "hash": "d81e83517a82edaeb2cdf37619a6b844",
+      "name": "1 (25).jpeg"
+    },
+    {
+      "hash": "c8f8f3f06e86ec7490e63185c1e32406",
+      "name": "1 (25).jpg"
+    },
+    {
+      "hash": "4e83bfebb3675c74361728d60ae47df7",
+      "name": "1 (26).jpeg"
+    },
+    {
+      "hash": "2221ae50871242d8c52d27e5b39667d7",
+      "name": "1 (26).jpg"
+    },
+    {
+      "hash": "1c9d2aabc641be293e74ba9bd86dea26",
+      "name": "1 (27).jpeg"
+    },
+    {
+      "hash": "45e64cbb5f1c587ac2bacc87010bd653",
+      "name": "1 (28).jpeg"
+    },
+    {
+      "hash": "3aceb30d244a6fb01416449a4f13d65e",
+      "name": "1 (29).jpeg"
+    },
+    {
+      "hash": "86a9bafce3ef377cac24fc9dd3d85817",
+      "name": "1 (3).jpeg"
+    },
+    {
+      "hash": "aed7b5b0805eaabf14d0f60c8fc4b5d2",
+      "name": "1 (3).jpg"
+    },
+    {
+      "hash": "99fccc4b5de183c7a6eba82f68a3047f",
+      "name": "1 (30).jpeg"
+    },
+    {
+      "hash": "3413170d3f352bcaddefa301d2837bff",
+      "name": "1 (31).jpeg"
+    },
+    {
+      "hash": "ca90ba9f12486bfe6773a1be9d9169af",
+      "name": "1 (32).jpeg"
+    },
+    {
+      "hash": "60a11c687fcacad33f29a849b129373b",
+      "name": "1 (4).jpeg"
+    },
+    {
+      "hash": "d4613e4b8fb21da9e6e398ad646e7047",
+      "name": "1 (4).jpg"
+    },
+    {
+      "hash": "d5d6f9cb104c37fc27cea5019e582b4a",
+      "name": "1 (5).jpeg"
+    },
+    {
+      "hash": "3ad46b2ffc2d2d89a722345e79aa2f98",
+      "name": "1 (5).jpg"
+    },
+    {
+      "hash": "b49ee8a1a08ff8edb0229fb741c25468",
+      "name": "1 (6).jpeg"
+    },
+    {
+      "hash": "d2659903deab614c4dd49bc6fbbc6fa6",
+      "name": "1 (7).jpeg"
+    },
+    {
+      "hash": "85a8e9f1eb27587cd3da435945f7ef21",
+      "name": "1 (8).jpeg"
+    },
+    {
+      "hash": "ff6c8cf49746f3e3209805d534018382",
+      "name": "1 (9).jpeg"
+    },
+    {
+      "hash": "fcc1ae168ac021ac03b3f3e5aa98eb75",
+      "name": "1 (9).jpg"
+    },
+    {
+      "hash": "1dc4528b4911988fb20b4f4b30810c87",
+      "name": "1736800166573.jpg"
+    },
+    {
+      "hash": "eb71750c79bf6d7666e672e651b7ab64",
+      "name": "868d276598e571fd0db6eb29e61b6044.jpeg"
+    },
+    {
+      "hash": "044f43862f8aa2755e6960257dbc9852",
+      "name": "bcccbc8ba1afcaee344641bb1044c68e.jpg"
+    },
+    {
+      "hash": "bc81a3dba0ac8d7b419bf93b38f538c7",
+      "name": "image-20260616-051653.png"
+    },
+    {
+      "hash": "7cad7908a933b2d07a7915c9f7c3b57c",
+      "name": "image1.jpeg"
+    },
+    {
+      "hash": "9437e0cd3feef7ebb7fd0251348173f0",
+      "name": "index.png"
+    },
+    {
+      "hash": "b661f55b2fd08d2d9fe02259a32a5068",
+      "name": "Main1879.jpeg"
+    },
+    {
+      "hash": "842443276ba3e393bd3bdbf676eda20c",
+      "name": "roster_101.jpeg"
+    },
+    {
+      "hash": "7bed3938bfd7ec4e9c89af004cd532f5",
+      "name": "roster_102.jpeg"
+    },
+    {
+      "hash": "00004ac6c414b965f1dd78510bae5af0",
+      "name": "roster_103.jpeg"
+    },
+    {
+      "hash": "41dacdc8836306d843c5bd388c461cd6",
+      "name": "roster_104.jpeg"
+    },
+    {
+      "hash": "63511545e16afb927388344fade30342",
+      "name": "roster_12.jpg"
+    },
+    {
+      "hash": "12b4998f698a1c2b7fd94809c530a2d3",
+      "name": "roster_13.jpg"
+    },
+    {
+      "hash": "de1debd0e84ccff335d7864056197a58",
+      "name": "roster_16.jpg"
+    },
+    {
+      "hash": "2610d3ac0c0df1910dc51c5fee1c5ec8",
+      "name": "roster_2.jpg"
+    },
+    {
+      "hash": "19dd644fd6fada6e520209e4fc39f345",
+      "name": "roster_3.jpg"
+    },
+    {
+      "hash": "9e950284e5bdb86c12f7f12c32f7c9f7",
+      "name": "roster_35.jpg"
+    },
+    {
+      "hash": "ec89f582b240fa7869189d5b5fe7b186",
+      "name": "roster_39.jpg"
+    },
+    {
+      "hash": "6c7bf2f666b23dd1759c47610a02aeca",
+      "name": "roster_40.jpg"
+    },
+    {
+      "hash": "d8fe89a643e77727bf80571c1d5d925e",
+      "name": "roster_43.jpg"
+    },
+    {
+      "hash": "288f8d69b55c1e7fb08acbb4ddc8487e",
+      "name": "roster_61.jpg"
+    },
+    {
+      "hash": "a703b71c2548713a7d2d9398c38996f1",
+      "name": "roster_65.jpg"
+    },
+    {
+      "hash": "7d39f873f2a816455e874d7599de9ef0",
+      "name": "roster_67.jpg"
+    },
+    {
+      "hash": "0ca9b387899fa62db9f98fde78c40cc9",
+      "name": "roster_70.jpeg"
+    },
+    {
+      "hash": "ce298dc0c3c551d5b0c7e283a62907f2",
+      "name": "roster_9.jpg"
+    }
+  ],
+  "testedOn": [],
+  "notes": "5-fold roster-cluster CV row exact 50.8% vs stock 46.4% vs v2 41.3% (old parser, exports/kfold/tight/results.json). With 2026-10-06 parser: 96.0% on 91 images (in-sample for 75), 95.6% on the 16 rosters added 2026-10-06 (never trained on). Retrains with fixed labels / +16 rosters (2026-10-05/06) tied or lost, so v4 stayed."
+}
