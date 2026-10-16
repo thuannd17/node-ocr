@@ -20,6 +20,7 @@
  * not found are marked "?" so a miss never teaches the model "O".
  */
 import { readingLines, parseDateText, HOTEL_CODE_RE } from './pdf-row-assembler.js';
+import { hotelFromEvent } from './pdf-roster-parser.js';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const WEEKDAY_RE = /^(Mon|Tue|Wed|Thu|Fri|Sat|Sun|Lunes|Martes|Mi[ée]rcoles|Jueves|Viernes|S[áa]bado|Domingo)\.?,?$/i;
@@ -61,7 +62,8 @@ export function alignLabel(tagPages, label, { ocr = false } = {}) {
   const free = t => !used.has(t);
 
   const rows = [];
-  for (const sec of ['published', 'planned']) (label[sec] || []).forEach((r, i) => rows.push({ sec, i, r }));
+  // a label's hotel night (duty "H1*" / "HT") as the words are tagged: a hotel code, or duty "H" with the hotel's name
+  for (const sec of ['published', 'planned']) (label[sec] || []).forEach((r, i) => rows.push({ sec, i, r: hotelFromEvent(r) }));
 
   // Which line each token is on.
   const lineOf = new Map();
@@ -249,7 +251,7 @@ export function alignLabel(tagPages, label, { ocr = false } = {}) {
         // The legend description at the end ("[SSB: Short Standby]") is printed elsewhere.
         const own = duty && text.endsWith(']') && text.lastIndexOf(`[${duty}: `) >= 0 ? text.slice(0, text.lastIndexOf(`[${duty}: `)) : text;
         row.infoLeft = own.split(/\s+/).filter(Boolean).map(norm).filter(Boolean);
-        // Words that must be found: all but a bracket's name ("Blk Hrs" of "[Blk Hrs 3:25]" may be the label's own words).
+        // Words that must be found: all but a bracket's name ("Block:" of "[Block: 3:25]" may be the label's own words).
         row.infoNeed = new Set();
         for (const m of own.matchAll(/\[[^\]]*]|\S+/g)) {
           const ws = m[0].split(/\s+/);

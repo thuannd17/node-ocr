@@ -197,7 +197,7 @@
     /* PDF duty plans: the PDF itself as preview */
     .pdf-preview { height: calc(100vh - var(--nav-h) - 40px); min-height: 480px; border: 0; background: #fff; }
     /* optional PDF columns with no value in this result */
-    table.hide-hotel [data-field="hotel"], table.hide-dc [data-field="dc"],
+    table.hide-dc [data-field="dc"],
     table.hide-registration [data-field="registration"], table.hide-ac [data-field="ac"], table.hide-crew [data-field="crew"] { display: none; }
     td[data-field="info"], td[data-field="crew"] { font-size: 11px; color: #555; min-width: 180px; }
 
@@ -237,9 +237,9 @@
 
 
   <div class="card upload-toolbar" id="uploadArea">
-    <button class="btn" id="uploadBtn"><i class="fa-solid fa-upload" aria-hidden="true"></i> Chọn ảnh / PDF</button>
-    <input type="file" id="fileInput" multiple accept="image/jpeg,image/png,image/bmp,image/jfif,application/pdf,.pdf">
-    <span class="drop-hint">hoặc kéo-thả một hay nhiều file vào trang · JPG, PNG, BMP, JFIF, PDF</span>
+    <button class="btn" id="uploadBtn"><i class="fa-solid fa-upload" aria-hidden="true"></i> Tải lên</button>
+    <input type="file" id="fileInput" multiple accept="image/jpeg,image/png,image/bmp,image/jfif,application/pdf,.pdf,.csv,.xls,.xlsx,.txt">
+    <span class="drop-hint">hoặc kéo-thả một hay nhiều file vào trang · JPG, PNG, BMP, JFIF, PDF, CSV, XLS, XLSX, TXT</span>
     <span class="spacer" style="flex:1"></span>
     <!-- result actions, shown once a file is loaded -->
     <span class="result-actions">
@@ -339,10 +339,11 @@
     let docMode = 'image';
     const FIELDS = {
       image: ['date', 'day', 'duty', 'dep', 'begin', 'end', 'arr'],
-      pdf: ['date', 'day', 'hotel', 'dc', 'duty', 'registration', 'dep', 'begin', 'end', 'arr', 'ac', 'crew', 'info'],
+      pdf: ['date', 'day', 'dc', 'duty', 'registration', 'dep', 'begin', 'end', 'arr', 'ac', 'crew', 'info'],
     };
-    const TITLES = { date: 'Date', day: 'Day', hotel: 'Hotel (H)', dc: 'DC', duty: 'Duty', registration: 'Registration (R)', dep: 'Dep', begin: 'Begin', end: 'End', arr: 'Arr', ac: 'AC', crew: 'Crew', info: 'Info' };
-    const isPdfFile = (file) => file.type === 'application/pdf' || /\.pdf$/i.test(file.name || '');
+    const TITLES = { date: 'Date', day: 'Day', dc: 'DC', duty: 'Duty', registration: 'Reg.', dep: 'Dep', begin: 'Begin', end: 'End', arr: 'Arr', ac: 'AC', crew: 'Crew', info: 'Info' };
+    // PDF and rosters exported as text (CSV, Excel, TXT): all read by /api/pdf.
+    const isPdfFile = (file) => file.type === 'application/pdf' || /\.(pdf|csv|xlsx?|txt)$/i.test(file.name || '');
     const escapeHtml = (s) => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[c]));
 
     // Table columns and preview for the kind of file shown.
@@ -360,7 +361,7 @@
     }
 
     // Columns only some PDF layouts fill: hidden in both tables when no row has a value.
-    const OPTIONAL_FIELDS = ['hotel', 'dc', 'registration', 'ac', 'crew'];
+    const OPTIONAL_FIELDS = ['dc', 'registration', 'ac', 'crew'];
     function hideEmptyColumns(rows) {
       for (const f of OPTIONAL_FIELDS) {
         const empty = !rows.some(r => String(r[f] || '').trim());
@@ -465,7 +466,7 @@
         displayResult(result);
         document.getElementById('fileInfo').innerHTML += modelInfoHtml(result);
       }
-      const folder = `fake-data/${job.kind === 'pdf' ? 'pdf' : (result.fileName.split('.').pop() || '').toLowerCase()}/${result.fileName}`;
+      const folder = `fake-data/${(result.fileName.split('.').pop() || '').toLowerCase()}/${result.fileName}`;
       document.getElementById('fileInfo').innerHTML += job.isNew
         ? ` | <span style="color:#2e7d32"><i class="fa-solid fa-star" aria-hidden="true"></i> Roster mới, đã lưu vào ${escapeHtml(folder)}</span>`
         : ` | Đã có trong dữ liệu (${escapeHtml(folder)})`;
@@ -477,7 +478,7 @@
       for (const file of fileList) {
         const kind = isPdfFile(file) ? 'pdf' : file.type.startsWith('image/') ? 'image' : null;
         const job = { id: nextId++, file, title: file.name, kind, status: 'waiting' };
-        if (!kind) Object.assign(job, { status: 'error', error: 'không phải ảnh (JPG, PNG, BMP) hay PDF' });
+        if (!kind) Object.assign(job, { status: 'error', error: 'không phải ảnh (JPG, PNG, BMP), PDF, CSV, Excel hay TXT' });
         jobs.push(job);
         added.push(job);
       }
@@ -492,12 +493,23 @@
     async function runQueue() {
       if (reading) return;
       reading = true;
-      let job;
-      while ((job = jobs.find(j => j.status === 'waiting'))) await readJob(job);
-      reading = false;
+      try {
+        let job;
+        // a file that fails (or a slip while showing it) must not stop the files after it
+        while ((job = jobs.find(j => j.status === 'waiting'))) {
+          try { await readJob(job); } catch (err) { Object.assign(job, { status: 'error', error: err.message || 'Đã có lỗi xảy ra' }); }
+        }
+      } finally {
+        reading = false;
+        renderQueue();
+      }
     }
 
     const formDataOf = (field, file) => { const f = new FormData(); f.append(field, file); return f; };
+    // A request that never answers (OCR server stuck, ...) becomes an error instead of holding the queue.
+    const READ_TIMEOUT_MS = 6 * 60 * 1000;
+    const fetchRead = (url, opts = {}) => fetch(url, { ...opts, signal: AbortSignal.timeout(READ_TIMEOUT_MS) })
+      .catch((e) => { throw new Error(e.name === 'TimeoutError' ? `quá ${READ_TIMEOUT_MS / 60000} phút không có phản hồi từ server` : `không kết nối được server (${e.message})`); });
 
     // Upload one job's file (or ask for a stored file again) and keep what the AI model read.
     async function readJob(job, again = false) {
@@ -507,14 +519,14 @@
         let result;
         if (job.kind === 'pdf') {
           const res = again || !job.file
-            ? await fetch(`/api/pdf/parse?name=${encodeURIComponent(job.storedAs)}&engine=model`)
-            : await fetch('/api/pdf/upload', { method: 'POST', body: formDataOf('file', job.file) });
+            ? await fetchRead(`/api/pdf/parse?name=${encodeURIComponent(job.storedAs)}&engine=model`)
+            : await fetchRead('/api/pdf/upload', { method: 'POST', body: formDataOf('file', job.file) });
           result = await res.json().catch(() => ({}));
           if (!res.ok) throw new Error(result.error || 'Lỗi khi đọc PDF');
           if (!again && job.file) job.isNew = !!result.newFile;
         } else {
           if (!job.previewUrl) job.previewUrl = URL.createObjectURL(job.file);
-          const res = await fetch('/api/ocr/upload', { method: 'POST', body: formDataOf('image', job.file) });
+          const res = await fetchRead('/api/ocr/upload', { method: 'POST', body: formDataOf('image', job.file) });
           result = await res.json().catch(() => ({}));
           if (!res.ok) throw new Error(result.error || 'Lỗi khi upload');
           if (!again) job.isNew = !!result.newRoster;
@@ -523,7 +535,12 @@
       } catch (err) {
         Object.assign(job, { status: 'error', error: err.message || 'Đã có lỗi xảy ra' });
       }
-      if (selected === job) selectJob(job); else renderQueue();
+      try {
+        if (selected === job) selectJob(job); else renderQueue();
+      } catch (err) {
+        console.error('[upload] showing', job.title, err);
+        showError(`${job.title}: đọc xong nhưng không hiển thị được kết quả (${err.message})`);
+      }
     }
 
     fileSelect.addEventListener('change', () => selectJob(jobs.find(j => String(j.id) === fileSelect.value)));

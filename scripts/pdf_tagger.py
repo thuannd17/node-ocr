@@ -179,6 +179,8 @@ def doc_features(pages):
 
 
 MODEL = 'hgb' if '--hgb' in sys.argv else 'svc'
+# LinearSVC regularization; PDF_TAGGER_C overrides it (more layouts may need a larger C)
+SVC_C = float(os.environ.get('PDF_TAGGER_C') or 0.5)
 
 
 class Dense:
@@ -201,7 +203,7 @@ def fit1(X, y, w=None):
     if MODEL == 'hgb':
         clf = Dense(HistGradientBoostingClassifier(max_iter=300, learning_rate=0.1, max_leaf_nodes=63, class_weight='balanced', random_state=0))
     else:
-        clf = LinearSVC(C=0.5, class_weight='balanced', max_iter=3000)
+        clf = LinearSVC(C=SVC_C, class_weight='balanced', max_iter=3000)
     clf.fit(Xv, y, sample_weight=w)
     return vec, clf
 

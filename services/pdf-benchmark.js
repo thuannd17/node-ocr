@@ -1,18 +1,16 @@
 /**
- * Scores the PDF duty-plan parser against verified labels in labels/pdf/
- * ({ published: [rows], planned: [rows] }), each table on its own.
- * Rows are paired with the image benchmark's alignRows (same 7 base fields),
- * then all 12 PDF fields are compared exactly (whitespace-normalized).
+ * The parser's reading of a text file (PDF, CSV, Excel, TXT), as /label Auto-fill shows it
+ * (parsePdfFile), and comparing rows with a label ({ published: [rows], planned: [rows] }),
+ * each table on its own (compareRows): rows are paired with the image benchmark's alignRows
+ * (same 7 base fields), then all PDF fields are compared exactly (whitespace-normalized).
  */
-import fs from 'node:fs';
 import { alignRows } from './benchmark.js';
 import { readPdfText, hasTextLayer } from './pdf-text.js';
 import { parseNetlinePdf } from './pdf-roster-parser.js';
 import { ocrPdfPages, ocrPdfAsImage } from './pdf-ocr.js';
 import { parseRoster, cleanExtractionResult } from './roster-parser.js';
-import { listLabels, dataFile, labelFile } from '../utils/data-files.js';
 
-export const PDF_FIELDS = ['date', 'day', 'hotel', 'dc', 'duty', 'registration', 'dep', 'begin', 'end', 'arr', 'ac', 'crew', 'info'];
+export const PDF_FIELDS = ['date', 'day', 'dc', 'duty', 'registration', 'dep', 'begin', 'end', 'arr', 'ac', 'crew', 'info'];
 
 const norm = (v) => String(v ?? '').trim().replace(/\s+/g, ' ');
 
@@ -58,51 +56,3 @@ export function compareRows(predRows = [], expRows = []) {
 }
 
 export const PDF_SECTIONS = ['published', 'planned'];
-
-export async function runPdfBenchmark({ pdfDir, labelsDir }) {
-  // pdfDir / labelsDir = the fake-data/ and labels/ roots; PDFs sit in their pdf/ subfolders
-  const files = listLabels(labelsDir, 'pdf').filter(n => fs.existsSync(dataFile(pdfDir, n)));
-  const perField = Object.fromEntries(PDF_FIELDS.map(f => [f, { matches: 0, total: 0 }]));
-  const results = [];
-  let rowMatches = 0, rowTotal = 0;
-  for (const name of files) {
-    const label = JSON.parse(fs.readFileSync(labelFile(labelsDir, name), 'utf8'));
-    let pred;
-    try {
-      pred = await parsePdfFile(dataFile(pdfDir, name));
-    } catch (e) {
-      // e.g. an image-only PDF while the OCR server is down: its rows count as wrong, the run goes on
-      const total = PDF_SECTIONS.reduce((n, sec) => n + (label[sec] || []).length, 0);
-      rowTotal += total;
-      for (const sec of PDF_SECTIONS) for (const _ of label[sec] || []) for (const f of PDF_FIELDS) perField[f].total += 1;
-      results.push({ file: name, rowMatches: 0, rowTotal: total, predCount: 0, sections: {}, errors: [], error: e.message });
-      continue;
-    }
-    const sections = {};
-    let fileMatches = 0, fileTotal = 0, predCount = 0;
-    const errors = [];
-    for (const sec of PDF_SECTIONS) {
-      const cmp = compareRows(pred[sec] || [], label[sec] || []);
-      sections[sec] = { rowMatches: cmp.rowMatches, rowTotal: cmp.rowTotal, predCount: cmp.predCount };
-      fileMatches += cmp.rowMatches;
-      fileTotal += cmp.rowTotal;
-      predCount += cmp.predCount;
-      for (const f of PDF_FIELDS) {
-        perField[f].matches += cmp.perField[f].matches;
-        perField[f].total += cmp.perField[f].total;
-      }
-      errors.push(...cmp.errors.map(e => ({ section: sec, ...e })));
-    }
-    rowMatches += fileMatches;
-    rowTotal += fileTotal;
-    results.push({ file: name, rowMatches: fileMatches, rowTotal: fileTotal, predCount, sections, errors });
-  }
-  return {
-    labeledCount: files.length,
-    rowMatches,
-    rowTotal,
-    rowExactMatchRate: rowTotal ? rowMatches / rowTotal : 0,
-    perField,
-    files: results,
-  };
-}

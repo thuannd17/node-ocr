@@ -32,7 +32,6 @@ flowchart TD
     end
 
     subgraph MEASURE["3. Measure"]
-        BM["npm run benchmark<br/>services/benchmark.js"]
         EP["eval-parser-cached.mjs"]
         DE["diagnose-errors.mjs"]
         AL["audit-labels.mjs"]
@@ -96,14 +95,14 @@ Same diagram as plain text (for terminals):
               │                                       │
               ▼                                       ▼
  ┌────── 3. MEASURE ───────┐  ┌──────────── 4. RETRAIN (manual) ─────────────┐
- │ npm run benchmark       │  │ npm run retrain-check                        │
- │ services/benchmark.js   │  │ ├ test = rosters the model never saw         │
- │ (PaddleOCR + parser)    │  │ ├ build-recognition-groundtruth.mjs:         │
+ │ /benchmark (AI model,   │  │ npm run retrain-check                        │
+ │   OCR)                  │  │ ├ test = rosters the model never saw         │
+ │                         │  │ ├ build-recognition-groundtruth.mjs:         │
  │                         │  │ │   labeled rows -> cell crops + text        │
  │ eval-parser-cached.mjs  │  │ ├ train -> models/rec/v(N+1)                 │
  │ diagnose-errors.mjs     │  │ └ OCR test set with old + new model          │
  │ audit-labels.mjs        │  │     -> better / tie / worse                  │
- │ /benchmark (AI model)   │  │                                              │
+ │                         │  │                                              │
  └─────────────────────────┘  │ better? npm run use-model -- vN              │
                               │   -> .env OCR_CUSTOM_REC, restart            │
                               │   -> back to 1 with the new model            │
@@ -224,9 +223,9 @@ and `models/pretrained/` (downloaded, only needed for retraining, see
 
 | Page | Purpose |
 |---|---|
-| `/upload` | **Try the AI model**: every uploaded roster **image or duty-plan PDF** is read by the learned model (images: PaddleOCR lines -> model), never by the parser and never answered from a saved label. When the file already has a label, the info line shows how many label rows the model got exactly right. The page is read-only (no editing, no saving labels: that is /label). The toolbar holds the file picker (or drop a file anywhere) and, once a result is shown, **↻ Đọc lại** (read again, e.g. after retraining). An image-only PDF (no text layer) is read by OCR: a duty plan by the parser (the model has no words for it); any other one, e.g. a Ryanair eCrew roster screen printed to PDF, has its pages stacked into one tall roster picture that the model reads as an image (and, once labeled, trains on as an image). A PDF shows the PDF and 12 columns; empty optional columns (DC, hotel, registration, AC) are hidden. `/upload?pdf=<file>` reads a stored PDF with the model. |
+| `/upload` | **Try the AI model**: every uploaded roster **image or duty-plan PDF** is read by the learned model (images: PaddleOCR lines -> model), never by the parser and never answered from a saved label. When the file already has a label, the info line shows how many label rows the model got exactly right. The page is read-only (no editing, no saving labels: that is /label). The toolbar holds the file picker (or drop a file anywhere) and, once a result is shown, **↻ Đọc lại** (read again, e.g. after retraining). An image-only PDF (no text layer) is read by OCR: a duty plan by the parser (the model has no words for it); any other one, e.g. a Ryanair eCrew roster screen printed to PDF, has its pages stacked into one tall roster picture that the model reads as an image (and, once labeled, trains on as an image). A PDF shows the PDF and 12 columns; empty optional columns (DC, Reg., AC, Crew) are hidden. `/upload?pdf=<file>` reads a stored PDF with the model. |
 | `/label` | Folder tree of `fake-data/` (one folder per extension; unlabeled 🆕 first, byte-identical image copies hidden unless asked). Hovering a file shows 🗑: it removes the file from the dataset (after a confirm) by moving it, its label and its cached OCR result to `tmp/trash/<date>/`. Clicking a file opens a popup (Esc / × closes; drag the bar in the middle to resize) with the file next to its label as editable Published / Planned tables (one cell per field, add / insert / delete rows; Enter moves down a column); the label is still saved as JSON (**{ } JSON** shows it). Making ground truth: **Auto-fill** proposes the rows with **Parser** (OCR + `roster-parser.js` for an image, the PDF parser for a PDF) or **AI model** (chosen in the list next to it), and says how many rows match the saved label; check, fix, save. Ctrl+S saves, Alt+↑/↓ moves between files. `/label?name=<file>` opens one. |
-| `/benchmark` | Score the AI model (images + PDFs, read as on /upload) against `labels/`, same as `npm run benchmark:model`; each file lists its differences from the label. **Xem & sửa** on a file opens the /label editor in a popup over the page (`/label?embed=1&review=1&name=<file>`): for an image, the table is the label and cells where the model differs are marked (yellow, model value underneath: click to take it), label rows the model missed are blue, rows only the model has are struck through (**+ nhãn** adds one); a PDF opens without the marks. A saved label shows "✓ đã lưu nhãn": run the benchmark again to update the scores. The parser benchmarks (`npm run benchmark`, `npm run benchmark:pdf`) are command-line only. |
+| `/benchmark` | Two scores against `labels/`. **1. Nhận dạng chữ từ ảnh (OCR)**: PaddleOCR alone on every labeled image (`npm run benchmark:ocr`): each labeled cell (date, day, duty, dep, begin, end, arr; a day's date/weekday once) is looked for in the OCR lines; cells read exactly and characters right, per field and per image with the misread cells. **2. Đọc dữ liệu roster theo loại file**: the AI model, read as on /upload (`npm run benchmark:model -- --types=image,pdf,csv,xls,xlsx,txt`), with a score per file type; tick the types to run. A run of only some types of a kind does not overwrite the score /models shows. Each file lists its differences from the label. **Xem & sửa** on a file opens the /label editor in a popup over the page (`/label?embed=1&review=1&name=<file>`): for an image, the table is the label and cells where the model differs are marked (yellow, model value underneath: click to take it), label rows the model missed are blue, rows only the model has are struck through (**+ nhãn** adds one); a PDF opens without the marks. A saved label shows "✓ đã lưu nhãn": run the benchmark again to update the scores. |
 
 New rosters: uploads are deduplicated by content and kept in `fake-data/`. A label
 is written only when a person presses **Save as Label**.
@@ -242,7 +241,8 @@ is written only when a person presses **Save as Label**.
 | `GET /api/labels`, `POST /api/labels` | read / save a label |
 | `GET /api/files`, `GET /api/raw` | list images / serve an image |
 | `DELETE /api/files?name=...` | remove an image or PDF from the dataset: file, label and cached result move to `tmp/trash/<date>/` |
-| `GET /api/benchmark/model/stream`, `POST /api/benchmark/stop` | AI model benchmark, images + PDFs (server-sent events) |
+| `GET /api/benchmark/model/stream?types=image,pdf,csv,...`, `GET /api/benchmark/ocr/stream`, `POST /api/benchmark/stop` | AI model benchmark per file type, OCR benchmark on images (server-sent events) |
+| `GET /api/benchmark/types` | labeled files per type |
 | `/api/models` | model versions per family: list, train, activate, delete (`/models`) |
 
 ## PDF duty plans (NetLine/Crew)
@@ -264,16 +264,16 @@ A third layout, the **Crew Roster Report** table (`Date | DC | C/I (Z) | C/O (Z)
 Activity | From | STD (Z) | To | STA (Z) | AC/Hotel | Blk Hrs | Duty Hrs`), gives per
 line: a `C/I` row (begin = C/I time), the activity (duty = Activity, dep = From,
 begin = STD, arr = To, end = STA, `[Blk Hrs ..]` in info), a `C/O` row (end = C/O
-time, `[Duty Hrs ..]` in info), and when AC/Hotel is longer than 3 characters a
-hotel row (duty `H`, info = the hotel); the DC column fills `dc`.
+time, `[Duty: ..]` in info), and when AC/Hotel is longer than 3 characters a
+hotel row (duty `HT`, info = the hotel); the DC column fills `dc`.
 A fourth layout, the **Crew member's flight time record** (`flight | date | flightno |
 registr | type | dep | off | on | arr | Block Time per Leg` or `1.pilot | 2.pilot | SIM`),
 lists flown legs: flightno -> duty, registr -> registration, type -> ac, the two
-times -> begin/end, the time columns after arr -> info (`[Block Time 3:12]`); the
+times -> begin/end, the time columns after arr -> info (block time `[Block: 3:12]`, as every layout writes it); the
 `flight` counter is skipped and the "All times in UTC! ..." note is shown as an alert.
 A fifth layout, the **crew flight log** (`Year | Month | Date | Dep | Block-Off | Arr |
 Block-On | Blocktime | AcType | AcRegId | PiC ...`), lists flown legs: Block-Off/On ->
-begin/end, Blocktime -> `[Block Hrs: 03:12]`, AcType -> ac, AcRegId -> registration;
+begin/end, Blocktime -> `[Block: 03:12]`, AcType -> ac, AcRegId -> registration;
 it has no flight number, so duty stays empty, and pilot names are skipped.
 A sixth layout, the Spanish **Calendario de actividades** (`Fecha Asignación | Hora
 Salida | Hora Salida UTC | Asignación | Descripción Asignación | ORI/DES | Hora Llegada |
@@ -290,14 +290,14 @@ wraps flight numbers "WAZ701" + "5" -> `WAZ7015` ("WMT28" + "25"), gives some du
 route ("PCAR55" 15:30 "*VIE" "BUD" 18:30 -> dep/arr, "*" kept), a C/I before a timed duty
 too ("20:05" "ST" "21:35"), continues the Descriptions on the next page, prints actual times "A02:00" (kept: `A02:00 Z`),
 "(L)" and "Delay 00:50" -> info, day indicators S / L / D under the grid -> the day's
-first row, and its F / D daily totals are not read; hotel nights -> `H` rows), and the **Schedule Details** table (`Date | Duties | Details |
+first row, and its F / D daily totals are not read; hotel nights -> `HT` rows), and the **Schedule Details** table (`Date | Duties | Details |
 Report times | Actual times/Delays | Debrief times | Indicators | Crew`, cells centred
 in each day's row): report -> C/I row, debrief -> C/O row, details "*BCN - BIO" ->
 dep/arr ("*" kept), other details -> `[OFF: Day off]`, actual times -> begin/end ("A07:12 L", "E13:00 L": the A/E stays; a
 delay "/01:41" -> `[Delay 01:41]`), the day's crew in the **crew** column of
 each of its flights (flight number with a route) (`[CP - DHC - 1096 - CASANOVAS][FO - 2151 -
 EREZUMA]`), its indicators and memos (`[M: Day Memo] [Memo: ...]`) on its first
-row, and one `H` row per night of the
+row, and one `HT` row per night of the
 "Hotel Information" table (dep = port, info = address, phone). Both give duty codes
 and indicators their "Descriptions" text: `[KU4: KUL Home Standby]`.
 Days only carry a day number, so the month is counted from the period start; when
@@ -319,8 +319,7 @@ period ends" (or "... a round trip ending outside the printed period").
 |---|---|
 | `date`, `day` | `Sat01` + the period in the header -> `1 Mar 25`, `Sat`; every row repeats its day's date |
 | `dc` | Duty Code column of a Crew Roster Report (`FO`, `DH`, `R*`), on the activity row only (not on C/I or C/O); empty in NetLine plans |
-| `hotel` | the H column: a layover line `H1* BOG` is a row of its own (hotel `H1*`, dep `BOG`, info = name and phone from the *Hotels* table) |
-| `duty` | `C/I`, `C/O`, `STBY`, `OFF`, flight number (`EW 7526`), training codes, ... one row each (empty on hotel rows) |
+| `duty` | `C/I`, `C/O`, `STBY`, `OFF`, flight number (`EW 7526`), training codes, ... one row each. A hotel night is an event of its own: the H column's code (layover line `H1* BOG` -> duty `H1*`, dep `BOG`, info = name and phone from the *Hotels* table), or `HT` where the file prints no code. There is no hotel column (since 2026-10-16). |
 | `registration` | the R column: on the row (`R`) or an aircraft code on the line under a leg (`A321`, `D-AIZA`); any other text there goes to `info` |
 | `dep`, `arr`, `ac` | as printed (`HAM`, `FUE`, `320`) |
 | `begin`, `end` | one format for every layout: `06:05 Z` (UTC), `07:00 B` (homebase, plans noted "(!) if not in homebase timezone"), `07:00 LB` (local at the departure airport, "(!) if not in departure airport timezone"), `07:00 L` also for plans noted "All CI/CO times are local", `13:00 L` (local, printed `!1300`), `05:00 Z / 00:00 L` only when the PDF gives both; a day offset stays (`22:00 Z -1`); `0900 !1145` printed as one piece is split into begin and end |
@@ -336,7 +335,8 @@ Label** (`labels/pdf/<file>.json`, `{ published: [...], planned: [...] }`), then
 
 ```powershell
 npm run parse-pdf -- "fake-data/pdf/<file>.pdf"   # print the parsed rows
-npm run benchmark:pdf                              # parser vs labels/pdf/
+npm run benchmark:model -- --pdf                   # AI model vs labels/pdf/ (and csv, xls, xlsx, txt)
+npm run check:autofill                             # the parser (/label Auto-fill) vs labels, and which files changed since the last run
 ```
 
 PDFs are kept in `fake-data/pdf/`, labels in `labels/pdf/`; both are personal
@@ -360,7 +360,7 @@ enough to read the others.
 | `scripts/build-pdf-token-data.mjs` | tags of every labeled PDF -> `exports/pdf-tokens/` (the parser's trace where it equals the label, else the label alignment) |
 | `services/ocr-tokens.js`, `scripts/build-image-token-data.mjs` | OCR lines of a labeled image -> words with positions, tagged from its label -> `exports/image-tokens/` |
 | `scripts/pdf_tagger.py`, `scripts/train_pdf_tagger.py` | the word tagger (scikit-learn, two stages: word + column-header features, then the neighbours' fields); every layout weighs the same in training |
-| `services/pdf-row-assembler.js` | tagged words -> rows (blocks, dates, C/I-C/O, hotels, time zones, legend; how `[Blk Hrs 3:25]` is written is learned from the labels) |
+| `services/pdf-row-assembler.js` | tagged words -> rows (blocks, dates, C/I-C/O, hotels, time zones, legend; how `[Block: 3:25]` is written is learned from the labels) |
 | `scripts/train-pdf-model.mjs` | the whole retrain -> `models/pdf-tagger/` (previous one kept in `models/pdf-tagger-prev/`; not in git) |
 | `services/pdf-ai-extract.js` | the app side: runs `scripts/pdf_tagger_predict.py` (~3-4 s per file) and assembles the rows (`extractWithModel` for PDFs, `extractImageWithModel` for images) |
 
@@ -423,8 +423,8 @@ reports throughput, latency and how much of it was queueing vs inference
 These need labeled rosters in `fake-data/` + `labels/` (see [Data](#5-data-not-in-git)).
 
 ```powershell
-npm run benchmark                                       # full run against labels/
-node --env-file=.env scripts/benchmark.mjs --strategy=paddleocr --json
+npm run benchmark:model                                 # AI model vs every label (as /benchmark)
+npm run benchmark:ocr                                   # PaddleOCR alone on the labeled images
 node scripts/eval-parser-cached.mjs                     # parser only, from cached OCR lines (seconds)
 node --env-file=.env scripts/diagnose-errors.mjs        # which pipeline stage each wrong field came from
 npm run audit-labels                                    # spot label typos
@@ -512,10 +512,10 @@ services/paddle-ocr.js       OCR client (resize, call server, parse, quality)
 services/roster-parser.js    OCR lines -> table rows
 services/benchmark.js        scoring
 scripts/ocr_server.py        PaddleOCR server (GPU auto-detect, CPU fallback)
-scripts/*.mjs                benchmark, eval, retrain-check, use-model, load-test, ...
+scripts/*.mjs                benchmark:model / :ocr, eval, retrain-check, use-model, load-test, ...
 scripts/requirements.txt     Python dependencies of the OCR server
-services/pdf-*.js            PDF duty plans: text + positions, parser, benchmark
-routes/pdf-api.js            /api/pdf/* (upload, parse, labels, benchmark)
+services/pdf-*.js            PDF duty plans: text + positions, parser, row comparison
+routes/pdf-api.js            /api/pdf/* (upload, parse, labels)
 models/rec/                  recognition model versions
 models/parser-patterns.json  fixed parser config
 .env.example                 settings template (copy to .env)

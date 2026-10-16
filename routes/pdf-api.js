@@ -2,6 +2,7 @@
 // API for NetLine/Crew duty-plan PDFs (text layer, no OCR), mounted at /api/pdf.
 // Same flow as images: upload -> check/fix the table -> Save as Label -> benchmark.
 // PDFs live in fake-data/pdf/<guid>.pdf, verified labels in labels/pdf/ (both local only).
+// CSV / XLS / XLSX / TXT rosters go the same way (fake-data/csv/, labels/csv/, ...), read as text.
 import { Router } from 'express';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -12,7 +13,8 @@ import multer from 'multer';
 import { parsePdfFile, compareRows, PDF_FIELDS, PDF_SECTIONS } from '../services/pdf-benchmark.js';
 import { compareSection } from '../services/benchmark.js';
 import { readPdfWithModel, modelInfo } from '../services/pdf-ai-extract.js';
-import { listData, dataFile, labelFile as labelPathOf, newDataName, PDF_EXTS } from '../utils/data-files.js';
+import { listData, dataFile, labelFile as labelPathOf, newDataName, PDF_EXTS, extOf } from '../utils/data-files.js';
+import { previewHtml } from '../services/table-text.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pdfDir = path.resolve(__dirname, '..', 'fake-data');
@@ -25,7 +27,7 @@ const listPdfs = () => listData(pdfDir, 'pdf');
 const pdfFile = (name) => dataFile(pdfDir, name);
 const labelFile = (name) => labelPathOf(labelsDir, name);
 const hasLabel = (name) => fs.existsSync(labelFile(name));
-const validName = (name) => !!name && path.basename(name) === name && /\.pdf$/i.test(name);
+const validName = (name) => !!name && path.basename(name) === name && PDF_EXTS.includes(extOf(name));
 
 /** Same PDF already stored: reuse it (a labeled copy first); else a new '<guid>.pdf'. */
 function storedNameFor(originalName, hash) {
@@ -97,7 +99,7 @@ async function resultFor(name, { engine = 'model', useLabel = false } = {}) {
 const upload = multer({
   dest: 'tmp/uploads/',
   limits: { fileSize: 10 * 1024 * 1024 },
-  fileFilter: (req, file, cb) => (/\.pdf$/i.test(file.originalname) ? cb(null, true) : cb(new Error('Chỉ nhận file PDF'))),
+  fileFilter: (req, file, cb) => (PDF_EXTS.includes(extOf(file.originalname)) ? cb(null, true) : cb(new Error('Chỉ nhận file PDF, CSV, XLS, XLSX, TXT'))),
 });
 
 const uploadFile = (req, res, next) => upload.single('file')(req, res, (err) => (err ? res.status(400).json({ error: err.message }) : next()));
@@ -111,7 +113,13 @@ router.post('/upload', uploadFile, async (req, res) => {
     const isNew = !fs.existsSync(target);
     if (isNew) fs.copyFileSync(req.file.path, target);
     // /upload is for trying the AI model: always the model, never a saved label or the parser.
-    const result = await resultFor(name, { engine: 'model' });
+    let result;
+    try {
+      result = await resultFor(name, { engine: 'model' });
+    } catch (e) {
+      if (isNew) fs.rmSync(target, { force: true }); // a file that cannot be read is not kept in fake-data/
+      throw e;
+    }
     res.json({ ...result, newFile: isNew });
   } catch (e) {
     console.error('[PDF upload]', e);
@@ -145,7 +153,12 @@ router.get('/raw', (req, res) => {
   if (!validName(name)) return res.status(400).send('Missing or invalid ?name=');
   const file = pdfFile(name);
   if (!fs.existsSync(file)) return res.status(404).send('PDF not found');
-  res.type('application/pdf').sendFile(file);
+  if (extOf(name) === 'pdf') return res.type('application/pdf').sendFile(file);
+  try {
+    res.type('html').send(previewHtml(file)); // CSV / Excel / TXT: shown as a table or as text
+  } catch (e) {
+    res.status(500).send(`Không đọc được file: ${e.message}`);
+  }
 });
 
 router.get('/labels', (req, res) => {
@@ -172,7 +185,7 @@ router.post('/labels', (req, res) => {
     _reviewedAt: new Date().toISOString(),
   };
   fs.writeFileSync(labelFile(name), JSON.stringify(payload, null, 2), 'utf8');
-  res.json({ ok: true, file: `labels/pdf/${name}.json`, published: payload.published.length, planned: payload.planned.length });
+  res.json({ ok: true, file: `labels/${extOf(name)}/${name}.json`, published: payload.published.length, planned: payload.planned.length });
 });
 
 export default router;

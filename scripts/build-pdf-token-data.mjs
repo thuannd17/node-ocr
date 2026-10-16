@@ -21,7 +21,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { readPdfText } from '../services/pdf-text.js';
-import { parseNetlinePdf } from '../services/pdf-roster-parser.js';
+import { parseNetlinePdf, hotelFromEvent } from '../services/pdf-roster-parser.js';
 import { compareRows, PDF_SECTIONS } from '../services/pdf-benchmark.js';
 import { wordsOf, plainTokens } from '../services/pdf-tokens.js';
 import { alignLabel } from '../services/pdf-label-align.js';
@@ -98,7 +98,7 @@ for (const name of names) {
   if (source === 'parser') {
   const tagged = new Set(outPages.flatMap(p => p.tokens.filter(t => t.field !== 'O').map(t => `${t.section}|${t.row}|${t.field}`)));
   for (const sec of PDF_SECTIONS) {
-    (result[sec] || []).forEach((r, i) => {
+    (result[sec] || []).map(hotelFromEvent).forEach((r, i) => { // hotel nights as the words are tagged
       for (const f of CORE) {
         if (!r[f]) continue;
         // C/I and C/O rows of a roster report share the airport printed on the activity line.

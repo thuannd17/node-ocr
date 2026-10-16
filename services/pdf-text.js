@@ -10,11 +10,14 @@
  */
 import fs from 'node:fs';
 import { getDocument, Util } from 'pdfjs-dist/legacy/build/pdf.mjs';
+import { readTableText, TABLE_EXTS } from './table-text.js';
 
 /** Text direction of an item in display space, snapped to 0/90/180/270 degrees. */
 const directionOf = (a, b) => ((Math.round(Math.atan2(b, a) / (Math.PI / 2)) * 90) + 360) % 360;
 
 export async function readPdfText(filePath) {
+  // CSV / XLS / XLSX / TXT: the same pages, laid out from the file's cells or lines.
+  if (TABLE_EXTS.includes(String(filePath).split('.').pop().toLowerCase())) return dayFirstDates(superscriptDays(readTableText(filePath)));
   const data = new Uint8Array(fs.readFileSync(filePath));
   const doc = await getDocument({ data, isEvalSupported: false, useSystemFonts: false, verbosity: 0 }).promise;
   const pages = [];
@@ -58,8 +61,12 @@ export async function readPdfText(filePath) {
 
 // "02:12⁺¹": the day offset printed in superscript -> "02:12+1", like the other layouts write it.
 const SUPERSCRIPT = { '⁺': '+', '⁻': '-', '⁰': '0', '¹': '1', '²': '2', '³': '3', '⁴': '4', '⁵': '5', '⁶': '6', '⁷': '7', '⁸': '8', '⁹': '9' };
+// A CSV export may have lost the "⁺" of "⁺¹" ("01:13?¹"): the superscript digit still says it is a day offset.
 function superscriptDays(pages) {
-  for (const p of pages) for (const i of p.items) i.text = i.text.replace(/[⁺⁻][⁰¹²³⁴⁵⁶⁷⁸⁹]+/g, (m) => [...m].map(c => SUPERSCRIPT[c]).join(''));
+  for (const p of pages) for (const i of p.items) {
+    i.text = i.text.replace(/[⁺⁻][⁰¹²³⁴⁵⁶⁷⁸⁹]+/g, (m) => [...m].map(c => SUPERSCRIPT[c]).join(''))
+      .replace(/\?([⁰¹²³⁴⁵⁶⁷⁸⁹]+)/g, (m, d) => `+${[...d].map(c => SUPERSCRIPT[c]).join('')}`);
+  }
   return pages;
 }
 
@@ -70,6 +77,7 @@ function superscriptDays(pages) {
  * need OCR like an image-only PDF.
  */
 export function hasTextLayer(pages) {
+  if (pages.some(p => p.fromTextFile)) return true; // CSV / Excel / TXT: all text, there is nothing to OCR
   const chars = pages.reduce((n, p) => {
     const urlYs = p.items.filter(i => /^https?:\/\//i.test(i.text.trim())).map(i => i.y);
     const browser = (i) => /^Page \d+ of \d+$/i.test(i.text.trim()) || urlYs.some(y => Math.abs(y - i.y) <= 2);
@@ -78,8 +86,8 @@ export function hasTextLayer(pages) {
   return chars >= 20;
 }
 
-// "07/31", "07/31/2024": two numbers of a date written with slashes (not part of a longer number).
-const SLASH_DATE_RE = /(?<![\d/])(\d{2})\/(\d{2})(?=\/\d{4}(?!\d)|(?![\d/]))/g;
+// "07/31", "07/31/2024", "07/31/24" (logbook exports): two numbers of a date written with slashes (not part of a longer number).
+const SLASH_DATE_RE = /(?<![\d/])(\d{2})\/(\d{2})(?=\/(?:\d{4}|\d{2})(?!\d)|(?![\d/]))/g;
 
 /**
  * Slash dates as day/month. Most rosters print "31/07/2024", but some (US

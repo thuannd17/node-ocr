@@ -10,13 +10,15 @@
  *          (readPdfWithModel): a duty plan by the parser on its OCR text (source 'parser'),
  *          a roster picture by the model on its OCR lines as an image.
  *
- * Byte-identical copies of a file are scored once (as `npm run benchmark`).
+ * Byte-identical copies of a file are scored once.
  * The model version active at the start is used for the whole run; a finished run's
  * scores are saved in that version's benchmark.json (shown on /models).
  * The model learned from these same labels, so the score is on data it has seen,
  * except labels made or changed after it was trained (counted in `labelsAfterTraining`).
  *
- *   runModelBenchmark({ kinds: ['image', 'pdf'], onEvent, shouldStop }) -> summary
+ *   runModelBenchmark({ types: ['image', 'pdf', 'csv', ...], onEvent, shouldStop }) -> summary
+ *     types: FILE_TYPES to read (default all); the summary scores each type on its own
+ *     (byType) besides images, text files (kind 'pdf') and both together.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -26,7 +28,7 @@ import { ocrLines } from './paddle-ocr.js';
 import { extractImageWithModel, readPdfWithModel, modelInfo } from './pdf-ai-extract.js';
 import { compareSection, alignRows, normalizeField } from './benchmark.js';
 import { compareRows, PDF_FIELDS } from './pdf-benchmark.js';
-import { listLabels, dataFile, labelFile } from '../utils/data-files.js';
+import { listLabels, dataFile, labelFile, extOf, PDF_EXTS } from '../utils/data-files.js';
 import { saveBenchmark } from './ai-models.js';
 import { groupByContent, pickCanonicalLabels } from '../utils/content-groups.js';
 
@@ -37,6 +39,16 @@ const SECTIONS = ['published', 'planned'];
 // Fields both kinds of file have: their accuracy is also given over images and PDFs together.
 export const COMMON_FIELDS = ['date', 'day', 'duty', 'dep', 'begin', 'end', 'arr'];
 const IMAGE_FIELDS = COMMON_FIELDS;
+// File types scored on their own: every picture is 'image'; text files by extension.
+export const FILE_TYPES = ['image', ...PDF_EXTS];
+export const typeOf = (name) => (PDF_EXTS.includes(extOf(name)) ? extOf(name) : 'image');
+
+/** Labeled files of each type: { image: n, pdf: n, csv: n, ... } (for the /benchmark choices). */
+export function labeledCounts() {
+  const out = Object.fromEntries(FILE_TYPES.map(t => [t, 0]));
+  for (const kind of ['image', 'pdf']) for (const n of labeledFiles(kind)) out[typeOf(n)] += 1;
+  return out;
+}
 
 /** Labeled files of one kind, one per distinct content. */
 function labeledFiles(kind) {
@@ -119,16 +131,19 @@ function summarize(files, info) {
     overall: all,
     image: sum(ok.filter(f => f.kind === 'image')),
     pdf: sum(ok.filter(f => f.kind === 'pdf')),
+    byType: Object.fromEntries(FILE_TYPES.map(t => [t, sum(ok.filter(f => typeOf(f.file) === t))]).filter(([, s]) => s.files)),
     errors: files.filter(f => f.error).length,
     files,
   };
 }
 
-export async function runModelBenchmark({ kinds = ['image', 'pdf'], onEvent, shouldStop } = {}) {
+export async function runModelBenchmark({ types = FILE_TYPES, onEvent, shouldStop } = {}) {
   const info = modelInfo();
   if (!info.ready) throw new Error('Chưa có AI model: label vài file rồi bấm "Train" ở /models.');
   const trainedAt = info.trainedAt ? Date.parse(info.trainedAt) : null;
-  const todo = kinds.flatMap(kind => labeledFiles(kind).map(name => ({ kind, name })));
+  const todo = ['image', 'pdf'].flatMap(kind => labeledFiles(kind).filter(n => types.includes(typeOf(n))).map(name => ({ kind, name })));
+  // a kind's score is saved to the model version (/models) only when all of its types were run
+  const kinds = ['image', 'pdf'].filter(k => FILE_TYPES.filter(t => (t === 'image') === (k === 'image')).every(t => types.includes(t)));
   onEvent?.({ type: 'start', total: todo.length, model: info });
   const files = [];
   for (const [i, { kind, name }] of todo.entries()) {
@@ -157,7 +172,7 @@ export async function runModelBenchmark({ kinds = ['image', 'pdf'], onEvent, sho
     const part = { at: new Date().toISOString() };
     for (const k of kinds) part[k] = brief(result[k]);
     if (kinds.length === 2) part.overall = brief(result.overall);
-    saveBenchmark(info.dir, part);
+    if (kinds.length) saveBenchmark(info.dir, part);
   }
   onEvent?.({ type: 'done', result });
   return result;

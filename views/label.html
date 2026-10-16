@@ -101,7 +101,7 @@
     td[contenteditable="true"]:not([data-field="info"]):not([data-field="crew"]) { white-space: nowrap; }
     td[data-field="info"], td[data-field="crew"] { font-size: 11px; color: #555; min-width: 160px; }
     /* optional PDF columns with no value in this file (shown again with "Hiện mọi cột") */
-    table.hide-hotel [data-field="hotel"], table.hide-dc [data-field="dc"],
+    table.hide-dc [data-field="dc"],
     table.hide-registration [data-field="registration"], table.hide-ac [data-field="ac"], table.hide-crew [data-field="crew"] { display: none; }
     td.actions { white-space: nowrap; width: 1%; }
     td.actions button { padding: 1px 7px; font-size: 13px; margin-left: 2px; }
@@ -216,9 +216,9 @@
     const $ = (id) => document.getElementById(id);
     const FIELDS = {
       image: ['date', 'day', 'duty', 'dep', 'begin', 'end', 'arr'],
-      pdf: ['date', 'day', 'hotel', 'dc', 'duty', 'registration', 'dep', 'begin', 'end', 'arr', 'ac', 'crew', 'info'],
+      pdf: ['date', 'day', 'dc', 'duty', 'registration', 'dep', 'begin', 'end', 'arr', 'ac', 'crew', 'info'],
     };
-    const TITLES = { date: 'Date', day: 'Day', hotel: 'Hotel', dc: 'DC', duty: 'Duty', registration: 'Reg.', dep: 'Dep', begin: 'Begin', end: 'End', arr: 'Arr', ac: 'AC', crew: 'Crew', info: 'Info' };
+    const TITLES = { date: 'Date', day: 'Day', dc: 'DC', duty: 'Duty', registration: 'Reg.', dep: 'Dep', begin: 'Begin', end: 'End', arr: 'Arr', ac: 'AC', crew: 'Crew', info: 'Info' };
     const SECTIONS = ['published', 'planned'];
     const extOf = (name) => (name.match(/\.([^.]+)$/)?.[1] || '').toLowerCase();
     // File tree marks: labeled / not labeled yet
@@ -275,7 +275,8 @@
         // a folder stays as the user left it; the one holding the selected file opens
         d.open = searching || openFolders.has(ext) || (current && current.ext === ext);
         const done = list.filter(f => f.done).length;
-        d.innerHTML = `<summary>${ext === 'pdf' ? '<i class="fa-solid fa-file-pdf" aria-hidden="true"></i>' : '<i class="fa-solid fa-image" aria-hidden="true"></i>'} ${ext}<span class="count">${done}/${list.length} có nhãn</span></summary>`;
+        const icon = { pdf: 'fa-file-pdf', csv: 'fa-file-csv', xls: 'fa-file-excel', xlsx: 'fa-file-excel', txt: 'fa-file-lines' }[ext] || 'fa-image';
+        d.innerHTML = `<summary><i class="fa-solid ${icon}" aria-hidden="true"></i> ${ext}<span class="count">${done}/${list.length} có nhãn</span></summary>`;
         d.addEventListener('toggle', () => {
           if (d.open) openFolders.add(ext); else openFolders.delete(ext);
           safeSet('label.openFolders', JSON.stringify([...openFolders]));
@@ -351,8 +352,8 @@
       setDirty(false);
     }
 
-    // Hotel / DC / Reg. / AC: hidden in both tables when no row of this PDF has a value.
-    const OPTIONAL_FIELDS = ['hotel', 'dc', 'registration', 'ac', 'crew'];
+    // DC / Reg. / AC / Crew: hidden in both tables when no row of this PDF has a value.
+    const OPTIONAL_FIELDS = ['dc', 'registration', 'ac', 'crew'];
     function hideEmptyColumns() {
       const rows = SECTIONS.flatMap(labelRows);
       for (const f of OPTIONAL_FIELDS) {
@@ -540,7 +541,7 @@
       document.querySelector('.preview-panel').classList.toggle('pdf', f.kind === 'pdf');
       if (!EMBED) history.replaceState(null, '', `/label?name=${encodeURIComponent(f.name)}`);
       const pdf = f.kind === 'pdf';
-      $('fileKind').textContent = pdf ? 'PDF duty plan' : 'Ảnh roster';
+      $('fileKind').textContent = !pdf ? 'Ảnh roster' : f.ext === 'pdf' ? 'PDF duty plan' : `Roster ${f.ext.toUpperCase()} (đọc như PDF)`;
       $('filePath').textContent = `fake-data/${f.ext}/${f.name}` + (f.duplicateOf ? `  (trùng nội dung với ${f.duplicateOf})` : '');
       $('filePath').title = $('filePath').textContent;
       $('rosterImg').style.display = pdf ? 'none' : '';
@@ -590,7 +591,8 @@
         const data = await res.json();
         renderTables(data);
         showBadge(true);
-        setStatus('ok', `labels/${f.ext}/${f.name}.json` + (data._reviewedAt ? ` — lưu lúc ${new Date(data._reviewedAt).toLocaleString()}` : ''));
+        if (data._autoLabel) setStatus('err', `labels/${f.ext}/${f.name}.json — nhãn TỰ ĐỘNG từ parser, chưa ai duyệt: kiểm tra từng dòng rồi bấm Save`);
+        else setStatus('ok', `labels/${f.ext}/${f.name}.json` + (data._reviewedAt ? ` — lưu lúc ${new Date(data._reviewedAt).toLocaleString()}` : ''));
         if (REVIEW && f.kind === 'image') await loadReview();
       } catch (e) {
         setStatus('err', 'Lỗi tải nhãn: ' + e.message);
@@ -700,7 +702,7 @@
       const wanted = PARAMS.get('name'); // /label?name=<file>
       let start = files.find(f => f.name === wanted);
       if (!start && EMBED && wanted) {
-        start = { name: wanted, ext: extOf(wanted), kind: extOf(wanted) === 'pdf' ? 'pdf' : 'image', labeled: true, done: true, duplicateOf: null };
+        start = { name: wanted, ext: extOf(wanted), kind: ['pdf', 'csv', 'xls', 'xlsx', 'txt'].includes(extOf(wanted)) ? 'pdf' : 'image', labeled: true, done: true, duplicateOf: null };
       }
       if (start && start.duplicateOf) $('showDups').checked = true;
       renderTree();

@@ -14,7 +14,7 @@
  *     "01/07/2024") set the day of the rows after them;
  *   - a page without any date after the days were read (statistics, overtime) adds nothing.
  * Document facts come from the parser's helpers (period, time-zone note, legend,
- * hotel table). How bare durations are written ("[Blk Hrs 3:25]") is learned from
+ * hotel table). How bare durations are written ("[Block: 3:25]") is learned from
  * the labels (`conventions`), keyed by the column header above them;
  * conventions.ocr (roster images): airport codes read with digits are repaired.
  *
@@ -24,8 +24,9 @@
  */
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { findPeriod, findNotices, findHotels, findLegend, findGridLegend, findOtherCrew, setDutyCrews, findCrewIdLists, setFlightCrews, findTrainings, findMemos, findHotelStays, PLANNED_RE, MONTHS, formatTime } from './pdf-roster-parser.js';
+import { hotelAsEvent, hotelFromEvent, findPeriod, findNotices, findHotels, findLegend, findGridLegend, findOtherCrew, setDutyCrews, findCrewIdLists, setFlightCrews, findTrainings, isTrainingOf, findMemos, findHotelStays, PLANNED_RE, MONTHS, formatTime } from './pdf-roster-parser.js';
 import { repairImageRows } from './roster-parser.js';
+import { looseTime } from './table-roster-parser.js';
 
 const HEADER_WORDS = new Set(JSON.parse(fs.readFileSync(fileURLToPath(new URL('./pdf-header-words.json', import.meta.url)), 'utf8')));
 /** Column-header words: the base list plus those the model learned from labeled layouts (conventions.headerWords). */
@@ -54,11 +55,15 @@ export function toLines(tokens, tol = 1.5) {
   return lines;
 }
 
-/** Header lines of a page: several known column-header words, most of the line (a word tagged as a value is not a header). */
+/**
+ * Header lines of a page: several known column-header words, most of the line (a word tagged as a value is not a header).
+ * The page's first line may also be a spreadsheet export's header: many known words among dozens of columns
+ * no roster reads ("Mountain Landings > 2000m").
+ */
 export function headerLines(lines, words = HEADER_WORDS) {
-  return lines.filter((l) => {
+  return lines.filter((l, k) => {
     const hits = l.tokens.filter(t => words.has(t.t.toLowerCase()) && (!t.field || t.field === 'O')).length;
-    return hits >= 3 && hits >= 0.5 * l.tokens.length;
+    return hits >= 3 && (hits >= 0.5 * l.tokens.length || (k === 0 && hits >= 8));
   });
 }
 
@@ -136,7 +141,9 @@ export function parseDateText(text) {
   if (spaced) {
     Object.assign(out, { day: +spaced[1], month: MONTHS.indexOf(spaced[2]) });
     if (spaced[3]) out.year = +spaced[3] % 100;
-  } else if ((m = /(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})/.exec(text))) Object.assign(out, { day: +m[1], month: +m[2] - 1, year: +m[3] % 100 });
+  } else if ((m = new RegExp(`(${MONTHS.join('|')})[a-z]*\\.?\\s+(\\d{1,2}),?\\s+(\\d{4})(?!\\d)`).exec(text))) {
+    Object.assign(out, { day: +m[2], month: MONTHS.indexOf(m[1]), year: +m[3] % 100 }); // "Jun 21 2024"
+  } else if ((m = /(\d{1,2})[/.-](\d{1,2})[/.-](\d{4}|\d{2})(?!\d)/.exec(text))) Object.assign(out, { day: +m[1], month: +m[2] - 1, year: +m[3] % 100 }); // "22/02/24" too
   else if ((m = /(\d{1,2})([A-Z][a-z]{2})(\d{2})/.exec(text)) && MONTHS.includes(m[2])) Object.assign(out, { day: +m[1], month: MONTHS.indexOf(m[2]), year: +m[3] });
   else if ((m = /(?:^|\s)(\d{1,2})\.(\d{1,2})\.(?:\s|$)/.exec(text))) {
     Object.assign(out, { day: +m[1], month: +m[2] - 1 });
@@ -224,7 +231,9 @@ function formatTimes(span, plain, headers) {
     }
   }
   const m = span.text.match(TIME_IN_RE);
-  return m ? formatTime(m[0], plain) : span.text;
+  // table exports: "601" (06:01), "8:25PM", "2259+" (next day)
+  if (!m || /^\d{1,4}\+$/.test(span.text.trim())) return looseTime(span.text.trim(), plain) || span.text;
+  return formatTime(m[0], plain);
 }
 
 /**
@@ -640,8 +649,14 @@ export function assembleRows(tagPages, pdfPages = [], conventions = {}) {
     } });
   });
   if (pdfPages.length) joinDocumentTables(written, pdfPages, { crewOf, dayCodes, legend, conventions });
+  // given out with the hotel night as an event of its own (hotelAsEvent): a hotel code on an event's line is the night after it
   const out = { published: [], planned: [] };
-  for (const w of written) out[w.section].push(w.row);
+  for (const { section, row } of written) {
+    if (row.hotel && row.duty) {
+      out[section].push(hotelAsEvent({ ...row, hotel: '' }));
+      out[section].push(hotelAsEvent({ ...Object.fromEntries(Object.keys(row).map(k => [k, ''])), date: row.date, day: row.day, hotel: row.hotel, dep: row.arr || row.dep }));
+    } else out[section].push(hotelAsEvent(row));
+  }
   if (conventions.ocr) repairImageRows(out); // OCR slips the image parser knows ("CHECK-TN", "CI9", "CRI" for CRL)
   return out;
 }
@@ -680,7 +695,7 @@ function joinDocumentTables(written, pdfPages, { crewOf, dayCodes, legend, conve
   // compact NetLine plans: crew ids per flight number under the days ("992 Cockpit:01736 03912")
   setFlightCrews(written.map(w => w.row), findCrewIdLists(pdfPages));
   for (const t of findTrainings(pdfPages)) {
-    const w = written.find(x => x.ymd != null && ddmmyyyy(x.ymd) === t.date && (x.row.duty || '').replace(/^[A-Z]*0*/, '') === t.duty.replace(/^[A-Z]*0*/, ''));
+    const w = written.find(x => x.ymd != null && isTrainingOf(t, ddmmyyyy(x.ymd), x.row));
     if (w && conventions.trainingCrew?.[w.r.layout] !== 'no') w.row.crew = (w.row.crew || '') + t.crew.map(c => `[${c}]`).join('');
   }
   // hotel nights: a row "H" after the night's last row, unless the tagged words made it already
@@ -738,7 +753,7 @@ function infoText(span, headers, conventions) {
 
 /**
  * What a labeled file teaches about its layout (tagPages with the true tags):
- *   duration:   how a bare duration in an info column is written ("3:25" under "Blk" -> "[Blk Hrs {}]")
+ *   duration:   how a bare duration in an info column is written ("3:25" under "Blk" -> "[Block: {}]")
  *   wrap:       how other info text is written, per layout and column ("Requested Day Off" -> "[{duty}: {}]")
  *   dateAnchor: whether an event belongs to the date above it ('previous') or the nearest one ('center'), per layout
  *   zone:       the zone letter of times printed plain, per note of the document ("All times in Local Station" -> L)
@@ -746,7 +761,7 @@ function infoText(span, headers, conventions) {
  */
 export function learnConventions(tagPages, label, pdfPages = []) {
   const duration = {}, wrap = {}, dateAnchor = {}, zone = {}, headerWords = {}, place = {}, legendTag = {}, crewShapes = {}, dayWide = {}, afterPeriod = {}, trainingCrew = {};
-  const rowsOf = sec => label[sec] || [];
+  const rowsOf = sec => (label[sec] || []).map(hotelFromEvent); // hotel nights as the words are tagged
   const vote = (obj, key, val) => { const seen = (obj[key] ||= {}); seen[val] = (seen[val] || 0) + 1; };
   // Column headers: the line right above a page's first row, 3+ words none of which belongs to a row,
   // most of them standing over a column of row values (a crew list or a title above the table does not).
@@ -758,6 +773,7 @@ export function learnConventions(tagPages, label, pdfPages = []) {
     if (!above || lines[first].y - above.y > 40 || above.tokens.length < 3 || above.tokens.some(t => t.field !== 'O')) continue;
     const values = lines.slice(first, first + 6).flatMap(l => l.tokens.filter(t => t.field !== 'O'));
     const overColumn = above.tokens.filter(h => values.some(v => Math.abs(v.x - h.x) < 20));
+    // most of the line, or many words over columns (a spreadsheet export with dozens of unread columns)
     if (overColumn.length < 3 || overColumn.length < 0.5 * above.tokens.length) continue;
     for (const t of overColumn) { const w = t.t.toLowerCase(); if (headerWordOk(w)) headerWords[w] = (headerWords[w] || 0) + 1; }
   }

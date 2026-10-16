@@ -406,6 +406,8 @@ class Handler(BaseHTTPRequestHandler):
                 "inflight": _stats["inflight"],
                 "waiting": _stats["waiting"],
                 "maxQueue": OCR_MAX_QUEUE,
+                "rec": OCR_CUSTOM_REC or "stock",
+                "det": OCR_CUSTOM_DET or "stock",
             })
         else:
             self._send(404, {"ok": False, "error": "Not found"})

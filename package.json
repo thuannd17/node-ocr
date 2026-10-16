@@ -10,7 +10,8 @@
     "form-data": "^4.0.6",
     "multer": "^2.4.0",
     "pdfjs-dist": "^4.10.38",
-    "sharp": "^0.35.5"
+    "sharp": "^0.35.5",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "scripts": {
     "start": "node --env-file=.env index.js",
@@ -18,10 +19,11 @@
     "ocr-server": ".\\.venv\\Scripts\\python -u scripts/ocr_server.py",
     "ocr:check": ".\\.venv\\Scripts\\python scripts/ocr_healthcheck.py",
     "audit-labels": "node --env-file=.env scripts/audit-labels.mjs",
-    "benchmark": "node --env-file=.env scripts/benchmark.mjs",
-    "benchmark:pdf": "node --env-file=.env scripts/benchmark-pdf.mjs",
+    "check:autofill": "node --env-file=.env scripts/check-autofill.mjs",
     "benchmark:model": "node --env-file=.env scripts/benchmark-model.mjs",
+    "benchmark:ocr": "node --env-file=.env scripts/benchmark-ocr.mjs",
     "parse-pdf": "node --env-file=.env scripts/parse-pdf.mjs",
+    "auto-label:tables": "node --env-file=.env scripts/auto-label-tables.mjs",
     "build-recognition-groundtruth": "node --env-file=.env scripts/build-recognition-groundtruth.mjs",
     "kfold-recognition": "node --env-file=.env scripts/kfold-recognition.mjs",
     "retrain-check": "node --env-file=.env scripts/retrain-check.mjs",

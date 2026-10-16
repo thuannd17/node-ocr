@@ -7,7 +7,8 @@ import { fileURLToPath } from 'node:url';
 import multer from 'multer';
 
 import { alignRows, normalizeField, compareSection } from '../services/benchmark.js';
-import { runModelBenchmark } from '../services/model-benchmark.js';
+import { runModelBenchmark, labeledCounts, FILE_TYPES } from '../services/model-benchmark.js';
+import { runOcrBenchmark } from '../services/ocr-benchmark.js';
 import { ocrLines, extractWithPaddleOCR } from '../services/paddle-ocr.js';
 import { extractImageWithModel, modelInfo } from '../services/pdf-ai-extract.js';
 import { saveLabelResult, savePredictedResult } from '../services/result-cache.js';
@@ -103,6 +104,7 @@ const upload = multer({
 
 // Upload ảnh rồi OCR (PaddleOCR + parser).
 router.post('/ocr/upload', upload.single('image'), async (req, res) => {
+  let finalPath = null; // the temp file, also removed when reading fails
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'Vui lòng chọn ảnh' });
@@ -113,7 +115,7 @@ router.post('/ocr/upload', upload.single('image'), async (req, res) => {
 
     // Ensure temp file has the original extension (PaddleOCR needs it)
     const origExt = path.extname(req.file.originalname);
-    let finalPath = tempPath;
+    finalPath = tempPath;
     if (origExt && !tempPath.toLowerCase().endsWith(origExt.toLowerCase())) {
       finalPath = tempPath + origExt;
       fs.renameSync(tempPath, finalPath);
@@ -413,9 +415,11 @@ router.post('/benchmark/stop', (req, res) => {
   return res.json({ ok: true, runId, stopping: true });
 });
 
-// AI model over every labeled image and PDF (services/model-benchmark.js), streamed per file.
-// Stop with POST /api/benchmark/stop?runId=….
-router.get('/benchmark/model/stream', async (req, res) => {
+/**
+ * Runs one benchmark as a server-sent event stream (start, file per file, done | error);
+ * stop it with POST /api/benchmark/stop?runId=… or by closing the stream.
+ */
+async function streamBenchmark(req, res, run) {
   const runId = String(req.query.runId || `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`);
   if (activeBenchmarks.has(runId)) return res.status(409).json({ error: `Benchmark runId already active: ${runId}` });
   const runState = { runId, stopRequested: false, startedAt: Date.now(), stoppedAt: null };
@@ -431,10 +435,8 @@ router.get('/benchmark/model/stream', async (req, res) => {
   res.flushHeaders?.();
   const heartbeat = setInterval(() => { if (!closed) res.write(': keep-alive\n\n'); }, 15000);
   req.on('close', () => { closed = true; runState.stopRequested = true; clearInterval(heartbeat); });
-  const kinds = ['image', 'pdf'].filter(k => !req.query.kind || req.query.kind === k);
   try {
-    await runModelBenchmark({
-      kinds,
+    await run({
       shouldStop: () => closed || runState.stopRequested,
       onEvent: (evt) => send(evt.type, evt),
     });
@@ -445,6 +447,22 @@ router.get('/benchmark/model/stream', async (req, res) => {
     activeBenchmarks.delete(runId);
     if (!closed) res.end();
   }
+}
+
+// Labeled files per type, for the /benchmark choices: { image: 75, pdf: 74, csv: 20, ... }
+router.get('/benchmark/types', (req, res) => {
+  res.json({ types: FILE_TYPES, counts: labeledCounts() });
+});
+
+// Text recognition alone: PaddleOCR on every labeled image (services/ocr-benchmark.js).
+router.get('/benchmark/ocr/stream', (req, res) => streamBenchmark(req, res, (opts) => runOcrBenchmark(opts)));
+
+// AI model over the labeled files of the chosen types (?types=image,pdf,csv; default all),
+// as /upload reads them (services/model-benchmark.js).
+router.get('/benchmark/model/stream', (req, res) => {
+  const asked = String(req.query.types || '').split(',').map(t => t.trim().toLowerCase()).filter(t => FILE_TYPES.includes(t));
+  const types = asked.length ? asked : FILE_TYPES;
+  return streamBenchmark(req, res, (opts) => runModelBenchmark({ types, ...opts }));
 });
 
 export default router;

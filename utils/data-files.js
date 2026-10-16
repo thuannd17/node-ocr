@@ -13,7 +13,9 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 
 export const IMAGE_EXTS = ['jpg', 'jpeg', 'png', 'jfif', 'bmp'];
-export const PDF_EXTS = ['pdf'];
+// Kind 'pdf' = a file read from its text, not by OCR: PDFs and rosters exported as
+// CSV / Excel / plain text (services/table-text.js lays those out like a PDF page).
+export const PDF_EXTS = ['pdf', 'csv', 'xls', 'xlsx', 'txt'];
 
 /** 'jpg' for 'x.JPG' */
 export const extOf = (name) => path.extname(String(name)).slice(1).toLowerCase();
