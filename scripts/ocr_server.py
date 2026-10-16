@@ -299,6 +299,24 @@ def _append_from_legacy_page(page, lines):
             continue
         lines.append({"text": text, "confidence": score, "box": _to_box(box)})
 
+def render_pdf_page(path, page_no, dpi):
+    """Render one page (1-based) of a PDF to a temp PNG for OCR (image-only
+    PDFs, e.g. a duty plan printed from a browser). Returns (png, pages, px per pt)."""
+    import pypdfium2 as pdfium
+    pdf = pdfium.PdfDocument(path)
+    try:
+        count = len(pdf)
+        if not 1 <= page_no <= count:
+            raise ValueError(f"page {page_no} out of range 1..{count}")
+        scale = dpi / 72.0
+        image = pdf[page_no - 1].render(scale=scale).to_pil().convert("RGB")
+        fd, png = tempfile.mkstemp(suffix=".png")
+        os.close(fd)
+        image.save(png, "PNG")
+        return png, count, scale
+    finally:
+        pdf.close()
+
 def run_ocr(path):
     engine = get_engine()
     width = height = None
@@ -431,8 +449,16 @@ class Handler(BaseHTTPRequestHandler):
             self._send(503, {"ok": False, "busy": True, "inflight": inflight_now, "maxQueue": OCR_MAX_QUEUE,
                              "error": f"OCR server busy ({inflight_now} requests in flight)"})
             return
+        pdf_info = {}
+        pdf_png = None
         try:
-            lines, width, height, timing = run_ocr(img_path)
+            ocr_path = img_path
+            if img_path.lower().endswith(".pdf"):
+                # {"path": "x.pdf", "page": 1, "dpi": 200}: OCR one rendered page.
+                pdf_png, count, scale = render_pdf_page(img_path, int(req.get("page") or 1), int(req.get("dpi") or 200))
+                ocr_path = pdf_png
+                pdf_info = {"page": int(req.get("page") or 1), "pageCount": count, "scale": scale}
+            lines, width, height, timing = run_ocr(ocr_path)
             elapsed = int((time.time() - t0) * 1000)
             with _stats_lock:
                 _stats["served"] += 1
@@ -443,13 +469,17 @@ class Handler(BaseHTTPRequestHandler):
             print(f"[ocr-server] {os.path.basename(img_path)} -> {len(lines)} lines in {elapsed}ms "
                   f"(queue {timing['queueMs']}ms, infer {timing['inferMs']}ms, still waiting {waiting_now})")
             self._send(200, {"ok": True, "path": img_path, "width": width, "height": height, "lineCount": len(lines),
-                             "elapsedMs": elapsed, "queueMs": timing["queueMs"], "inferMs": timing["inferMs"], "lines": lines})
+                             "elapsedMs": elapsed, "queueMs": timing["queueMs"], "inferMs": timing["inferMs"],
+                             **pdf_info, "lines": lines})
         except Exception as e:
             _stat_add(failed=1)
             traceback.print_exc()
             self._send(500, {"ok": False, "error": str(e)})
         finally:
             _stat_add(inflight=-1)
+            if pdf_png and os.path.exists(pdf_png):
+                try: os.remove(pdf_png)
+                except OSError: pass
     def log_message(self, fmt, *args): pass
 
 

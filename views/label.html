@@ -5,254 +5,758 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Roster Label Tool</title>
   <link rel="stylesheet" href="/assets/app.css">
+  <link rel="stylesheet" href="/assets/fontawesome/css/all.min.css">
+  <script>
+    // /label?embed=1&name=<file>: only the viewer popup, shown inside another page's
+    // iframe (the benchmark's "Xem & sửa"); closing it tells that page.
+    if (new URLSearchParams(location.search).has('embed')) document.documentElement.classList.add('embed');
+  </script>
   <style>
     .page-header .todo { font-size: 13px; color: var(--muted); }
-    .label-nav { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 12px 16px; margin-bottom: 12px; }
-    .label-nav .progress { font-size: 13px; color: var(--muted); min-width: 60px; text-align: center; }
-    .label-nav select { padding: 6px 8px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px; max-width: 420px; }
-    button { cursor: pointer; border: none; border-radius: 6px; padding: 6px 12px; font-size: 14px; background: var(--primary); color: white; }
+    button { cursor: pointer; border: none; border-radius: 6px; padding: 6px 12px; font-size: 13px; background: var(--primary); color: white; }
     button:hover { background: var(--primary-dark); }
+    button:disabled { opacity: .5; cursor: default; }
     button.secondary { background: var(--secondary); }
     button.secondary:hover { background: var(--secondary-dark); }
-    button.danger { background: var(--danger); }
-    button.danger:hover { background: var(--danger-dark); }
-    input.json-input { width: 100%; }
-    .label-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-    @media (max-width: 900px) { .label-grid { grid-template-columns: 1fr; } }
-    .panel { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 12px; display: flex; flex-direction: column; gap: 8px; }
-    .panel h2 { margin: 0; font-size: 14px; color: #555; font-weight: 600; }
-    .panel img { max-width: 100%; object-fit: contain; align-self: center; border: 1px solid #eee; }
-    .editor-wrap { flex: 1; display: flex; flex-direction: column; min-height: 0; }
-    textarea { flex: 1; width: 100%; font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 12px; resize: none; padding: 8px; border: 1px solid #ddd; border-radius: 6px; }
-    .toolbar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
-    .toolbar select { padding: 4px 8px; border: 1px solid #ddd; border-radius: 4px; }
-    .status { font-size: 12px; padding: 4px 8px; min-height: 18px; }
-    .status.ok { color: #2a7d2a; }
-    .status.err { color: #c33; }
-    .status.busy { color: #888; }
-    .button-row { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+    button.small { padding: 3px 8px; font-size: 12px; }
+
+    .panel { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 12px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+    .panel h2 { margin: 0; font-size: 14px; color: #555; font-weight: 600; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+
+    /* File tree: the whole page; a file opens in the viewer popup */
+    .tree-tools { display: flex; gap: 8px 16px; align-items: center; flex-wrap: wrap; }
+    .tree-tools input[type=search] { padding: 6px 8px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px; width: 260px; max-width: 100%; }
+    .tree-tools label { font-size: 12px; color: var(--muted); display: flex; gap: 6px; align-items: center; }
+    .tree-tools .spacer { flex: 1; }
+    .tree-tools .status { padding: 0; }
+    .tree { font-size: 13px; margin: 0; padding: 0; list-style: none; }
+    .tree ul { list-style: none; margin: 0; padding-left: 16px; border-left: 1px dashed #d5dae2; margin-left: 7px; }
+    .tree ul.files { columns: 300px; column-gap: 16px; padding-top: 2px; padding-bottom: 6px; }
+    .tree ul.files > li { break-inside: avoid; }
+    .tree summary { cursor: pointer; padding: 3px 4px; border-radius: 4px; user-select: none; display: flex; gap: 6px; align-items: center; }
+    .tree summary:hover { background: #f0f3f8; }
+    .tree summary .count { margin-left: auto; font-size: 11px; color: var(--muted); }
+    .tree .file { display: flex; gap: 6px; align-items: center; padding: 2px 4px; border-radius: 4px; cursor: pointer; white-space: nowrap; }
+    .tree .file:hover { background: #f0f3f8; }
+    .tree .file.active { background: #dce9fb; }
+    .tree .file .fname { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; }
+    .tree .file.dup .fname { color: #999; }
+    .tree .file .dirty-dot { color: #e08a00; font-weight: 700; }
+    .tree .file .del-file { margin-left: auto; visibility: hidden; background: transparent; color: #c33; padding: 0 6px; font-size: 13px; line-height: 18px; }
+    .tree .file:hover .del-file, .tree .file .del-file:focus-visible { visibility: visible; }
+    .tree .file .del-file:hover { background: #fde2e2; }
+    .tree .empty { color: var(--muted); font-size: 12px; padding: 6px; }
+
+    /* Viewer popup: file on the left, its label tables on the right */
+    .viewer { position: fixed; inset: 0; z-index: 1000; background: rgba(20, 28, 42, .55); display: flex; padding: 14px; }
+    .viewer[hidden] { display: none; }
+    .viewer-box { background: var(--bg); border-radius: 10px; box-shadow: 0 10px 40px rgba(0,0,0,.35); flex: 1; display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
+    .viewer-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 8px 12px; background: var(--card); border-bottom: 1px solid var(--border); }
+    .viewer-head .title { display: flex; gap: 8px; align-items: center; min-width: 0; flex: 1; }
+    .viewer-head .title b { white-space: nowrap; font-size: 14px; color: var(--nav-bg); }
+    .viewer-head .pos { font-size: 12px; color: var(--muted); white-space: nowrap; }
+    .viewer-head .close { background: transparent; color: #555; font-size: 22px; line-height: 1; padding: 2px 8px; }
+    .viewer-head .close:hover { background: #eceff3; }
+    .viewer-body { --split: 42%; flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, var(--split)) 12px minmax(0, 1fr); padding: 10px; gap: 0; }
+    .viewer-body > .panel { min-height: 0; overflow: auto; }
+    .splitter { cursor: col-resize; border-radius: 4px; position: relative; touch-action: none; }
+    .splitter::after { content: ''; position: absolute; left: 5px; top: calc(50% - 24px); width: 2px; height: 48px; border-radius: 1px; background: #b8c2d1; }
+    .splitter:hover, .splitter.dragging { background: #d6e1f1; }
+    @media (max-width: 900px) {
+      .viewer { padding: 0; }
+      .viewer-box { border-radius: 0; }
+      .viewer-body { grid-template-columns: 1fr; grid-template-rows: minmax(240px, 40%) minmax(0, 1fr); gap: 8px; overflow: hidden; }
+      .splitter { display: none; }
+    }
+    .preview-panel img { max-width: 100%; align-self: flex-start; border: 1px solid #eee; cursor: zoom-in; }
+    .preview-panel img.zoomed { max-width: none; cursor: zoom-out; }
+    .preview-panel iframe { width: 100%; flex: 1; min-height: 400px; border: 1px solid #eee; }
+    .preview-panel.pdf { overflow: hidden; }
+    body.viewer-open { overflow: hidden; }
+    .file-path { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 11.5px; color: var(--muted); word-break: break-all; font-weight: 400; }
     .labeled-badge { display: inline-block; padding: 1px 6px; border-radius: 8px; font-size: 10px; font-weight: 600; }
     .labeled-badge.yes { background: #d3f3d3; color: #2a7d2a; }
     .labeled-badge.no  { background: #ffe0e0; color: #c33; }
 
-    /* Autocomplete select for jumping */
-    .file-select { flex: 1; }
+    /* Table editor (same look as /upload) */
+    .toolbar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+    .toolbar .spacer { flex: 1; }
+    .toolbar input { padding: 4px 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; }
+    .status { font-size: 12px; padding: 2px 0; min-height: 18px; }
+    .status.ok { color: #2a7d2a; }
+    .status.err { color: #c33; }
+    .status.busy { color: #888; }
+    .section-header { font-size: 15px; font-weight: 700; margin: 8px 0 4px; color: #333; display: flex; align-items: center; gap: 10px; }
+    .section-header.planned { color: #e08a00; }
+    .section-header .n { font-size: 12px; font-weight: 400; color: var(--muted); }
+    .table-container { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { padding: 6px 8px; border: 1px solid #ddd; text-align: left; }
+    th { background: #f5f5f5; font-weight: 600; white-space: nowrap; }
+    tbody tr:nth-child(even) { background: #f9f9f9; }
+    td.idx { color: #999; font-size: 11px; text-align: right; width: 1%; user-select: none; }
+    td[contenteditable="true"] { cursor: text; outline: none; min-width: 40px; }
+    td[contenteditable="true"]:hover { background: #fff3e0; }
+    td[contenteditable="true"]:focus { background: #fff9c4 !important; box-shadow: inset 0 0 0 2px #ffc107; }
+    td[contenteditable="true"]:not([data-field="info"]):not([data-field="crew"]) { white-space: nowrap; }
+    td[data-field="info"], td[data-field="crew"] { font-size: 11px; color: #555; min-width: 160px; }
+    /* optional PDF columns with no value in this file (shown again with "Hiện mọi cột") */
+    table.hide-hotel [data-field="hotel"], table.hide-dc [data-field="dc"],
+    table.hide-registration [data-field="registration"], table.hide-ac [data-field="ac"], table.hide-crew [data-field="crew"] { display: none; }
+    td.actions { white-space: nowrap; width: 1%; }
+    td.actions button { padding: 1px 7px; font-size: 13px; margin-left: 2px; }
+    td.actions button.del { background: var(--danger); }
+    td.actions button.del:hover { background: var(--danger-dark); }
+    .empty-section { color: #999; font-style: italic; padding: 12px; text-align: center; border: 1px dashed #ddd; border-radius: 6px; }
+    /* Embedded (benchmark popup): no page behind the viewer, no file stepping */
+    html.embed, html.embed body { background: transparent; }
+    html.embed .topnav, html.embed main.page, html.embed #prev, html.embed #next, html.embed #viewerPos { display: none; }
+
+    /* Review (?review=1): the AI model's reading compared with this label */
+    .review-note { font-size: 12px; color: #5d4037; background: #fff8e1; border: 1px solid #ffe082; border-radius: 6px; padding: 6px 10px; }
+    .review-note[hidden] { display: none; }
+    td.ocr-diff { background: #fff3cd; box-shadow: inset 0 0 0 2px #f0ad4e; }
+    tr.ocr-missing td[data-field] { background: #e3f2fd; }
+    tr.ocr-hint td { font-size: 11px; color: #8a5a00; background: #fffbea !important; padding-top: 1px; padding-bottom: 3px; border-top: none; }
+    tr.ocr-hint td.use { cursor: pointer; text-decoration: underline dotted; }
+    tr.ocr-hint td.use:hover { background: #fff3cd !important; }
+    tr.ocr-hint.extra td[data-field] { color: #a33; background: #fdecea !important; text-decoration: line-through; }
+    tr.ocr-hint td.idx { color: #b08a3a; }
+    .json-view { display: none; }
+    .json-view.open { display: block; }
+    .json-view textarea { width: 100%; min-height: 220px; font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 12px; padding: 8px; border: 1px solid #ddd; border-radius: 6px; resize: vertical; }
   </style>
 </head>
 <body>
   <script src="/assets/nav.js"></script>
   <main class="page">
   <div class="page-header">
-    <h1>🏷️ Label Tool</h1>
+    <h1><i class="fa-solid fa-tags" aria-hidden="true"></i> Label Tool</h1>
     <span class="todo" id="todoCount"></span>
-    <p class="subtitle">Nhãn chuẩn (ground truth) để đo độ chính xác và train model.</p>
+    <p class="subtitle">Nhãn chuẩn (ground truth) để đo độ chính xác và train model. File ở <code>fake-data/&lt;đuôi&gt;/</code>, nhãn ở <code>labels/&lt;đuôi&gt;/&lt;file&gt;.json</code>.</p>
   </div>
 
-  <div class="card label-nav">
-    <button class="secondary" id="prev">← Prev</button>
-    <span class="progress" id="progress">0 / 0</span>
-    <button id="next">Next →</button>
-    <select class="file-select" id="fileSelect"></select>
-    <button id="autoFill">⚡ Auto-fill từ OCR</button>
-  </div>
-
-  <div class="label-grid">
-    <div class="panel">
-      <h2>Ảnh roster (fake-data/<span id="currentFile">—</span>) <span class="labeled-badge no" id="labeledBadge">chưa label</span></h2>
-      <img id="rosterImg" alt="roster" />
+  <!-- File tree: click a file to open it in the viewer -->
+  <div class="panel">
+    <div class="tree-tools">
+      <input type="search" id="treeSearch" placeholder="Tìm theo tên file…" aria-label="Tìm theo tên file" />
+      <label><input type="checkbox" id="onlyTodo" /> Chỉ file chưa có nhãn</label>
+      <label><input type="checkbox" id="showDups" /> Hiện ảnh trùng nội dung</label>
     </div>
+    <ul class="tree" id="tree"><li class="empty">Đang tải…</li></ul>
+  </div>
+  </main>
 
-    <div class="panel">
-      <h2>Ground-truth JSON</h2>
-       <div class="toolbar">
-         <button class="secondary" id="prettyBtn">Pretty</button>
-         <button class="secondary" id="clearBtn">Clear</button>
-         <button class="secondary" id="copyBtn">Copy</button>
-         <span class="file-size" id="fileSize" style="margin-left: auto;"></span>
-       </div>
-      <div class="editor-wrap">
-        <textarea id="labelArea" spellcheck="false" placeholder='{
-  "published": [
-    { "date": "12 Jun 20", "day": "FRI", "duty": "OFF(Z)", "dep": "HAN", "begin": "00:00 Z", "end": "23:59 Z", "arr": "HAN" }
-  ],
-  "planned": []
-}'></textarea>
-        <span class="status" id="status"></span>
-        <div class="button-row">
-          <button class="secondary" id="reloadBtn">Reload</button>
-          <button id="saveBtn">💾 Lưu label</button>
+  <!-- Viewer popup: the file and its ground truth as editable tables -->
+  <div class="viewer" id="viewer" hidden role="dialog" aria-modal="true" aria-labelledby="fileKind">
+    <div class="viewer-box">
+      <div class="viewer-head">
+        <div class="title">
+          <b id="fileKind">Ảnh roster</b>
+          <span class="labeled-badge no" id="labeledBadge"></span>
+          <span class="file-path" id="filePath"></span>
+        </div>
+        <span class="pos" id="viewerPos"></span>
+        <button class="secondary small" id="prev" title="File trước (Alt+↑)"><i class="fa-solid fa-arrow-up" aria-hidden="true"></i> Trước</button>
+        <button class="secondary small" id="next" title="File sau (Alt+↓)"><i class="fa-solid fa-arrow-down" aria-hidden="true"></i> Sau</button>
+        <button class="close" id="closeViewer" title="Đóng (Esc)" aria-label="Đóng"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
+      </div>
+      <div class="viewer-body" id="viewerBody">
+        <div class="panel preview-panel">
+          <img id="rosterImg" alt="roster" title="Bấm để phóng to / thu nhỏ" style="display:none" />
+          <iframe id="rosterPdf" title="PDF" style="display:none"></iframe>
+        </div>
+        <div class="splitter" id="splitter" title="Kéo để đổi độ rộng"></div>
+        <div class="panel table-panel">
+          <div class="toolbar">
+            <select id="engineSel" title="Cách đọc file để đề xuất nhãn" style="padding:3px 6px; border:1px solid #ddd; border-radius:4px; font-size:12px">
+              <option value="parser">Parser</option>
+              <option value="model">AI model</option>
+            </select>
+            <button class="small" id="autoFill" title="Đọc file bằng cách đã chọn để đề xuất nhãn (thay bảng hiện tại)"><i class="fa-solid fa-bolt" aria-hidden="true"></i> Auto-fill</button>
+            <span class="spacer"></span>
+            <button class="secondary small" id="jsonBtn"><i class="fa-solid fa-code" aria-hidden="true"></i> JSON</button>
+            <button class="secondary small" id="reloadBtn" title="Bỏ thay đổi, tải lại nhãn đã lưu"><i class="fa-solid fa-rotate-left" aria-hidden="true"></i> Reload</button>
+            <button class="small" id="saveBtn" title="Ctrl+S"><i class="fa-solid fa-floppy-disk" aria-hidden="true"></i> Lưu label</button>
+          </div>
+          <div class="toolbar pdf-only" style="display:none">
+            <label style="font-size:13px">Period <input id="periodInput" placeholder="01Jul24 - 31Jul24" /></label>
+            <label style="font-size:12px; color:var(--muted)"><input type="checkbox" id="allCols" /> Hiện mọi cột</label>
+          </div>
+          <span class="status" id="status"></span>
+          <div class="review-note" id="reviewNote" hidden></div>
+
+          <div id="editor">
+            <div class="section-header">Published <span class="n" id="publishedN"></span>
+              <button class="small" data-add="published"><i class="fa-solid fa-plus" aria-hidden="true"></i> Thêm dòng</button></div>
+            <div class="table-container">
+              <table id="publishedTable"><thead><tr class="head-row"></tr></thead><tbody id="publishedBody"></tbody></table>
+              <div class="empty-section" id="publishedEmpty">Không có dòng nào</div>
+            </div>
+
+            <div class="section-header planned">Planned <span class="n" id="plannedN"></span>
+              <button class="small" data-add="planned"><i class="fa-solid fa-plus" aria-hidden="true"></i> Thêm dòng</button></div>
+            <div class="table-container">
+              <table id="plannedTable"><thead><tr class="head-row"></tr></thead><tbody id="plannedBody"></tbody></table>
+              <div class="empty-section" id="plannedEmpty">Không có dòng nào</div>
+            </div>
+
+            <div class="json-view" id="jsonView">
+              <div class="section-header">JSON sẽ lưu <span class="n">(chỉ đọc — sửa trong bảng)</span>
+                <button class="secondary small" id="copyBtn"><i class="fa-solid fa-copy" aria-hidden="true"></i> Copy</button></div>
+              <textarea id="jsonArea" readonly spellcheck="false" aria-label="JSON sẽ lưu"></textarea>
+            </div>
+          </div>
         </div>
       </div>
     </div>
   </div>
-  </main>
 
   <script>
     const $ = (id) => document.getElementById(id);
-    const files = [];
-    let currentIdx = 0;
+    const FIELDS = {
+      image: ['date', 'day', 'duty', 'dep', 'begin', 'end', 'arr'],
+      pdf: ['date', 'day', 'hotel', 'dc', 'duty', 'registration', 'dep', 'begin', 'end', 'arr', 'ac', 'crew', 'info'],
+    };
+    const TITLES = { date: 'Date', day: 'Day', hotel: 'Hotel', dc: 'DC', duty: 'Duty', registration: 'Reg.', dep: 'Dep', begin: 'Begin', end: 'End', arr: 'Arr', ac: 'AC', crew: 'Crew', info: 'Info' };
+    const SECTIONS = ['published', 'planned'];
+    const extOf = (name) => (name.match(/\.([^.]+)$/)?.[1] || '').toLowerCase();
+    // File tree marks: labeled / not labeled yet
+    const LABELED_ICON = '<i class="fa-solid fa-circle-check" style="color:#2e7d32" title="Đã có nhãn" aria-hidden="true"></i>';
+    const NEW_ICON = '<i class="fa-regular fa-circle" style="color:#9e9e9e" title="Chưa có nhãn" aria-hidden="true"></i>';
+    const PARAMS = new URLSearchParams(location.search);
+    const EMBED = PARAMS.has('embed');   // inside the benchmark's popup
+    const REVIEW = PARAMS.has('review'); // mark where the AI model's reading differs from the label
+    let savedOnce = false;               // a label was saved while embedded (the benchmark's scores are stale)
+    // Table rows of the label itself; review hint rows (OCR values) are not part of it.
+    const labelRows = (sec) => [...$(sec + 'Body').rows].filter(tr => !tr.classList.contains('ocr-hint'));
 
-    function setBusy(msg) {
-      const s = $('status');
-      s.className = 'status busy';
-      s.textContent = msg || '';
-    }
-    function setStatus(ok, msg) {
-      const s = $('status');
-      s.className = 'status ' + (ok ? 'ok' : 'err');
-      s.textContent = msg || '';
+    let files = [];        // { name, ext, kind: 'image'|'pdf', labeled, duplicateOf }
+    let current = null;    // the selected file entry
+    let dirty = false;     // table edited since load/save
+    const openFolders = new Set(JSON.parse(safeGet('label.openFolders') || '[]'));
+
+    function safeGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
+    function safeSet(k, v) { try { localStorage.setItem(k, v); } catch { /* private mode */ } }
+    const labelUrl = (f) => `${f.kind === 'pdf' ? '/api/pdf/labels' : '/api/labels'}?name=${encodeURIComponent(f.name)}`;
+    const rawUrl = (f) => `${f.kind === 'pdf' ? '/api/pdf/raw' : '/api/raw'}?name=${encodeURIComponent(f.name)}`;
+
+    function setStatus(kind, msg) { const s = $('status'); s.className = 'status ' + kind; s.textContent = msg || ''; }
+    function setDirty(v) {
+      dirty = v;
+      $('saveBtn').innerHTML = '<i class="fa-solid fa-floppy-disk" aria-hidden="true"></i> Lưu label' + (v ? ' *' : '');
+      document.querySelectorAll('.tree .file.active .dirty-dot').forEach(el => { el.textContent = v ? '●' : ''; });
+      if ($('jsonView').classList.contains('open')) refreshJson();
     }
 
-    function escapeHtml(s){
-      const m = { 38: 'amp', 60: 'lt', 62: 'gt', 34: 'quot', 39: '#039' };
-      return String(s).replace(/[&<>"']/g, (c) => '&' + m[c.charCodeAt(0)] + ';');
+    // ---------- Tree ----------
+    function visibleFiles() {
+      const q = $('treeSearch').value.trim().toLowerCase();
+      const onlyTodo = $('onlyTodo').checked, showDups = $('showDups').checked;
+      return files.filter(f => (showDups || !f.duplicateOf) && (!onlyTodo || !f.done) && (!q || f.name.toLowerCase().includes(q)));
     }
 
-    function updateProgress() {
-      $('progress').textContent = `${currentIdx + 1} / ${files.length}`;
-      const file = files[currentIdx];
-      $('currentFile').textContent = file;
-      $('fileSelect').value = String(currentIdx);
-      $('rosterImg').src = `/api/raw?name=${encodeURIComponent(file)}`;
-      loadLabel(file);
-      updateBadge(file);
-    }
-
-    function updateBadge(file) {
-      fetch(`/api/labels?name=${encodeURIComponent(file)}`)
-        .then((r) => r.status === 200)
-        .then((has) => {
-          const b = $('labeledBadge');
-          b.className = 'labeled-badge ' + (has ? 'yes' : 'no');
-          b.textContent = has ? 'đã label' : 'chưa label';
+    function renderTree() {
+      const vis = visibleFiles();
+      const byExt = new Map();
+      for (const f of vis) { if (!byExt.has(f.ext)) byExt.set(f.ext, []); byExt.get(f.ext).push(f); }
+      const tree = $('tree');
+      tree.innerHTML = '';
+      const root = document.createElement('li');
+      const det = document.createElement('details');
+      det.open = true;
+      det.innerHTML = `<summary><i class="fa-solid fa-folder-open" aria-hidden="true"></i> <b>fake-data</b><span class="count">${vis.length} file</span></summary>`;
+      const ul = document.createElement('ul');
+      const searching = !!$('treeSearch').value.trim();
+      for (const ext of [...byExt.keys()].sort()) {
+        const list = byExt.get(ext);
+        const li = document.createElement('li');
+        const d = document.createElement('details');
+        // a folder stays as the user left it; the one holding the selected file opens
+        d.open = searching || openFolders.has(ext) || (current && current.ext === ext);
+        const done = list.filter(f => f.done).length;
+        d.innerHTML = `<summary>${ext === 'pdf' ? '<i class="fa-solid fa-file-pdf" aria-hidden="true"></i>' : '<i class="fa-solid fa-image" aria-hidden="true"></i>'} ${ext}<span class="count">${done}/${list.length} có nhãn</span></summary>`;
+        d.addEventListener('toggle', () => {
+          if (d.open) openFolders.add(ext); else openFolders.delete(ext);
+          safeSet('label.openFolders', JSON.stringify([...openFolders]));
         });
+        const fl = document.createElement('ul');
+        fl.className = 'files';
+        for (const f of list) {
+          const item = document.createElement('li');
+          item.className = 'file' + (current && current.name === f.name ? ' active' : '') + (f.duplicateOf ? ' dup' : '');
+          item.title = f.name + (f.duplicateOf ? `\nTrùng nội dung với ${f.duplicateOf}` : '');
+          item.innerHTML = `<span>${f.done ? LABELED_ICON : NEW_ICON}</span><span class="fname"></span><span class="dirty-dot"></span>`
+            + '<button class="del-file" title="Xóa file này khỏi dữ liệu (cùng nhãn của nó)" aria-label="Xóa file"><i class="fa-solid fa-trash-can" aria-hidden="true"></i></button>';
+          item.querySelector('.fname').textContent = f.name;
+          item.querySelector('.del-file').addEventListener('click', (e) => { e.stopPropagation(); deleteFile(f); });
+          if (current && current.name === f.name && dirty) item.querySelector('.dirty-dot').textContent = '●';
+          item.addEventListener('click', () => selectFile(f));
+          f._el = item;
+          fl.appendChild(item);
+        }
+        d.appendChild(fl);
+        li.appendChild(d);
+        ul.appendChild(li);
+      }
+      det.appendChild(ul);
+      root.appendChild(det);
+      tree.appendChild(root);
+      if (!vis.length) tree.innerHTML = '<li class="empty">Không có file nào khớp bộ lọc.</li>';
     }
 
-    async function loadLabel(file) {
+    function updateTodo() {
+      const todo = files.filter(f => !f.duplicateOf && !f.done);
+      const pdf = todo.filter(f => f.kind === 'pdf').length;
+      $('todoCount').textContent = todo.length ? `— ${todo.length - pdf} ảnh và ${pdf} PDF chưa có nhãn` : '— tất cả đã có nhãn';
+    }
+
+    // ---------- Table editor ----------
+    function setColumns(kind) {
+      for (const tr of document.querySelectorAll('.head-row')) {
+        tr.innerHTML = '<th>#</th>' + FIELDS[kind].map(f => `<th data-field="${f}">${TITLES[f]}</th>`).join('') + '<th></th>';
+      }
+      for (const el of document.querySelectorAll('.pdf-only')) el.style.display = kind === 'pdf' ? '' : 'none';
+    }
+
+    function makeRow(row) {
+      const tr = document.createElement('tr');
+      const idx = document.createElement('td');
+      idx.className = 'idx';
+      tr.appendChild(idx);
+      for (const f of FIELDS[current.kind]) {
+        const td = document.createElement('td');
+        td.contentEditable = 'true';
+        td.dataset.field = f;
+        td.textContent = row[f] ?? '';
+        tr.appendChild(td);
+      }
+      const act = document.createElement('td');
+      act.className = 'actions';
+      act.innerHTML = '<button class="secondary" data-act="insert" title="Chèn dòng dưới" aria-label="Chèn dòng dưới"><i class="fa-solid fa-plus" aria-hidden="true"></i></button><button class="del" data-act="delete" title="Xóa dòng" aria-label="Xóa dòng"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>';
+      tr.appendChild(act);
+      return tr;
+    }
+
+    function renderTables(data) {
+      setColumns(current.kind);
+      for (const sec of SECTIONS) {
+        const body = $(sec + 'Body');
+        body.innerHTML = '';
+        for (const row of data?.[sec] || []) body.appendChild(makeRow(row));
+      }
+      $('periodInput').value = data?.period || '';
+      hideEmptyColumns();
+      renumber();
+      setDirty(false);
+    }
+
+    // Hotel / DC / Reg. / AC: hidden in both tables when no row of this PDF has a value.
+    const OPTIONAL_FIELDS = ['hotel', 'dc', 'registration', 'ac', 'crew'];
+    function hideEmptyColumns() {
+      const rows = SECTIONS.flatMap(labelRows);
+      for (const f of OPTIONAL_FIELDS) {
+        const empty = !rows.some(tr => tr.querySelector(`td[data-field="${f}"]`)?.textContent.trim());
+        for (const sec of SECTIONS) $(sec + 'Table').classList.toggle(`hide-${f}`, current.kind === 'pdf' && empty && !$('allCols').checked);
+      }
+    }
+
+    function renumber() {
+      for (const sec of SECTIONS) {
+        const rows = labelRows(sec);
+        rows.forEach((tr, i) => { tr.cells[0].textContent = i + 1; });
+        $(sec + 'N').textContent = `${rows.length} dòng`;
+        $(sec + 'Empty').style.display = rows.length ? 'none' : '';
+        $(sec + 'Table').style.display = rows.length ? '' : 'none';
+      }
+    }
+
+    // ---------- Review: the AI model's reading vs this label (images) ----------
+    // GET /api/review pairs the model's rows with the label rows (the benchmark's own
+    // alignment). The table stays the label: a cell where the model differs is marked,
+    // with the model's value in a small row underneath (click it to take it); a label
+    // row the model missed is blue; a row only the model has is shown struck through and
+    // "+ nhãn" adds it. Nothing changes the label until it is saved.
+    function hintRow(row, fields, extra) {
+      const tr = document.createElement('tr');
+      tr.className = 'ocr-hint' + (extra ? ' extra' : '');
+      tr.innerHTML = '<td class="idx">AI</td>';
+      for (const f of FIELDS[current.kind]) {
+        const td = document.createElement('td');
+        td.dataset.field = f;
+        if (fields.includes(f)) {
+          td.textContent = row[f] || (extra ? '' : '(trống)');
+          td.dataset.value = row[f] || '';
+          if (!extra) { td.className = 'use'; td.title = 'Bấm để dùng giá trị AI model đọc này cho nhãn'; }
+        }
+        tr.appendChild(td);
+      }
+      const act = document.createElement('td');
+      act.className = 'actions';
+      if (extra) act.innerHTML = '<button class="secondary" data-act="adopt" title="Thêm dòng này vào nhãn"><i class="fa-solid fa-plus" aria-hidden="true"></i> nhãn</button>';
+      tr.appendChild(act);
+      tr._ocr = row;
+      return tr;
+    }
+
+    function useOcrValue(td) {
+      const target = td.parentElement._for?.querySelector(`td[data-field="${td.dataset.field}"]`);
+      if (!target) return;
+      target.textContent = td.dataset.value;
+      target.classList.remove('ocr-diff');
+      td.classList.remove('use');
+      td.style.color = '#2e7d32';
+      setDirty(true);
+    }
+
+    function adoptOcrRow(hint) {
+      hint.replaceWith(makeRow(hint._ocr));
+      renumber();
+      setDirty(true);
+    }
+
+    async function loadReview() {
+      const f = current;
+      const note = $('reviewNote');
+      note.hidden = false;
+      note.textContent = 'Đang cho AI model đọc file để so với nhãn…';
       try {
-        const res = await fetch(`/api/labels?name=${encodeURIComponent(file)}`);
+        const res = await fetch(`/api/review?name=${encodeURIComponent(f.name)}`);
+        const data = await res.json();
+        if (f !== current) return;
+        if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
+        for (const sec of SECTIONS) {
+          const items = data.sections[sec] || [];
+          const rows = labelRows(sec);
+          if (items.filter(it => it.label).length !== rows.length) throw new Error('bảng khác nhãn đã lưu, bấm Reload');
+        }
+        for (const sec of SECTIONS) {
+          const rows = labelRows(sec);
+          let i = 0, last = null;
+          for (const it of data.sections[sec] || []) {
+            if (!it.label) { // a row only the model has: after the label row before it
+              const hint = hintRow(it.row, FIELDS[current.kind], true);
+              if (last) (last._hint || last).after(hint); else $(sec + 'Body').prepend(hint);
+              last = hint;
+              continue;
+            }
+            const tr = rows[i++];
+            last = tr;
+            if (it.kind === 'missing') { tr.classList.add('ocr-missing'); tr.title = 'AI model bỏ sót dòng này'; }
+            if (it.kind !== 'diff') continue;
+            for (const fld of it.diff) tr.querySelector(`td[data-field="${fld}"]`)?.classList.add('ocr-diff');
+            const hint = hintRow(it.row, it.diff, false);
+            hint._for = tr;
+            tr._hint = hint;
+            tr.after(hint);
+          }
+        }
+        note.textContent = `So với AI model: ${data.diffCells} ô khác (vàng; giá trị model đọc ở dòng nhỏ bên dưới, bấm để lấy nếu nhãn sai), `
+          + `${data.missingRows} dòng model bỏ sót (xanh), ${data.extraRows} dòng model thừa (gạch đỏ; "+ nhãn" nếu nhãn thiếu dòng đó). `
+          + 'Bảng là nhãn: chỉ đổi khi bạn sửa và Lưu.';
+      } catch (e) {
+        note.textContent = 'Không so được với AI model: ' + e.message;
+      }
+    }
+
+    function collect() {
+      const out = {};
+      if (current.kind === 'pdf') out.period = $('periodInput').value.trim() || null;
+      for (const sec of SECTIONS) {
+        out[sec] = labelRows(sec).map(tr => {
+          const row = {};
+          for (const td of tr.querySelectorAll('td[data-field]')) row[td.dataset.field] = td.textContent.trim();
+          return row;
+        }).filter(r => Object.values(r).some(Boolean)); // fully empty rows are dropped
+      }
+      return out;
+    }
+
+    function refreshJson() { $('jsonArea').value = JSON.stringify(collect(), null, 2); }
+
+    function addRow(sec, afterTr) {
+      const empty = Object.fromEntries(FIELDS[current.kind].map(f => [f, '']));
+      const tr = makeRow(empty);
+      if (afterTr) (afterTr._hint || afterTr).after(tr); else $(sec + 'Body').appendChild(tr);
+      renumber();
+      setDirty(true);
+      tr.querySelector('td[contenteditable]').focus();
+    }
+
+    for (const sec of SECTIONS) {
+      const body = $(sec + 'Body');
+      body.addEventListener('input', () => setDirty(true));
+      body.addEventListener('click', (e) => {
+        const use = e.target.closest('tr.ocr-hint td.use');
+        if (use) { useOcrValue(use); return; }
+        const btn = e.target.closest('button[data-act]');
+        if (!btn) return;
+        const tr = btn.closest('tr');
+        if (btn.dataset.act === 'insert') addRow(sec, tr);
+        else if (btn.dataset.act === 'adopt') adoptOcrRow(tr);
+        else { tr._hint?.remove(); tr.remove(); renumber(); setDirty(true); }
+      });
+      // Enter = next row, same column (adds a row at the end); Shift+Enter stays a newline-free no-op
+      body.addEventListener('keydown', (e) => {
+        const td = e.target.closest('td[contenteditable]');
+        if (!td || e.key !== 'Enter') return;
+        e.preventDefault();
+        const tr = td.parentElement, rows = labelRows(sec);
+        let next = rows[rows.indexOf(tr) + (e.shiftKey ? -1 : 1)];
+        if (!next && !e.shiftKey) { addRow(sec, tr); next = labelRows(sec)[rows.indexOf(tr) + 1]; }
+        next?.querySelector(`td[data-field="${td.dataset.field}"]`)?.focus();
+      });
+      // paste as plain text, so cells never pick up markup
+      body.addEventListener('paste', (e) => {
+        if (!e.target.closest('td[contenteditable]')) return;
+        e.preventDefault();
+        document.execCommand('insertText', false, (e.clipboardData.getData('text/plain') || '').replace(/\s*\n\s*/g, ' '));
+      });
+    }
+    document.querySelectorAll('[data-add]').forEach(b => b.addEventListener('click', () => addRow(b.dataset.add)));
+    $('periodInput').addEventListener('input', () => setDirty(true));
+    $('allCols').addEventListener('change', () => current && hideEmptyColumns());
+
+    // ---------- Selecting / loading / saving ----------
+    function confirmLeave() {
+      return !dirty || confirm('Nhãn của file này có thay đổi chưa lưu. Bỏ thay đổi?');
+    }
+
+    const viewerOpen = () => !$('viewer').hidden;
+
+    async function selectFile(f, { force = false } = {}) {
+      if (!force && viewerOpen() && current && current.name === f.name) return;
+      if (!force && viewerOpen() && !confirmLeave()) return;
+      current = f;
+      openViewer();
+      document.querySelectorAll('.tree .file.active').forEach(el => el.classList.remove('active'));
+      f._el?.classList.add('active');
+      const folder = f._el?.closest('details');
+      if (folder && !folder.open) folder.open = true;
+      f._el?.scrollIntoView({ block: 'nearest' });
+      const vis = visibleFiles(), at = vis.indexOf(f);
+      $('viewerPos').textContent = at >= 0 ? `${at + 1} / ${vis.length}` : '';
+      $('rosterImg').classList.remove('zoomed');
+      document.querySelector('.preview-panel').classList.toggle('pdf', f.kind === 'pdf');
+      if (!EMBED) history.replaceState(null, '', `/label?name=${encodeURIComponent(f.name)}`);
+      const pdf = f.kind === 'pdf';
+      $('fileKind').textContent = pdf ? 'PDF duty plan' : 'Ảnh roster';
+      $('filePath').textContent = `fake-data/${f.ext}/${f.name}` + (f.duplicateOf ? `  (trùng nội dung với ${f.duplicateOf})` : '');
+      $('filePath').title = $('filePath').textContent;
+      $('rosterImg').style.display = pdf ? 'none' : '';
+      $('rosterPdf').style.display = pdf ? 'block' : 'none';
+      if (pdf) { $('rosterImg').removeAttribute('src'); $('rosterPdf').src = rawUrl(f); }
+      else { $('rosterPdf').removeAttribute('src'); $('rosterImg').src = rawUrl(f); }
+      await loadLabel();
+    }
+
+    function openViewer() {
+      if (viewerOpen()) return;
+      $('viewer').hidden = false;
+      document.body.classList.add('viewer-open');
+    }
+
+    function closeViewer() {
+      if (!viewerOpen() || !confirmLeave()) return;
+      $('viewer').hidden = true;
+      document.body.classList.remove('viewer-open');
+      setDirty(false);
+      $('rosterPdf').removeAttribute('src');
+      $('rosterImg').removeAttribute('src');
+      if (EMBED) { parent.postMessage({ type: 'label-popup-close', name: current?.name, saved: savedOnce }, location.origin); return; }
+      history.replaceState(null, '', '/label');
+    }
+
+    function showBadge(has) {
+      const b = $('labeledBadge');
+      b.style.display = '';
+      b.className = 'labeled-badge ' + (has ? 'yes' : 'no');
+      b.textContent = has ? 'đã có nhãn' : 'chưa có nhãn';
+    }
+
+    async function loadLabel() {
+      const f = current;
+      setStatus('busy', 'Đang tải nhãn…');
+      try {
+        const res = await fetch(labelUrl(f));
+        if (f !== current) return; // another file was picked meanwhile
         if (res.status === 404) {
-          $('labelArea').value = '';
-          setStatus(false, 'Chưa có label. Sử dụng Auto-fill để VLM đề xuất.');
+          renderTables({ published: [], planned: [] });
+          showBadge(false);
+          setStatus('err', `Chưa có nhãn. Bấm Auto-fill để ${f.kind === 'pdf' ? 'parser PDF' : 'OCR'} đề xuất, hoặc thêm dòng tay.`);
           return;
         }
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const data = await res.json();
-        $('labelArea').value = JSON.stringify(data, null, 2);
-        setStatus(true, 'Đã load label.');
+        renderTables(data);
+        showBadge(true);
+        setStatus('ok', `labels/${f.ext}/${f.name}.json` + (data._reviewedAt ? ` — lưu lúc ${new Date(data._reviewedAt).toLocaleString()}` : ''));
+        if (REVIEW && f.kind === 'image') await loadReview();
       } catch (e) {
-        setStatus(false, 'Lỗi load: ' + e.message);
+        setStatus('err', 'Lỗi tải nhãn: ' + e.message);
       }
     }
 
     async function saveLabel() {
-      const file = files[ currentIdx ];
-      const raw = $('labelArea').value.trim();
-
-      if (!raw) {
-        setStatus(false, 'Nothing to save.');
-        return;
-      }
-      let parsed;
-      try { parsed = JSON.parse(raw); }
-      catch (e) { setStatus(false, 'JSON không hợp lệ: ' + e.message); return; }
-
+      if (!current) return;
+      const f = current, body = collect();
+      if (!body.published.length && !body.planned.length && !confirm('Cả hai bảng đều trống. Vẫn lưu nhãn rỗng?')) return;
+      setStatus('busy', 'Đang lưu…');
       try {
-        setBusy('Đang lưu...');
-
-        const url = `/api/labels?name=${encodeURIComponent(file)}`;
-        const res = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(parsed)
-        });
-
-        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || ('HTTP ' + res.status));
-
-        setStatus(true, 'Đã lưu labels/' + file + '.json');
-        updateBadge(file);
+        const res = await fetch(labelUrl(f), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
+        setDirty(false);
+        showBadge(true);
+        savedOnce = true;
+        if (!f.done) {
+          f.done = f.labeled = true;
+          if (f._el) f._el.firstElementChild.innerHTML = LABELED_ICON;
+          updateTodo();
+        }
+        setStatus('ok', `Đã lưu ${data.file || `labels/${f.ext}/${f.name}.json`} (${body.published.length} published, ${body.planned.length} planned)`);
       } catch (e) {
-        setStatus(false, 'Lỗi lưu: ' + e.message);
+        setStatus('err', 'Lỗi lưu: ' + e.message);
       }
     }
 
+    // Auto-fill: the parser or the AI model proposes the rows; a person checks them and saves.
     async function autoFill() {
-      const file = files[ currentIdx ];
+      if (!current) return;
+      if (dirty && !confirm('Auto-fill sẽ thay toàn bộ bảng hiện tại. Tiếp tục?')) return;
+      const f = current, engine = $('engineSel').value;
+      const byName = engine === 'model' ? 'AI model' : (f.kind === 'pdf' ? 'Parser PDF' : 'OCR + parser');
       try {
-        setBusy('Đang chạy OCR để đề xuất nhãn...');
-        const res = await fetch(`/api/predict?name=${encodeURIComponent(file)}`);
-        if (!res.ok) throw new Error('HTTP ' + res.status);
+        setStatus('busy', `${byName} đang đọc file để đề xuất nhãn…`);
+        const url = f.kind === 'pdf'
+          ? `/api/pdf/parse?name=${encodeURIComponent(f.name)}&engine=${engine}`
+          : `/api/predict?name=${encodeURIComponent(f.name)}&engine=${engine}`;
+        const res = await fetch(url);
         const data = await res.json();
-        const strip = (rows) => (rows || []).map(({ date, day, duty, dep, begin, end, arr }) => ({ date, day, duty, dep, begin, end, arr }));
-        $('labelArea').value = JSON.stringify({ published: strip(data.published), planned: strip(data.planned) }, null, 2);
-        setStatus(true, 'OCR đã đề xuất. Đối chiếu với ảnh, sửa rồi Lưu.');
+        if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
+        if (f !== current) return;
+        renderTables({ period: data.period, published: data.published, planned: data.planned });
+        $('reviewNote').hidden = true; // the OCR marks were for the replaced rows
+        const notes = [data.readMode === 'ocr-image' ? 'PDF không có lớp text: đã OCR các trang và đọc như một ảnh roster.' : data.readMode === 'ocr' ? 'PDF không có lớp text, đã đọc bằng OCR.' : '', ...(data.notices || [])].filter(Boolean);
+        const v = data.vsLabel;
+        const score = v && v.rowTotal ? ` Đúng ${v.rowMatches}/${v.rowTotal} dòng so với nhãn đang lưu.` : '';
+        const by = data.source === 'model' ? 'AI model' : byName;
+        setStatus('ok', `${by} đã đề xuất — đối chiếu với file, sửa rồi Lưu.${score}` + (notes.length ? ' Lưu ý: ' + notes.join(' | ') : ''));
+        setDirty(true);
       } catch (e) {
-        setStatus(false, 'Lỗi OCR: ' + e.message);
+        setStatus('err', 'Lỗi Auto-fill: ' + e.message);
       }
     }
 
-    function gotoIdx(i) {
-      if (i < 0) i = 0;
-      if (i >= files.length) i = files.length - 1;
-      currentIdx = i;
-      updateProgress();
+    function step(delta) {
+      const vis = visibleFiles();
+      if (!vis.length) return;
+      const at = current ? vis.findIndex(f => f.name === current.name) : -1;
+      const next = vis[Math.min(vis.length - 1, Math.max(0, at + delta))];
+      if (next && next !== current) {
+        if (!openFolders.has(next.ext)) { openFolders.add(next.ext); renderTree(); }
+        selectFile(next);
+      }
     }
 
-    function next() { gotoIdx(currentIdx + 1); }
-    function prev() { gotoIdx(currentIdx - 1); }
-
-    function pretty() {
-      const v = $('labelArea').value.trim();
-      if (!v) return;
-      try { $('labelArea').value = JSON.stringify(JSON.parse(v), null, 2); setStatus(true, 'Pretty OK.'); }
-      catch (e) { setStatus(false, 'JSON lỗi: ' + e.message); }
+    // ---------- Init ----------
+    async function loadFiles() {
+      const [img, pdf] = await Promise.all([
+        fetch('/api/files').then(r => r.json()),
+        fetch('/api/pdf/files').then(r => r.json()).catch(() => ({ items: [] })),
+      ]);
+      const labeledCopy = new Set((img.items || []).filter(i => i.duplicateOf && i.labeled).map(i => i.duplicateOf));
+      files = [
+        ...(img.items || []).map(i => ({ name: i.name, kind: 'image', labeled: i.labeled, duplicateOf: i.duplicateOf, done: i.labeled || labeledCopy.has(i.name) })),
+        ...(pdf.items || []).map(p => ({ name: p.name, kind: 'pdf', labeled: p.labeled, duplicateOf: null, done: p.labeled })),
+      ].map(f => ({ ...f, ext: extOf(f.name) }));
+      // unlabeled first inside each folder, so new uploads are easy to find
+      files.sort((a, b) => a.ext.localeCompare(b.ext) || (a.done - b.done) || a.name.localeCompare(b.name));
+      updateTodo();
     }
-    function clearLabel() { $('labelArea').value = ''; setStatus(false, 'Cleared.'); }
-    function copyLabel() {
-      const v = $('labelArea').value;
-      if (!v) return;
-      navigator.clipboard.writeText(v).then(() => setStatus(true, 'Copied.'));
+
+    // Remove a file that is wrong or not wanted for training. The server moves the
+    // file, its label and its cached OCR result to tmp/trash/<date>/ (not erased).
+    async function deleteFile(f) {
+      const open = current && current.name === f.name && viewerOpen();
+      const what = f.labeled ? 'file này và nhãn của nó' : 'file này';
+      if (!confirm(`Xóa ${what} khỏi dữ liệu?\n\n${f.name}\n\nFile sẽ không còn được dùng để train và benchmark. `
+        + 'Nó được chuyển vào tmp/trash/<ngày>/ (khôi phục bằng cách chuyển lại chỗ cũ).')) return;
+      try {
+        const res = await fetch(`/api/files?name=${encodeURIComponent(f.name)}`, { method: 'DELETE' });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
+        if (open) { setDirty(false); closeViewer(); }
+        if (current && current.name === f.name) current = null;
+        await loadFiles(); // duplicates of this file are recomputed
+        renderTree();
+      } catch (e) {
+        alert('Không xóa được: ' + e.message);
+      }
     }
 
     async function init() {
-      const res = await fetch('/api/files');
-      const data = await res.json();
-      // One entry per distinct image (byte-identical copies hidden); images that
-      // still need a label come first, so new uploads are easy to find.
-      const items = (data.items || data.files.map(name => ({ name, labeled: false, duplicateOf: null })))
-        .filter(i => !i.duplicateOf);
-      const labeledCopy = new Set((data.items || []).filter(i => i.duplicateOf && i.labeled).map(i => i.duplicateOf));
-      for (const i of items) i.done = i.labeled || labeledCopy.has(i.name);
-      items.sort((a, b) => (a.done - b.done) || a.name.localeCompare(b.name));
-      files.push(...items.map(i => i.name));
-      const sel = $('fileSelect');
-      items.forEach((it, i) => {
-        const o = document.createElement('option');
-        o.value = String(i);
-        o.textContent = (it.done ? '✅ ' : '🆕 ') + it.name;
-        sel.appendChild(o);
-      });
-      const todo = items.filter(i => !i.done).length;
-      $('todoCount').textContent = todo ? `— ${todo} ảnh chưa có nhãn` : '— tất cả đã có nhãn';
-      updateProgress();
+      await loadFiles();
+      const wanted = PARAMS.get('name'); // /label?name=<file>
+      let start = files.find(f => f.name === wanted);
+      if (!start && EMBED && wanted) {
+        start = { name: wanted, ext: extOf(wanted), kind: extOf(wanted) === 'pdf' ? 'pdf' : 'image', labeled: true, done: true, duplicateOf: null };
+      }
+      if (start && start.duplicateOf) $('showDups').checked = true;
+      renderTree();
+      if (start) selectFile(start, { force: true });
     }
 
-    $('prev').onclick = prev;
-    $('next').onclick = next;
+    $('treeSearch').addEventListener('input', renderTree);
+    $('onlyTodo').addEventListener('change', renderTree);
+    $('showDups').addEventListener('change', renderTree);
+    $('prev').onclick = () => step(-1);
+    $('next').onclick = () => step(1);
     $('saveBtn').onclick = saveLabel;
     $('autoFill').onclick = autoFill;
-    $('prettyBtn').onclick = pretty;
-    $('clearBtn').onclick = clearLabel;
-    $('copyBtn').onclick = copyLabel;
-    $('reloadBtn').onclick = () => loadLabel(files[currentIdx]);
-    $('fileSelect').onchange = (e) => gotoIdx(Number(e.target.value));
+    $('engineSel').value = safeGet('label.engine') || 'parser';
+    $('engineSel').onchange = () => safeSet('label.engine', $('engineSel').value);
+    $('reloadBtn').onclick = () => { if (current && confirmLeave()) loadLabel(); };
+    $('jsonBtn').onclick = () => { $('jsonView').classList.toggle('open'); if ($('jsonView').classList.contains('open')) refreshJson(); };
+    $('copyBtn').onclick = () => navigator.clipboard.writeText($('jsonArea').value).then(() => setStatus('ok', 'Đã copy JSON.'));
+
+    $('closeViewer').onclick = closeViewer;
+    $('viewer').addEventListener('mousedown', (e) => { if (e.target === $('viewer')) closeViewer(); }); // click outside the box
+    $('rosterImg').onclick = () => $('rosterImg').classList.toggle('zoomed');
+
+    // Drag the bar between file and tables to resize them (remembered per browser)
+    {
+      const body = $('viewerBody'), bar = $('splitter');
+      const saved = Number(safeGet('label.split'));
+      if (saved >= 20 && saved <= 80) body.style.setProperty('--split', saved + '%');
+      bar.addEventListener('pointerdown', (e) => {
+        try { bar.setPointerCapture(e.pointerId); } catch { /* not a live pointer */ }
+        bar.classList.add('dragging');
+        $('rosterPdf').style.pointerEvents = 'none'; // the PDF frame would swallow the drag
+        const move = (ev) => {
+          const r = body.getBoundingClientRect();
+          const pct = Math.min(80, Math.max(20, ((ev.clientX - r.left) / r.width) * 100));
+          body.style.setProperty('--split', pct.toFixed(1) + '%');
+        };
+        const up = () => {
+          bar.classList.remove('dragging');
+          $('rosterPdf').style.pointerEvents = '';
+          bar.removeEventListener('pointermove', move);
+          safeSet('label.split', parseFloat(body.style.getPropertyValue('--split')) || '');
+        };
+        bar.addEventListener('pointermove', move);
+        bar.addEventListener('pointerup', up, { once: true });
+      });
+    }
 
     document.addEventListener('keydown', (e) => {
-      if (e.target.tagName === 'TEXTAREA') return;
-      if (e.key === 'ArrowLeft') prev();
-      if (e.key === 'ArrowRight') next();
-      if (e.key === 's' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); saveLabel(); }
+      if (!viewerOpen()) return;
+      if (e.key === 'Escape') { e.preventDefault(); closeViewer(); return; }
+      if (e.key === 's' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); saveLabel(); return; }
+      if (e.altKey && e.key === 'ArrowDown') { e.preventDefault(); step(1); }
+      if (e.altKey && e.key === 'ArrowUp') { e.preventDefault(); step(-1); }
     });
+    window.addEventListener('beforeunload', (e) => { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
 
     init();
   </script>

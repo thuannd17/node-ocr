@@ -9,7 +9,7 @@
  * saw its roster: folds come from utils/content-groups.js rosterClusters +
  * assignFolds, and each fold's model is scored with the REAL pipeline
  * (services/benchmark.js, split='val' of the same fold) on a temporary OCR
- * server — VLM fallback disabled so Gemini can't stand in for OCR.
+ * server.
  *
  * Per fold k:
  *   1. build  exports/recognition-groundtruth/<id>-f<k>   (val = fold k)
@@ -40,6 +40,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { groupByContent, pickCanonicalLabels, rosterClusters, assignFolds } from '../utils/content-groups.js';
+import { listData, labelFile } from '../utils/data-files.js';
 
 const ROOT = process.cwd();
 const IS_WIN = process.platform === 'win32';
@@ -183,7 +184,7 @@ function sumResults(list) {
 function computeFoldMap(k) {
 	const folder = path.join(ROOT, 'fake-data');
 	const labels = path.join(ROOT, 'labels');
-	const names = fs.readdirSync(folder).filter(n => fs.existsSync(path.join(labels, `${n}.json`)));
+	const names = listData(folder, 'image').filter(n => fs.existsSync(labelFile(labels, n)));
 	const groups = groupByContent(folder, names);
 	const { canonical } = pickCanonicalLabels(groups, labels);
 	const foldOf = assignFolds(rosterClusters(canonical, labels), k);
@@ -194,10 +195,8 @@ function computeFoldMap(k) {
 
 async function main() {
 	const args = parseArgs(process.argv.slice(2));
-	// Before importing the pipeline: point it at the temp server and make sure
-	// low-confidence images can't fall back to Gemini (would score the VLM).
+	// Before importing the pipeline: point it at the temp server.
 	process.env.OCR_SERVER_URL = `http://127.0.0.1:${PORT}`;
-	delete process.env.VLM_API_KEY;
 	const { runBenchmark } = await import('../services/benchmark.js');
 
 	const outDir = path.join(ROOT, 'exports', 'kfold', args.id);

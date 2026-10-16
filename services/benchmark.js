@@ -1,8 +1,8 @@
 // /services/benchmark.js
 import fs from 'node:fs';
-import path from 'node:path';
-import { extractRaw } from './parsers.js';
+import { extractWithPaddleOCR } from './paddle-ocr.js';
 import { groupByContent, pickCanonicalLabels, splitByGroup, rosterClusters, assignFolds } from '../utils/content-groups.js';
+import { listData, dataFile, labelFile as labelPathOf } from '../utils/data-files.js';
 
 const FIELDS = ['date', 'day', 'duty', 'dep', 'begin', 'end', 'arr'];
 
@@ -337,16 +337,11 @@ export async function runBenchmark({ strategy, folderPath, labelsPath, onEvent, 
   if (!fs.existsSync(folderPath)) throw new Error('fake-data folder not found: ' + folderPath);
   if (!fs.existsSync(labelsPath)) throw new Error('labels/ folder not found: ' + labelsPath);
 
-  // Lấy tất cả ảnh trong fake-data
-  const allFiles = fs.readdirSync(folderPath, { withFileTypes: true })
-    .filter(d => d.isFile() && /\.(jpe?g|png|jfif)$/i.test(d.name))
-    .map(d => d.name);
+  // Lấy tất cả ảnh trong fake-data/<ext>/
+  const allFiles = listData(folderPath, 'image');
 
   // Chỉ giữ lại những ảnh đã có label
-  let labeled = allFiles.filter((name) => {
-    const labelFile = path.join(labelsPath, `${name}.json`);
-    return fs.existsSync(labelFile);
-  });
+  let labeled = allFiles.filter((name) => fs.existsSync(labelPathOf(labelsPath, name)));
   if (dedupe) {
     const { canonical } = pickCanonicalLabels(groupByContent(folderPath, labeled), labelsPath);
     const keep = new Set(canonical.values());
@@ -398,8 +393,8 @@ export async function runBenchmark({ strategy, folderPath, labelsPath, onEvent, 
   let completed = 0;
 
   const runOne = async ({ name, idx }) => {
-    const filePath = path.join(folderPath, name);
-    const labelFile = path.join(labelsPath, `${name}.json`);
+    const filePath = dataFile(folderPath, name);
+    const labelFile = labelPathOf(labelsPath, name);
 
     let expData;
     try {
@@ -414,8 +409,7 @@ export async function runBenchmark({ strategy, folderPath, labelsPath, onEvent, 
 
     let predData;
     try {
-      // No Gemini fallback while scoring: the benchmark measures our OCR + parser.
-      predData = await extractRaw(filePath, { ...(strategy ? { strategy } : {}), allowVlmFallback: false });
+      predData = await extractWithPaddleOCR(filePath);
     } catch (e) {
       const row = { file: name, error: 'Extraction failed: ' + e.message };
       fileResults[idx] = row;
@@ -427,8 +421,7 @@ export async function runBenchmark({ strategy, folderPath, labelsPath, onEvent, 
     const pubCmp = compareSection(predData.published || [], expData.published || []);
     const planCmp = compareSection(predData.planned || [], expData.planned || []);
 
-    const row = { file: name, sections: { published: pubCmp, planned: planCmp } };
-    fileResults[idx] = row;
+    fileResults[idx] = { file: name, sections: { published: pubCmp, planned: planCmp } };
 
     const rowMatch = pubCmp.rowMatches + planCmp.rowMatches;
     const rowTotal = pubCmp.rowTotal + planCmp.rowTotal;

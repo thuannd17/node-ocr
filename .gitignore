@@ -28,7 +28,7 @@ exports/
 *.log
 
 # ---- Roster data (real crew rosters: personal data; the repo is public) ----
-# Images and their ground-truth labels stay local.
+# Images/PDFs (fake-data/<ext>/<guid>.<ext>) and their labels (labels/<ext>/) stay local.
 fake-data/
 labels/
 
@@ -50,3 +50,9 @@ models/rec/v7/
 models/rec/*/infer/
 !models/rec/stock/infer/
 !models/rec/v4/infer/
+# Learned PDF extractor: trained on personal crew rosters (labels/pdf/), rebuilt by `npm run train:pdf`.
+models/pdf-tagger/
+models/pdf-tagger-next/
+models/pdf-tagger-prev/
+models/ai/
+scripts/__pycache__/

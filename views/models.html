@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Models</title>
+  <link rel="stylesheet" href="/assets/app.css">
+  <link rel="stylesheet" href="/assets/fontawesome/css/all.min.css">
+  <style>
+    .pipeline { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 13px; color: #555; padding: 12px 16px; }
+    .pipeline .step { background: #f5f7fb; border: 1px solid #e3e8f0; border-radius: 6px; padding: 6px 10px; }
+    .pipeline .step b { color: #2b3a55; }
+    .pipeline .arrow { color: #aaa; }
+    .family { margin-top: 20px; }
+    .family-head { display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap; padding: 16px 16px 8px; }
+    .family-head h2 { margin: 0; font-size: 18px; color: #2b3a55; display: flex; gap: 10px; align-items: center; }
+    .family-head .desc { flex-basis: 100%; font-size: 13px; color: #666; margin: 2px 0 0; }
+    .family-head .active-name { font-size: 13px; color: #2e7d32; font-weight: 600; }
+    .train-box { padding: 0 16px 12px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .train-box .note { font-size: 12px; color: #777; flex: 1 1 400px; }
+    .apply-note { padding: 0 16px 10px; font-size: 12px; color: #8a6d00; }
+    .btn { background: var(--primary); color: #fff; border: none; padding: 8px 14px; border-radius: 6px; cursor: pointer; font-size: 14px; white-space: nowrap; }
+    .btn:hover:not(:disabled) { background: var(--primary-dark); }
+    .btn:disabled { background: #ccc; cursor: not-allowed; }
+    .btn.secondary { background: #fff; color: var(--primary); border: 1px solid var(--primary); }
+    .btn.secondary:hover:not(:disabled) { background: #eef4ff; }
+    .btn.secondary:disabled { background: #fff; color: #bbb; border-color: #ddd; }
+    .btn.danger { background: #fff; color: #c62828; border: 1px solid #e0b4b4; }
+    .btn.danger:hover:not(:disabled) { background: #ffebee; }
+    .btn.danger:disabled { background: #fff; color: #bbb; border-color: #ddd; }
+    .btn.small { padding: 6px 10px; font-size: 13px; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; background: #fff; }
+    th, td { padding: 10px 12px; border-top: 1px solid #eee; text-align: left; vertical-align: middle; }
+    th { background: #f5f5f5; font-weight: 600; font-size: 13px; color: #444; }
+    tr.active-row { background: #f1f8e9; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; background: #eceff1; color: #546e7a; }
+    .badge.active { background: #2e7d32; color: #fff; }
+    .muted { color: #888; font-size: 12px; }
+    .actions { display: flex; gap: 8px; justify-content: flex-end; }
+    .msg { padding: 12px 15px; border-radius: 6px; margin: 12px 0; display: none; }
+    .msg.visible { display: block; }
+    .msg.error { color: #d32f2f; background: #ffebee; }
+    .msg.ok { color: #2e7d32; background: #e8f5e9; }
+    .train-log { font-family: ui-monospace, Consolas, monospace; font-size: 12px; background: #1e1e1e; color: #ddd; padding: 10px 12px; border-radius: 6px; max-height: 220px; overflow: auto; white-space: pre-wrap; margin: 0 16px 12px; display: none; }
+    .train-log.visible { display: block; }
+    .table-wrap { overflow-x: auto; }
+  </style>
+</head>
+<body>
+  <script src="/assets/nav.js"></script>
+  <main class="page">
+    <div class="page-header">
+      <h1><i class="fa-solid fa-brain" aria-hidden="true"></i> AI Models</h1>
+      <p class="subtitle">Các model đọc roster, mỗi loại với các phiên bản đã train và phiên bản đang kích hoạt. Train lại khi có thêm nhãn để model tự học thêm.</p>
+    </div>
+
+    <div class="card pipeline" id="pipeline"></div>
+    <div id="msg" class="msg"></div>
+    <div id="families"></div>
+  </main>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const escapeHtml = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[c]));
+    const fmtSize = (b) => (b == null ? '' : b >= 1048576 ? `${(b / 1048576).toFixed(1)} MB` : `${Math.round(b / 1024)} KB`);
+    const fmtDate = (s) => {
+      if (!s) return '';
+      const d = new Date(s);
+      return /^\d{4}-\d{2}-\d{2}$/.test(s) ? d.toLocaleDateString() : d.toLocaleString();
+    };
+    let families = [];
+    const watching = new Set(); // families whose training this page is following
+
+    function showMsg(text, kind = 'ok') {
+      const el = $('msg');
+      el.textContent = text;
+      el.className = `msg visible ${kind}`;
+      if (kind === 'ok') setTimeout(() => el.classList.remove('visible'), 6000);
+    }
+
+    // How a roster is read: image -> detect -> recognise -> roster reader; a PDF with text goes straight to the reader.
+    function renderPipeline() {
+      const by = Object.fromEntries(families.map(f => [f.id, f]));
+      const step = (id) => {
+        const f = by[id];
+        const a = f?.versions.find(v => v.active);
+        return `<span class="step"><i class="fa-solid ${f?.icon || 'fa-cube'}" aria-hidden="true"></i> <b>${escapeHtml(f?.name || id)}</b> ${a ? `<span class="muted">(${escapeHtml(a.id)})</span>` : ''}</span>`;
+      };
+      $('pipeline').innerHTML = `<span><i class="fa-solid fa-image" aria-hidden="true"></i> Ảnh roster</span><span class="arrow">→</span>${step('detect')}<span class="arrow">→</span>${step('rec')}<span class="arrow">→</span>${step('roster')}<span class="arrow">→</span><span>Dòng roster</span>
+        <span class="muted" style="flex-basis:100%">PDF có lớp text đi thẳng vào <b>${escapeHtml(by.roster?.name || 'AI đọc roster')}</b> (không cần OCR).</span>`;
+    }
+
+    function versionRow(f, v) {
+      const score = (v.score || []).map(escapeHtml).join('<br/>');
+      return `<tr class="${v.active ? 'active-row' : ''}">
+        <td><b>${escapeHtml(v.title || v.id)}</b> ${v.status ? `<span class="badge ${v.active ? 'active' : ''}">${escapeHtml(v.status)}</span>` : ''}</td>
+        <td>${escapeHtml(fmtDate(v.createdAt))}</td>
+        <td>${escapeHtml(v.data || '')}</td>
+        <td>${score || ''}${v.scoreNote ? `${score ? '<br/>' : ''}<span class="muted">${escapeHtml(v.scoreNote)}${v.scoreAt ? ` lúc ${escapeHtml(fmtDate(v.scoreAt))}` : ''}</span>` : ''}</td>
+        <td>${fmtSize(v.sizeBytes)}</td>
+        <td>${v.readOnly ? '' : `<div class="actions">
+          <button class="btn secondary small" data-activate="${escapeHtml(v.id)}" data-family="${f.id}" ${v.active ? 'disabled' : ''} title="${v.active ? 'Đang được dùng' : 'Dùng phiên bản này'}"><i class="fa-solid fa-circle-check" aria-hidden="true"></i> Kích hoạt</button>
+          <button class="btn danger small" data-delete="${escapeHtml(v.id)}" data-family="${f.id}" ${v.deletable ? '' : 'disabled'} title="${escapeHtml(v.deletable ? 'Xoá phiên bản này' : `Không xoá được: ${v.keepReason}`)}"><i class="fa-solid fa-trash" aria-hidden="true"></i> Xoá</button>
+        </div>`}</td>
+      </tr>`;
+    }
+
+    function familyHtml(f) {
+      const active = f.versions.find(v => v.active);
+      const t = f.training || {};
+      return `<section class="card family" id="family-${f.id}">
+        <div class="family-head">
+          <h2><i class="fa-solid ${f.icon}" aria-hidden="true"></i> ${escapeHtml(f.name)}</h2>
+          ${active ? `<span class="active-name"><i class="fa-solid fa-circle-check" aria-hidden="true"></i> Đang kích hoạt: ${escapeHtml(active.title || active.id)}</span>` : ''}
+          <p class="desc">${escapeHtml(f.description)}</p>
+        </div>
+        <div class="train-box">
+          ${f.trainable ? `<button class="btn" data-train="${f.id}" ${t.running ? 'disabled' : ''}><i class="fa-solid fa-graduation-cap" aria-hidden="true"></i> ${t.running ? 'Đang train…' : 'Train phiên bản mới'}</button>` : ''}
+          <span class="note" id="train-status-${f.id}">${escapeHtml(f.trainNote)}</span>
+        </div>
+        ${f.applyNote ? `<div class="apply-note"><i class="fa-solid fa-circle-info" aria-hidden="true"></i> ${escapeHtml(f.applyNote)}</div>` : ''}
+        <div class="train-log" id="train-log-${f.id}"></div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Phiên bản</th><th>Tạo lúc</th><th>Dữ liệu train</th><th>Độ chính xác</th><th>Dung lượng</th><th></th></tr></thead>
+          <tbody>${f.versions.map(v => versionRow(f, v)).join('') || '<tr><td colspan="6" class="muted">Chưa có phiên bản nào.</td></tr>'}</tbody>
+        </table></div>
+      </section>`;
+    }
+
+    function render() {
+      renderPipeline();
+      $('families').innerHTML = families.map(familyHtml).join('');
+      for (const f of families) if (f.training?.running && !watching.has(f.id)) watchTraining(f.id);
+      for (const id of watching) $(`train-log-${id}`)?.classList.add('visible');
+    }
+
+    async function load() {
+      try {
+        const res = await fetch('/api/models');
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || res.statusText);
+        families = data.families;
+        render();
+      } catch (e) {
+        showMsg('Không tải được danh sách model: ' + e.message, 'error');
+      }
+    }
+
+    const fail = async (res) => { const d = await res.json().catch(() => ({})); return d.error || res.statusText; };
+
+    document.addEventListener('click', async (e) => {
+      const act = e.target.closest('[data-activate]');
+      const del = e.target.closest('[data-delete]');
+      const train = e.target.closest('[data-train]');
+      if (act && !act.disabled) {
+        const { family, activate: id } = act.dataset;
+        const res = await fetch(`/api/models/${family}/${encodeURIComponent(id)}/activate`, { method: 'POST' });
+        if (!res.ok) return showMsg(await fail(res), 'error');
+        const f = families.find(x => x.id === family);
+        showMsg(`Đã kích hoạt ${f.name}: ${id}. ${f.applyNote}`);
+        load();
+      } else if (del && !del.disabled) {
+        const { family, delete: id } = del.dataset;
+        const f = families.find(x => x.id === family);
+        if (!confirm(`Xoá phiên bản ${id} của "${f.name}"? Không hoàn tác được.`)) return;
+        const res = await fetch(`/api/models/${family}/${encodeURIComponent(id)}`, { method: 'DELETE' });
+        if (!res.ok) return showMsg(await fail(res), 'error');
+        showMsg(`Đã xoá ${id}.`);
+        load();
+      } else if (train && !train.disabled) {
+        const family = train.dataset.train;
+        const res = await fetch(`/api/models/${family}/train`, { method: 'POST' });
+        if (!res.ok) return showMsg(await fail(res), 'error');
+        train.disabled = true;
+        watchTraining(family);
+      }
+    });
+
+    // Follow one family's training run until it ends, then reload the versions.
+    async function watchTraining(family) {
+      if (watching.has(family)) return;
+      watching.add(family);
+      $(`train-log-${family}`)?.classList.add('visible');
+      while (true) {
+        const t = await fetch(`/api/models/${family}/train`).then(r => r.json()).catch(() => null);
+        const log = $(`train-log-${family}`), status = $(`train-status-${family}`);
+        if (t && log) {
+          log.textContent = (t.log || []).join('\n');
+          log.scrollTop = log.scrollHeight;
+          status.textContent = t.running ? `Đang train (từ ${fmtDate(t.startedAt)})…` : t.ok ? 'Train xong.' : 'Train dừng hoặc lỗi: xem log.';
+        }
+        if (!t || !t.running) break;
+        await new Promise(r => setTimeout(r, 3000));
+      }
+      watching.delete(family);
+      await load();
+      $(`train-log-${family}`)?.classList.add('visible'); // keep the finished run's log in view
+      const t = await fetch(`/api/models/${family}/train`).then(r => r.json()).catch(() => null);
+      if (t) $(`train-log-${family}`).textContent = (t.log || []).join('\n');
+    }
+
+    load();
+  </script>
+</body>
+</html>

@@ -18,14 +18,10 @@ flowchart TD
     subgraph READ["1. Read a roster"]
         U["Browser /upload"] -->|"POST /api/ocr/upload"| API["routes/api.js"]
         API -->|"same image seen before"| PC[("cache/parsed/<br/>result-cache.js")]
-        API --> PS{"services/parsers.js<br/>STRATEGY / ?strategy="}
-        PS -->|paddleocr| PO["services/paddle-ocr.js"]
-        PS -->|vlm| VLM["services/vlm.js<br/>Gemini API<br/>prompts.js, cache/vlm"]
+        API --> PO["services/paddle-ocr.js"]
         PO -->|"HTTP :8501"| OS["scripts/ocr_server.py<br/>PaddleOCR det 1920<br/>rec model OCR_CUSTOM_REC<br/>models/rec/v4/infer"]
         OS -->|"text lines + boxes"| RP["services/roster-parser.js<br/>parser-rules.js<br/>models/parser-patterns.json"]
-        RP -.->|"low quality: suggest Gemini<br/>(wait only with VLM_FALLBACK=auto)"| VLM
         RP --> OUT["published + planned rows"]
-        VLM --> OUT
         PC --> OUT
         OUT --> T["Table on /upload"]
     end
@@ -35,12 +31,12 @@ flowchart TD
         SL["Save as Label<br/>/upload or /label"] -->|"POST /api/labels"| LB[("labels/image.json<br/>verified ground truth")]
     end
 
-    subgraph MEASURE["3. Measure (never Gemini)"]
+    subgraph MEASURE["3. Measure"]
         BM["npm run benchmark<br/>services/benchmark.js"]
         EP["eval-parser-cached.mjs"]
         DE["diagnose-errors.mjs"]
         AL["audit-labels.mjs"]
-        BP["/benchmark page"]
+        BP["/benchmark page<br/>AI model, npm run benchmark:model"]
     end
 
     subgraph RETRAIN["4. Retrain (manual)"]
@@ -74,24 +70,20 @@ Same diagram as plain text (for terminals):
  │                                              │      (result-cache.js)     │
  │                                              │                            │
  │                                              ▼                            │
- │                                    services/parsers.js                    │
- │                                    STRATEGY / ?strategy=                  │
- │                      ┌──── paddleocr ────────┴──────── vlm ────┐          │
- │                      ▼                                         ▼          │
- │          services/paddle-ocr.js                      services/vlm.js      │
- │                      │ HTTP :8501                     Gemini API          │
- │                      ▼                                (prompts.js,        │
- │          scripts/ocr_server.py                         cache/vlm)         │
- │          PaddleOCR det (1920) +                               ▲           │
- │          rec model OCR_CUSTOM_REC                             │           │
- │          (models/rec/v4/infer)                                │           │
- │                      │ text lines + boxes                     │           │
- │                      ▼                                        │           │
- │          services/roster-parser.js  ── low quality? ──────────┘           │
- │          (+ parser-rules.js,           (VLM_FALLBACK, needs VLM_API_KEY)  │
- │           models/parser-patterns.json)                                    │
- │                      │                                                    │
- │                      ▼                                                    │
+ │                                    services/paddle-ocr.js                 │
+ │                                              │ HTTP :8501                 │
+ │                                              ▼                            │
+ │                                    scripts/ocr_server.py                  │
+ │                                    PaddleOCR det (1920) +                 │
+ │                                    rec model OCR_CUSTOM_REC               │
+ │                                    (models/rec/v4/infer)                  │
+ │                                              │ text lines + boxes         │
+ │                                              ▼                            │
+ │                                    services/roster-parser.js              │
+ │                                    (+ parser-rules.js,                    │
+ │                                     models/parser-patterns.json)          │
+ │                                              │                            │
+ │                                              ▼                            │
  │          { published: [...], planned: [...] } ──> table on /upload        │
  └───────────────────────────────────┬───────────────────────────────────────┘
                                      │ a person checks / fixes the table
@@ -106,12 +98,12 @@ Same diagram as plain text (for terminals):
  ┌────── 3. MEASURE ───────┐  ┌──────────── 4. RETRAIN (manual) ─────────────┐
  │ npm run benchmark       │  │ npm run retrain-check                        │
  │ services/benchmark.js   │  │ ├ test = rosters the model never saw         │
- │ (PaddleOCR + parser,    │  │ ├ build-recognition-groundtruth.mjs:         │
- │  never Gemini)          │  │ │   labeled rows -> cell crops + text        │
+ │ (PaddleOCR + parser)    │  │ ├ build-recognition-groundtruth.mjs:         │
+ │                         │  │ │   labeled rows -> cell crops + text        │
  │ eval-parser-cached.mjs  │  │ ├ train -> models/rec/v(N+1)                 │
  │ diagnose-errors.mjs     │  │ └ OCR test set with old + new model          │
  │ audit-labels.mjs        │  │     -> better / tie / worse                  │
- │ /benchmark page         │  │                                              │
+ │ /benchmark (AI model)   │  │                                              │
  └─────────────────────────┘  │ better? npm run use-model -- vN              │
                               │   -> .env OCR_CUSTOM_REC, restart            │
                               │   -> back to 1 with the new model            │
@@ -123,12 +115,9 @@ Same diagram as plain text (for terminals):
 The four steps:
 
 1. **Read.** `ocr_server.py` finds the text lines and reads them with the fine-tuned
-   model. `roster-parser.js` turns those lines into rows of the two tables. Gemini is
-   used only when you choose it; when the PaddleOCR result looks bad, `/upload`
-   suggests it.
-2. **Label.** Only a person writes labels. Gemini output is never saved as a label
-   on its own.
-3. **Measure.** Scores always compare against `labels/` and never use Gemini.
+   model. `roster-parser.js` turns those lines into rows of the two tables.
+2. **Label.** Only a person writes labels.
+3. **Measure.** Scores always compare against `labels/`.
 4. **Retrain.** Run by hand. A new model version is used only after
    `use-model` switches to it.
 
@@ -168,8 +157,7 @@ Linux/macOS: `python3.11 -m venv .venv && .venv/bin/pip install -r scripts/requi
 copy .env.example .env      # Linux/macOS: cp .env.example .env
 ```
 
-The defaults work as is. Only set `VLM_API_KEY` (a Google AI Studio key) if you
-want the optional Gemini features; everything else runs offline. All settings are
+The defaults work as is; everything runs offline. All settings are
 listed in [`.env`](#env) below.
 
 ### 3. Check the OCR runtime
@@ -203,8 +191,15 @@ in the repository**:
 
 | Folder | Content | On a fresh clone |
 |---|---|---|
-| `fake-data/` | roster images | created empty on first start; every upload is stored here (deduplicated by content) |
-| `labels/` | verified labels, one `<image>.json` per image | created empty; filled by **Save as Label** on `/upload` or `/label` |
+| `fake-data/<ext>/` | roster images and duty-plan PDFs, one folder per extension (`jpg/`, `jpeg/`, `png/`, `jfif/`, `pdf/`), each file named `<guid>.<ext>` | created empty on first start; every upload is stored here under a new GUID (deduplicated by content) |
+| `labels/<ext>/` | verified labels, `<guid>.<ext>.json` next to the same folder name as its file | created empty; filled by **Save as Label** on `/upload` or `/label` |
+
+Code never builds these paths itself: `utils/data-files.js` (`listData`, `dataFile`,
+`labelFile`, ...) resolves a file name to its folder, so training, benchmark and
+the app all see the same files. File names are unique across folders, so caches,
+`exports/` and `models/rec/*/model.json` refer to files by name only.
+The GUID rename of 2026-10-13 kept a map of old -> new names in
+`tmp/backup-guid-rename-20261013/mapping.json`.
 
 Upload and OCR work without any data. `/label` and `/benchmark` only have
 something to show once images are uploaded and labeled; to reuse an existing
@@ -229,60 +224,165 @@ and `models/pretrained/` (downloaded, only needed for retraining, see
 
 | Page | Purpose |
 |---|---|
-| `/upload` | Upload a roster, check the table, fix cells, **Save as Label**. **Re-parse (VLM)** reads the image with Gemini instead. |
-| `/label` | Edit labels; unlabeled images are listed first. |
-| `/benchmark` | Score the pipeline against `labels/`. **Xem & sửa** on a file opens `/upload?review=<file>` in a new tab. |
-| `/upload?review=<file>` | OCR result of a labeled image with the cells that differ from its label marked (yellow, old value underneath: click to take it), rows OCR missed (blue, filled from the label) and extra rows (struck through). Fix, then **Save as Label**; it asks first if marked cells are still unchecked. |
+| `/upload` | **Try the AI model**: every uploaded roster **image or duty-plan PDF** is read by the learned model (images: PaddleOCR lines -> model), never by the parser and never answered from a saved label. When the file already has a label, the info line shows how many label rows the model got exactly right. The page is read-only (no editing, no saving labels: that is /label). The toolbar holds the file picker (or drop a file anywhere) and, once a result is shown, **↻ Đọc lại** (read again, e.g. after retraining). An image-only PDF (no text layer) is read by OCR: a duty plan by the parser (the model has no words for it); any other one, e.g. a Ryanair eCrew roster screen printed to PDF, has its pages stacked into one tall roster picture that the model reads as an image (and, once labeled, trains on as an image). A PDF shows the PDF and 12 columns; empty optional columns (DC, hotel, registration, AC) are hidden. `/upload?pdf=<file>` reads a stored PDF with the model. |
+| `/label` | Folder tree of `fake-data/` (one folder per extension; unlabeled 🆕 first, byte-identical image copies hidden unless asked). Hovering a file shows 🗑: it removes the file from the dataset (after a confirm) by moving it, its label and its cached OCR result to `tmp/trash/<date>/`. Clicking a file opens a popup (Esc / × closes; drag the bar in the middle to resize) with the file next to its label as editable Published / Planned tables (one cell per field, add / insert / delete rows; Enter moves down a column); the label is still saved as JSON (**{ } JSON** shows it). Making ground truth: **Auto-fill** proposes the rows with **Parser** (OCR + `roster-parser.js` for an image, the PDF parser for a PDF) or **AI model** (chosen in the list next to it), and says how many rows match the saved label; check, fix, save. Ctrl+S saves, Alt+↑/↓ moves between files. `/label?name=<file>` opens one. |
+| `/benchmark` | Score the AI model (images + PDFs, read as on /upload) against `labels/`, same as `npm run benchmark:model`; each file lists its differences from the label. **Xem & sửa** on a file opens the /label editor in a popup over the page (`/label?embed=1&review=1&name=<file>`): for an image, the table is the label and cells where the model differs are marked (yellow, model value underneath: click to take it), label rows the model missed are blue, rows only the model has are struck through (**+ nhãn** adds one); a PDF opens without the marks. A saved label shows "✓ đã lưu nhãn": run the benchmark again to update the scores. The parser benchmarks (`npm run benchmark`, `npm run benchmark:pdf`) are command-line only. |
 
 New rosters: uploads are deduplicated by content and kept in `fake-data/`. A label
-is written only when a person presses **Save as Label**. Gemini output is never
-saved as a label automatically.
+is written only when a person presses **Save as Label**.
 
 ## API
 
 | Route | Description |
 |---|---|
-| `POST /api/ocr/upload?strategy=paddleocr\|vlm` | multipart field `image`; returns both tables (cached by content, `&force=true` to redo) |
-| `GET /api/predict?name=...&strategy=...` | OCR an image already in `fake-data/` |
-| `GET /api/review?name=...` | prediction vs label for a labeled image, rows paired like the benchmark |
+| `POST /api/ocr/upload` | multipart field `image`; both tables read by the AI model (`source: 'model'`, `vsLabel` when labeled) |
+| `GET /api/predict?name=...&engine=parser\|model` | read an image already in `fake-data/` (default parser) |
+| `GET /api/pdf/parse?name=...&engine=parser\|model` | read a stored PDF (default model); `&label=true` returns its label when there is one |
+| `GET /api/review?name=...` | AI model reading vs label for a labeled image, rows paired like the benchmark |
 | `GET /api/labels`, `POST /api/labels` | read / save a label |
 | `GET /api/files`, `GET /api/raw` | list images / serve an image |
-| `GET /api/benchmark`, `/api/benchmark/stream`, `POST /api/benchmark/stop` | benchmark |
+| `DELETE /api/files?name=...` | remove an image or PDF from the dataset: file, label and cached result move to `tmp/trash/<date>/` |
+| `GET /api/benchmark/model/stream`, `POST /api/benchmark/stop` | AI model benchmark, images + PDFs (server-sent events) |
+| `/api/models` | model versions per family: list, train, activate, delete (`/models`) |
 
-## Gemini (VLM)
+## PDF duty plans (NetLine/Crew)
 
-Gemini is still available, in three ways:
+`/upload` and `/label` read "Individual duty plan" PDFs exported by NetLine/Crew. Most have a
+text layer, so there is **no OCR**: `services/pdf-text.js` reads the words with
+their positions (pdfjs-dist; pages printed sideways, e.g. via "Microsoft Print to
+PDF", are turned upright) and `services/pdf-roster-parser.js` turns the day
+columns into rows. Two layouts are read: 2-3 blocks of `date H duty R dep arr AC
+info` per landscape page (days `Sat01`), and the single-column RYR plan `date
+stops duty req dep arr AC rank info` (days `01. Sat`; `req` is read like `R`).
+A compact variant prints only `date duty dep arr AC` (the period after the name:
+"Individual duty plan for ... Period: 31Aug26 -- 06Sep26"); its note "Local time at
+homebase or (!) outside homebase" makes plain times `LB`, and the crew ids listed
+per flight number under the days ("992 Cockpit:01736 03912" / "Cabin:06366 ...") go
+to that flight's **crew** without its airline prefix (NX992):
+`[Cockpit - 01736][Cockpit - 03912][Cabin - 06366]...`.
+A third layout, the **Crew Roster Report** table (`Date | DC | C/I (Z) | C/O (Z) |
+Activity | From | STD (Z) | To | STA (Z) | AC/Hotel | Blk Hrs | Duty Hrs`), gives per
+line: a `C/I` row (begin = C/I time), the activity (duty = Activity, dep = From,
+begin = STD, arr = To, end = STA, `[Blk Hrs ..]` in info), a `C/O` row (end = C/O
+time, `[Duty Hrs ..]` in info), and when AC/Hotel is longer than 3 characters a
+hotel row (duty `H`, info = the hotel); the DC column fills `dc`.
+A fourth layout, the **Crew member's flight time record** (`flight | date | flightno |
+registr | type | dep | off | on | arr | Block Time per Leg` or `1.pilot | 2.pilot | SIM`),
+lists flown legs: flightno -> duty, registr -> registration, type -> ac, the two
+times -> begin/end, the time columns after arr -> info (`[Block Time 3:12]`); the
+`flight` counter is skipped and the "All times in UTC! ..." note is shown as an alert.
+A fifth layout, the **crew flight log** (`Year | Month | Date | Dep | Block-Off | Arr |
+Block-On | Blocktime | AcType | AcRegId | PiC ...`), lists flown legs: Block-Off/On ->
+begin/end, Blocktime -> `[Block Hrs: 03:12]`, AcType -> ac, AcRegId -> registration;
+it has no flight number, so duty stays empty, and pilot names are skipped.
+A sixth layout, the Spanish **Calendario de actividades** (`Fecha Asignación | Hora
+Salida | Hora Salida UTC | Asignación | Descripción Asignación | ORI/DES | Hora Llegada |
+Hora Llegada UTC | Nro Vuelo`): day + date from "Lunes 01/07/2024", begin/end as
+`05:00 Z / 00:00 L` (UTC, then local), duty = Asignación (`L`, `SOBREAVIS`) or Nro
+Vuelo, dep/arr = ORI/DES, info = Descripción Asignación as printed.
+Two **Personal Crew Schedule Report** layouts (times local, "L", or "Z" when the period line says "All times in UTC", which is shown as an alert): the **grid** (one
+column per day "01/07": C/I time, flights as number / dep time / dep / arr / arr time /
+[AC], C/O time, or a duty code with its times; "→" … "↓" = landing after midnight,
+end "00:05 L +1"; the "Other Crew" table lists the crew of one flight of a duty, and
+every flight of that duty from C/I to C/O gets it in **crew**; its date may be the UTC
+day, so the flight is also looked for a day later or earlier; Wizz Air's variant
+wraps flight numbers "WAZ701" + "5" -> `WAZ7015` ("WMT28" + "25"), gives some duties a
+route ("PCAR55" 15:30 "*VIE" "BUD" 18:30 -> dep/arr, "*" kept), a C/I before a timed duty
+too ("20:05" "ST" "21:35"), continues the Descriptions on the next page, prints actual times "A02:00" (kept: `A02:00 Z`),
+"(L)" and "Delay 00:50" -> info, day indicators S / L / D under the grid -> the day's
+first row, and its F / D daily totals are not read; hotel nights -> `H` rows), and the **Schedule Details** table (`Date | Duties | Details |
+Report times | Actual times/Delays | Debrief times | Indicators | Crew`, cells centred
+in each day's row): report -> C/I row, debrief -> C/O row, details "*BCN - BIO" ->
+dep/arr ("*" kept), other details -> `[OFF: Day off]`, actual times -> begin/end ("A07:12 L", "E13:00 L": the A/E stays; a
+delay "/01:41" -> `[Delay 01:41]`), the day's crew in the **crew** column of
+each of its flights (flight number with a route) (`[CP - DHC - 1096 - CASANOVAS][FO - 2151 -
+EREZUMA]`), its indicators and memos (`[M: Day Memo] [Memo: ...]`) on its first
+row, and one `H` row per night of the
+"Hotel Information" table (dep = port, info = address, phone). Both give duty codes
+and indicators their "Descriptions" text: `[KU4: KUL Home Standby]`.
+Days only carry a day number, so the month is counted from the period start; when
+a later page range was printed, the first month whose weekdays all match is used.
 
-1. **Suggested on a poor OCR result.** With `STRATEGY=paddleocr`, if the parsed result
-   looks bad (fewer than 5 rows, average confidence < 45%, > 30% low-confidence rows,
-   or > 20% of rows with a broken critical field), the OCR result is returned at once
-   and `/upload` shows a **Thử bằng Gemini** button. `VLM_FALLBACK=auto` calls Gemini
-   right away and waits for it instead (the behaviour before 2026-10-07, which made
-   some uploads take 40 s+); `VLM_FALLBACK=0` turns Gemini off here.
-2. **Per request.** The **Re-parse (VLM)** button, or `?strategy=vlm` on the API.
-3. **Everything through Gemini.** `STRATEGY=vlm` in `.env`.
+A PDF **without** a text layer (e.g. printed from a browser as an image) is
+rendered page by page and read by the OCR server (`services/pdf-ocr.js`, needs
+`npm run ocr-server`); typical OCR slips (header words, "Sa227", "8325",
+statistics without brackets) are repaired before the same parser runs, and
+`/upload` warns that the result needs checking.
 
-It needs `VLM_API_KEY`. Without a key there is no suggestion and `strategy=vlm`
-returns an error. A Gemini call gives up after `VLM_TIMEOUT_MS` (default 30 s).
-`/upload` shows how long each step took (OCR, parse, Gemini). `npm run benchmark` never uses the fallback, so
-scores measure only PaddleOCR + parser.
+
+
+Like the image rosters, the result has two tables: **published**, and **planned**
+for the days after "The following is only for information because the published
+period ends" (or "... a round trip ending outside the printed period").
+
+| Field | From |
+|---|---|
+| `date`, `day` | `Sat01` + the period in the header -> `1 Mar 25`, `Sat`; every row repeats its day's date |
+| `dc` | Duty Code column of a Crew Roster Report (`FO`, `DH`, `R*`), on the activity row only (not on C/I or C/O); empty in NetLine plans |
+| `hotel` | the H column: a layover line `H1* BOG` is a row of its own (hotel `H1*`, dep `BOG`, info = name and phone from the *Hotels* table) |
+| `duty` | `C/I`, `C/O`, `STBY`, `OFF`, flight number (`EW 7526`), training codes, ... one row each (empty on hotel rows) |
+| `registration` | the R column: on the row (`R`) or an aircraft code on the line under a leg (`A321`, `D-AIZA`); any other text there goes to `info` |
+| `dep`, `arr`, `ac` | as printed (`HAM`, `FUE`, `320`) |
+| `begin`, `end` | one format for every layout: `06:05 Z` (UTC), `07:00 B` (homebase, plans noted "(!) if not in homebase timezone"), `07:00 LB` (local at the departure airport, "(!) if not in departure airport timezone"), `07:00 L` also for plans noted "All CI/CO times are local", `13:00 L` (local, printed `!1300`), `05:00 Z / 00:00 L` only when the PDF gives both; a day offset stays (`22:00 Z -1`); `0900 !1145` printed as one piece is split into begin and end |
+| `info` | the duty statistics, e.g. `[DT 12:30] [FDT 12:30] ...` or `[FT 03:10][DT 05:35]...`, on the row they start next to |
+| `info` (text) | other text in the info column on the event's line (`72049 ALTC`) or wrapping onto the lines under it (`KURJAKOV` / `OBS`), and the text lines under the event (`Instructor, LC`, `EATC Rzeszow` / `**` / `BGR CAE` ...), in reading order |
+| `info` (crew message) | "To c/m: ..." / "From c/m: ..." with its wrapped lines, on the event of that line or else the event before |
+| `info` (legend) | a duty code listed in *Absence/Ground Activity Legend* (`STBY`, `DBF`, `--`, ...) adds its description, e.g. `[STBY: Standby]` |
+
+Notes printed on the *Period:* line ("Local times at event airport. (!) if not in homebase timezone", "All CI/CO times are local") are shown as an alert above the table on `/upload`. Info of an item: statistics, then the legend description. Statistics printed under a hotel line still belong to the item before it. The other tables after the last day (crew lists, totals, training expiry, contacts) are skipped.
+
+Same loop as for images: upload on `/upload`, check and fix the table, **Save as
+Label** (`labels/pdf/<file>.json`, `{ published: [...], planned: [...] }`), then measure:
+
+```powershell
+npm run parse-pdf -- "fake-data/pdf/<file>.pdf"   # print the parsed rows
+npm run benchmark:pdf                              # parser vs labels/pdf/
+```
+
+PDFs are kept in `fake-data/pdf/`, labels in `labels/pdf/`; both are personal
+data and not in git.
+
+### Learned extractor (the AI model used by /upload)
+
+An offline model, trained from all labels (`labels/pdf/` and the image labels),
+reads layouts without new parser code. `/upload` always uses it, to try out
+each newly trained model; `/label` Auto-fill can use it or the parser to make
+ground truth. The loop: label files on `/label` (or **Save as Label** on
+`/upload`), then **Train** on `/models` (or `npm run train:pdf`, ~7 min
+for 44 PDFs + 94 images; image OCR lines are cached in `exports/ocr-lines/`, so
+only new images need the OCR server). One labeled file of a layout is usually
+enough to read the others.
+
+| Piece | What it does |
+|---|---|
+| `services/pdf-tokens.js` | words of the text layer with positions |
+| `services/pdf-label-align.js` | training tags from a label alone: which words hold each row's values (so files the parser misreads still teach the model) |
+| `scripts/build-pdf-token-data.mjs` | tags of every labeled PDF -> `exports/pdf-tokens/` (the parser's trace where it equals the label, else the label alignment) |
+| `services/ocr-tokens.js`, `scripts/build-image-token-data.mjs` | OCR lines of a labeled image -> words with positions, tagged from its label -> `exports/image-tokens/` |
+| `scripts/pdf_tagger.py`, `scripts/train_pdf_tagger.py` | the word tagger (scikit-learn, two stages: word + column-header features, then the neighbours' fields); every layout weighs the same in training |
+| `services/pdf-row-assembler.js` | tagged words -> rows (blocks, dates, C/I-C/O, hotels, time zones, legend; how `[Blk Hrs 3:25]` is written is learned from the labels) |
+| `scripts/train-pdf-model.mjs` | the whole retrain -> `models/pdf-tagger/` (previous one kept in `models/pdf-tagger-prev/`; not in git) |
+| `services/pdf-ai-extract.js` | the app side: runs `scripts/pdf_tagger_predict.py` (~3-4 s per file) and assembles the rows (`extractWithModel` for PDFs, `extractImageWithModel` for images) |
+
+Measured on the 44 labeled PDFs (rows with all 12 fields right, each file read
+by a model that never saw it): layouts already labeled 92.6%; a new layout after
+labeling one file of it 84.6%; a layout never labeled 58%. On images, a model
+trained with the images read 86.8% of rows when it had not seen the image
+(images it trained on: 88.2%; the image parser: 97.0%). The parser stays the
+better tool for making labels of the layouts it knows.
+
+```powershell
+npm run train:pdf                                   # retrain from labels/pdf/
+npm run eval:pdf-model                              # assembler on the true tags
+.venv/Scripts/python scripts/train_pdf_tagger.py --predict one   # tags for "one labeled file" ...
+npm run eval:pdf-model -- --pred exports/pdf-tokens-pred/one     # ... and their rows
+```
 
 ## `.env`
 
 ```ini
 HOST=localhost
 PORT=3000
-
-STRATEGY=paddleocr                    # paddleocr (default, offline) | vlm (Gemini)
-
-# Gemini
-VLM_PROVIDER=gemini
-VLM_API_KEY=...                       # Google AI Studio key
-VLM_MODEL=gemini-3.5-flash-lite       # default gemini-3.5-flash
-VLM_CACHE_ENABLED=true                # cache Gemini answers in cache/vlm/
-# VLM_FALLBACK=auto                   # wait for Gemini on a poor OCR result (default: suggest it)
-# VLM_FALLBACK=0                      # never call or suggest Gemini there
-# VLM_TIMEOUT_MS=30000                # give up on a Gemini call after this
 
 # PaddleOCR
 OCR_WORKERS=1
@@ -408,20 +508,21 @@ index.js                     app entry
 routes/api.js, views.js      API + pages
 views/                       upload, label, benchmark, home
 views/assets/                shared stylesheet + top menu (nav.js)
-services/paddle-ocr.js       OCR client + Gemini suggestion/fallback
+services/paddle-ocr.js       OCR client (resize, call server, parse, quality)
 services/roster-parser.js    OCR lines -> table rows
-services/vlm.js, prompts.js  Gemini extraction
 services/benchmark.js        scoring
 scripts/ocr_server.py        PaddleOCR server (GPU auto-detect, CPU fallback)
 scripts/*.mjs                benchmark, eval, retrain-check, use-model, load-test, ...
 scripts/requirements.txt     Python dependencies of the OCR server
+services/pdf-*.js            PDF duty plans: text + positions, parser, benchmark
+routes/pdf-api.js            /api/pdf/* (upload, parse, labels, benchmark)
 models/rec/                  recognition model versions
 models/parser-patterns.json  fixed parser config
 .env.example                 settings template (copy to .env)
 
 local only (not in git):
-fake-data/                   roster images
-labels/                      verified labels (one JSON per image)
-cache/, tmp/, exports/       OCR lines, Gemini answers, upload results, datasets
+fake-data/<ext>/             roster images and duty-plan PDFs (<guid>.<ext>)
+labels/<ext>/                verified labels (<guid>.<ext>.json)
+cache/, tmp/, exports/       OCR lines, upload results, datasets
 models/pretrained/           base model for retraining
 ```

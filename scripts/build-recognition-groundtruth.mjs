@@ -35,6 +35,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import sharp from 'sharp';
 import { groupByContent, pickCanonicalLabels, splitByGroup, rosterClusters, assignFolds } from '../utils/content-groups.js';
+import { listData, dataFile, labelFile } from '../utils/data-files.js';
 
 const ROOT = process.cwd();
 const FAKE_DATA_DIR = path.join(ROOT, 'fake-data');
@@ -482,10 +483,8 @@ async function main() {
 	const outDir = path.join(ROOT, 'exports', 'recognition-groundtruth', args.id);
 	for (const split of ['train', 'val']) fs.mkdirSync(path.join(outDir, 'images', split), { recursive: true });
 
-	let images = fs.readdirSync(FAKE_DATA_DIR, { withFileTypes: true })
-		.filter(d => d.isFile() && /\.(jpe?g|png|jfif)$/i.test(d.name))
-		.map(d => d.name)
-		.filter(name => fs.existsSync(path.join(LABELS_DIR, `${name}.json`)));
+	let images = listData(FAKE_DATA_DIR, 'image')
+		.filter(name => fs.existsSync(labelFile(LABELS_DIR, name)));
 
 	// fake-data/ contains many byte-identical copies of the same screenshot,
 	// labeled separately (and not always identically). Keep ONE copy per image
@@ -526,7 +525,7 @@ async function main() {
 	// for parser calibration, just for the recognition dataset instead.
 	const labelSnapshot = {};
 	for (const name of images) {
-		try { labelSnapshot[name] = fs.statSync(path.join(LABELS_DIR, `${name}.json`)).mtime.toISOString(); } catch { /* skip */ }
+		try { labelSnapshot[name] = fs.statSync(labelFile(LABELS_DIR, name)).mtime.toISOString(); } catch { /* skip */ }
 	}
 
 	console.log(`Building recognition ground-truth from ${images.length} labeled images...`);
@@ -535,9 +534,9 @@ async function main() {
 	const stats = { images: images.length, noHeader: 0, noColumns: 0, publishedMatched: 0, publishedSkippedCountMismatch: 0, plannedMatched: 0, plannedSkippedCountMismatch: 0, cropsWritten: 0, cropsEmptyValue: 0, perField: Object.fromEntries(FIELD_COLUMNS.map(f => [f, 0])), anchorRows: 0, cropsSkippedGlued: 0, datedaySkippedNoDate: 0, labelRowsTotal: { published: 0, planned: 0 }, labelRowsPaired: { published: 0, planned: 0 }, generalCrops: 0, generalTrain: 0, generalVal: 0, tightCrops: 0, tightPerField: {} };
 
 	for (const fileName of images) {
-		const imagePath = path.join(FAKE_DATA_DIR, fileName);
+		const imagePath = dataFile(FAKE_DATA_DIR, fileName);
 		let label;
-		try { label = JSON.parse(fs.readFileSync(path.join(LABELS_DIR, `${fileName}.json`), 'utf8')); } catch { continue; }
+		try { label = JSON.parse(fs.readFileSync(labelFile(LABELS_DIR, fileName), 'utf8')); } catch { continue; }
 		const published = Array.isArray(label.published) ? label.published : [];
 		const planned = Array.isArray(label.planned) ? label.planned : [];
 

@@ -3,18 +3,22 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { dataFile, labelFile } from '../utils/data-files.js';
 import { groupByContent, pickCanonicalLabels, splitByGroup, rosterClusters, assignFolds } from '../utils/content-groups.js';
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'node-ocr-groups-'));
 const imgDir = path.join(root, 'img');
 const labelDir = path.join(root, 'labels');
-fs.mkdirSync(imgDir);
-fs.mkdirSync(labelDir);
 
 const row = (duty, dep = 'PIK') => ({ date: '12 Jun 20', day: 'Fri', duty, dep, begin: '00:00 Z', end: '21:00 Z', arr: '' });
 function addImage(name, bytes, rows) {
-  fs.writeFileSync(path.join(imgDir, name), bytes);
-  if (rows) fs.writeFileSync(path.join(labelDir, `${name}.json`), JSON.stringify({ published: rows, planned: [] }));
+  // fake-data/<ext>/<name> and labels/<ext>/<name>.json, as in the real dataset
+  fs.mkdirSync(path.dirname(dataFile(imgDir, name)), { recursive: true });
+  fs.writeFileSync(dataFile(imgDir, name), bytes);
+  if (rows) {
+    fs.mkdirSync(path.dirname(labelFile(labelDir, name)), { recursive: true });
+    fs.writeFileSync(labelFile(labelDir, name), JSON.stringify({ published: rows, planned: [] }));
+  }
 }
 
 // "a.jpg" and "b.jpeg" are byte-identical copies, labeled differently; "c.jpg" is a different image.
@@ -52,7 +56,10 @@ test('canonical label copy is the one with the more common values, conflicts are
 test('overlapping weekly rosters cluster together and share a fold', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'node-ocr-clusters-'));
   const day = (d, duty) => ({ date: `${d} Jun 20`, day: 'Fri', duty, dep: 'PIK', begin: '05:00 Z', end: '09:00 Z', arr: 'STN' });
-  const write = (name, rows) => fs.writeFileSync(path.join(dir, `${name}.json`), JSON.stringify({ published: rows, planned: [] }));
+  const write = (name, rows) => {
+    fs.mkdirSync(path.dirname(labelFile(dir, name)), { recursive: true });
+    fs.writeFileSync(labelFile(dir, name), JSON.stringify({ published: rows, planned: [] }));
+  };
   // wk1 and wk2 share 3 of 4 rows (next week's screenshot); other shares none.
   write('wk1.jpg', [day(1, 'FR1'), day(2, 'FR2'), day(3, 'FR3'), day(4, 'FR4')]);
   write('wk2.jpg', [day(2, 'FR2'), day(3, 'FR3'), day(4, 'FR4'), day(5, 'FR5')]);

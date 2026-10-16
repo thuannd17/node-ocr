@@ -6,12 +6,14 @@ import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import multer from 'multer';
 
-import { extractRaw } from '../services/parsers.js';
-import { runBenchmark, alignRows, normalizeField } from '../services/benchmark.js';
-import { listFilesInFolder } from '../utils/helpers.js';
-import { getCachedResult, getCachedPrediction, saveLabelResult, savePredictedResult } from '../services/result-cache.js';
+import { alignRows, normalizeField, compareSection } from '../services/benchmark.js';
+import { runModelBenchmark } from '../services/model-benchmark.js';
+import { ocrLines, extractWithPaddleOCR } from '../services/paddle-ocr.js';
+import { extractImageWithModel, modelInfo } from '../services/pdf-ai-extract.js';
+import { saveLabelResult, savePredictedResult } from '../services/result-cache.js';
 import sharp from 'sharp';
 import crypto from 'node:crypto';
+import { IMAGE_EXTS, listData, dataFile, labelFile as labelPathOf, newDataName, isDataName, kindOf } from '../utils/data-files.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -21,51 +23,60 @@ const router = Router();
 const folderPath = path.resolve(__dirname, '..', 'fake-data');
 const labelsPath = path.resolve(__dirname, '..', 'labels');
 // Neither folder is in git (roster data stays local): create them on a fresh clone.
-for (const dir of [folderPath, labelsPath]) fs.mkdirSync(dir, { recursive: true });
+// Files sit in one subfolder per extension: fake-data/jpg/<guid>.jpg, labels/jpg/<guid>.jpg.json.
+for (const ext of IMAGE_EXTS) for (const root of [folderPath, labelsPath]) fs.mkdirSync(path.join(root, ext), { recursive: true });
 const md5 = (buf) => crypto.createHash('md5').update(buf).digest('hex');
-// Identifies what produced a prediction: recognition model, detector limit and
-// parser code. A cached prediction from an older model/parser is not reused.
-const PIPELINE_ID = md5([
-  process.env.STRATEGY || 'paddleocr',
-  process.env.OCR_CUSTOM_REC || '',
-  process.env.OCR_TEXT_DET_LIMIT_SIDE_LEN || '',
-  fs.readFileSync(path.resolve(__dirname, '..', 'services', 'roster-parser.js')),
-].join('|')).slice(0, 12);
-
 // fake-data/ content index: file name -> md5, re-hashed only when a file's
 // mtime/size changes, so lookups by content stay cheap as the folder grows.
 const contentIndex = new Map();
 function indexFakeData() {
   const seen = new Set();
-  for (const f of listFilesInFolder(folderPath)) {
-    const abs = path.join(folderPath, f.name);
+  for (const name of listData(folderPath, 'image')) {
+    const abs = dataFile(folderPath, name);
     const st = fs.statSync(abs);
     const key = `${st.mtimeMs}:${st.size}`;
-    const cur = contentIndex.get(f.name);
-    if (!cur || cur.key !== key) contentIndex.set(f.name, { key, hash: md5(fs.readFileSync(abs)) });
-    seen.add(f.name);
+    const cur = contentIndex.get(name);
+    if (!cur || cur.key !== key) contentIndex.set(name, { key, hash: md5(fs.readFileSync(abs)) });
+    seen.add(name);
   }
   for (const name of contentIndex.keys()) if (!seen.has(name)) contentIndex.delete(name);
   return contentIndex;
 }
-const hasLabel = (name) => fs.existsSync(path.join(labelsPath, `${name}.json`));
+const hasLabel = (name) => fs.existsSync(labelPathOf(labelsPath, name));
 
-/** Name to store an upload under in fake-data/.
+/** Name to store an upload under in fake-data/<ext>/.
  * - Same image already there (any name): reuse that file, preferring a copy
  *   that has a label, so a re-upload neither duplicates the dataset nor loses
  *   its reviewed label.
- * - Otherwise the original name, or name-<hash8>.ext when a different image
- *   already has that name. */
+ * - Otherwise a new '<guid>.<ext>' (the original name is not kept). */
 function storedNameFor(originalName, contentHash) {
   const sameContent = [...indexFakeData()].filter(([, v]) => v.hash === contentHash).map(([n]) => n);
-  if (sameContent.length) {
-    return sameContent.find(n => n === originalName && hasLabel(n))
-      || sameContent.find(hasLabel)
-      || (sameContent.includes(originalName) ? originalName : sameContent[0]);
+  if (sameContent.length) return sameContent.find(hasLabel) || sameContent[0];
+  return newDataName(originalName);
+}
+
+/** Rows of a roster image read by the learned AI model: PaddleOCR lines -> model -> rows. */
+async function readImageWithModel(filePath) {
+  const t0 = Date.now();
+  const lines = await ocrLines(filePath);
+  const ocrMs = Date.now() - t0;
+  const { width, height } = await sharp(filePath).metadata();
+  const t1 = Date.now();
+  const result = await extractImageWithModel(lines, width, height);
+  return { ...result, _timings: { ocrMs, modelMs: Date.now() - t1 } };
+}
+
+/** How many rows of the image's verified label a result got exactly right (null when unlabeled). */
+function scoreVsLabel(name, result) {
+  if (!hasLabel(name)) return null;
+  const label = JSON.parse(fs.readFileSync(labelPathOf(labelsPath, name), 'utf8'));
+  const score = { rowMatches: 0, rowTotal: 0 };
+  for (const sec of ['published', 'planned']) {
+    const c = compareSection(result[sec] || [], label[sec] || []);
+    score.rowMatches += c.rowMatches;
+    score.rowTotal += c.expCount;
   }
-  if (!fs.existsSync(path.join(folderPath, originalName))) return originalName;
-  const ext = path.extname(originalName);
-  return `${path.basename(originalName, ext)}-${contentHash.slice(0, 8)}${ext}`;
+  return score;
 }
 
 const activeBenchmarks = new Map();
@@ -90,7 +101,7 @@ const upload = multer({
   }
 });
 
-// Upload ảnh rồi OCR. ?strategy=vlm|paddleocr (mặc định theo STRATEGY env, fallback paddleocr)
+// Upload ảnh rồi OCR (PaddleOCR + parser).
 router.post('/ocr/upload', upload.single('image'), async (req, res) => {
   try {
     if (!req.file) {
@@ -98,8 +109,7 @@ router.post('/ocr/upload', upload.single('image'), async (req, res) => {
     }
 
     const tempPath = req.file.path;
-    const strategy = req.query.strategy;
-    const effectiveStrategy = strategy || process.env.STRATEGY || 'paddleocr';
+    const effectiveStrategy = 'paddleocr'; // the only reader since Gemini was removed (2026-10-09)
 
     // Ensure temp file has the original extension (PaddleOCR needs it)
     const origExt = path.extname(req.file.originalname);
@@ -136,45 +146,16 @@ router.post('/ocr/upload', upload.single('image'), async (req, res) => {
     const storedName = storedNameFor(req.file.originalname, md5(fs.readFileSync(finalPath)));
     // New roster = this image content was not in fake-data/ yet; it is kept there
     // (unlabeled) as future training/benchmark data once someone reviews it.
-    const isNewRoster = !fs.existsSync(path.join(folderPath, storedName));
-    if (storedName !== req.file.originalname) console.log(`[OCR Upload] ${isNewRoster ? 'Name taken by a different image' : 'Same image already stored'} -> ${storedName}`);
+    const isNewRoster = !fs.existsSync(dataFile(folderPath, storedName));
+    console.log(`[OCR Upload] ${isNewRoster ? 'New roster, stored as' : 'Same image already stored as'} ${storedName}`);
 
-    // Reuse a reviewed label, or a prediction made by this same model/parser
-    // (PIPELINE_ID); anything older is re-run. ?force=true always re-runs.
-    const forceParse = req.query.force === 'true';
-    // A label in labels/ (however it was made) is the reviewed answer for this image.
-    const labelFile = path.join(labelsPath, `${storedName}.json`);
-    const labelResult = !forceParse && fs.existsSync(labelFile)
-      ? (() => { const l = JSON.parse(fs.readFileSync(labelFile, 'utf8')); return { published: l.published || [], planned: l.planned || [], _isLabel: true, _source: 'label', _cachedAt: l._reviewedAt || null }; })()
-      : null;
-    const cachedEntry = forceParse || labelResult ? null : getCachedResult(storedName);
-    const cachedResult = labelResult || (cachedEntry && (cachedEntry._isLabel || cachedEntry._pipeline === PIPELINE_ID) ? cachedEntry : null);
-    let result;
-    let fromCache = false;
-    let timings = null; // per-step ms, only when this request actually ran OCR / Gemini
-    
-    if (cachedResult) {
-      console.log(`[OCR Upload] Cache HIT for ${storedName} (${cachedResult._isLabel ? 'reviewed label' : 'same pipeline'}, cached at ${cachedResult._cachedAt})`);
-      result = cachedResult;
-      fromCache = true;
-    } else {
-      console.log(`[OCR Upload] Cache MISS${forceParse ? ' (forced)' : ''} - parsing...`);
-      uploadPhase = 'ocr';
-      const t1 = Date.now();
-      result = await extractRaw(finalPath, { strategy: effectiveStrategy });
-      const ocrTime = Date.now() - t1;
-      console.log(`[OCR Upload] OCR + Parse took ${ocrTime}ms`);
-      // paddleocr reports its own steps; a direct Gemini run is all "vlm"
-      timings = result?._timings || (effectiveStrategy === 'vlm' ? { vlmMs: ocrTime } : {});
-      
-      // Save to cache for next time
-      uploadPhase = 'cache-save';
-      savePredictedResult(storedName, result, {
-        source: result?._predictionSource || effectiveStrategy,
-        strategy: effectiveStrategy,
-        pipeline: PIPELINE_ID,
-      });
-    }
+    // /upload is for trying the AI model: every upload is read by the model (OCR + learned
+    // tagger), never answered from a saved label or the parser. /label Auto-fill offers the parser.
+    if (!modelInfo().ready) throw new Error('Chưa có AI model: label vài file rồi bấm "Train" ở /models.');
+    uploadPhase = 'ocr+model';
+    const result = await readImageWithModel(finalPath);
+    const timings = result._timings;
+    console.log(`[OCR Upload] AI model: OCR ${timings.ocrMs}ms + model ${timings.modelMs}ms`);
 
     console.log(`[OCR Upload] Result: published=${result?.published?.length || 0}, planned=${result?.planned?.length || 0}`);
 
@@ -184,18 +165,19 @@ router.post('/ocr/upload', upload.single('image'), async (req, res) => {
 
     // Move file to fake-data/ (rename if same filesystem, else copy)
     uploadPhase = 'file-move';
-    const destPath = path.join(folderPath, storedName);
+    const destPath = dataFile(folderPath, storedName);
+    fs.mkdirSync(path.dirname(destPath), { recursive: true });
     try {
       if (!fs.existsSync(destPath)) {
         // Try rename first (faster than copy)
         try {
           fs.renameSync(finalPath, destPath);
-          console.log(`[OCR Upload] Moved to fake-data/${storedName}`);
+          console.log(`[OCR Upload] Moved to fake-data/${path.relative(folderPath, destPath)}`);
           finalPath = null; // Already moved, don't delete
         } catch {
           // Rename failed (cross-device), fallback to copy
           fs.copyFileSync(finalPath, destPath);
-          console.log(`[OCR Upload] Copied to fake-data/${storedName}`);
+          console.log(`[OCR Upload] Copied to fake-data/${path.relative(folderPath, destPath)}`);
         }
       }
     } catch (copyErr) {
@@ -213,7 +195,7 @@ router.post('/ocr/upload', upload.single('image'), async (req, res) => {
 
     const totalLines = (result.published?.length || 0) + (result.planned?.length || 0);
     const totalTime = Date.now() - t0;
-    console.log(`[OCR Upload] Total time: ${totalTime}ms ${fromCache ? '(from cache)' : ''} | Phase: ${uploadPhase}`);
+    console.log(`[OCR Upload] Total time: ${totalTime}ms | Phase: ${uploadPhase}`);
     console.log(`[OCR Upload] Sending response: ${totalLines} total lines`);
     
     res.json({
@@ -221,15 +203,16 @@ router.post('/ocr/upload', upload.single('image'), async (req, res) => {
       planned: result.planned || [],
       totalLines,
       totalMs: totalTime,
-      timings: timings ? { ...timings, totalMs: totalTime } : null,
-      vlmSuggested: !fromCache && !!result?._vlmSuggested,
+      timings: { ...timings, totalMs: totalTime },
       strategy: effectiveStrategy,
       fileName: storedName,
-      fromCache,
-      source: fromCache ? cachedResult._source : (result?._predictionSource || effectiveStrategy),
+      fromCache: false,
+      source: 'model',
+      model: { trainedAt: modelInfo().trainedAt || null },
       newRoster: isNewRoster,
-      labeled: fs.existsSync(path.join(labelsPath, `${storedName}.json`)),
-      quality: result?._quality ? { confidence: result._quality.confidence, reason: result._quality.reason } : null,
+      labeled: hasLabel(storedName),
+      vsLabel: scoreVsLabel(storedName, result),
+      quality: null,
       success: true
     });
   } catch (err) {
@@ -277,20 +260,48 @@ router.get('/files', (req, res) => {
   }
 });
 
+// Remove a roster file (image or PDF) from the dataset, from /label. Nothing is
+// erased: the file, its label and its cached OCR result move to
+// tmp/trash/<date>/ (same relative paths), so a wrong delete can be undone by
+// moving them back. Training and benchmarks list fake-data/, so they skip it.
+router.delete('/files', (req, res) => {
+  const name = String(req.query.name || '');
+  if (!isDataName(name)) return res.status(400).json({ error: 'Missing or invalid ?name=' });
+  const root = path.resolve(__dirname, '..');
+  const file = dataFile(folderPath, name);
+  if (!fs.existsSync(file)) return res.status(404).json({ error: 'File not found' });
+  const trash = path.join(root, 'tmp', 'trash', new Date().toISOString().slice(0, 10));
+  const moved = [];
+  try {
+    for (const src of [file, labelPathOf(labelsPath, name), path.join(root, 'cache', 'parsed', `${name}.json`)]) {
+      if (!fs.existsSync(src)) continue;
+      const dst = path.join(trash, path.relative(root, src));
+      fs.mkdirSync(path.dirname(dst), { recursive: true });
+      fs.renameSync(src, dst);
+      moved.push(path.relative(root, dst).replace(/\\/g, '/'));
+    }
+    contentIndex.delete(name);
+    res.json({ ok: true, name, moved });
+  } catch (e) {
+    console.error('[DELETE /api/files]', e);
+    res.status(500).json({ error: e.message, moved });
+  }
+});
+
 // Serve raw image file (dùng cho <img src="/api/raw?name=...">)
 router.get('/raw', (req, res) => {
-  const name = req.query.name;
-  if (!name) return res.status(400).send('Missing ?name=');
-  const filePath = path.join(folderPath, name);
+  const name = String(req.query.name || '');
+  if (!isDataName(name)) return res.status(400).send('Missing or invalid ?name=');
+  const filePath = dataFile(folderPath, name);
   if (!fs.existsSync(filePath)) return res.status(404).send('File not found');
   res.sendFile(filePath);
 });
 
 // GET label JSON cho 1 file
 router.get('/labels', (req, res) => {
-  const name = req.query.name;
-  if (!name) return res.status(400).json({ error: 'Missing ?name=' });
-  const labelFile = path.join(labelsPath, `${name}.json`);
+  const name = String(req.query.name || '');
+  if (!isDataName(name)) return res.status(400).json({ error: 'Missing or invalid ?name=' });
+  const labelFile = labelPathOf(labelsPath, name);
   if (!fs.existsSync(labelFile)) return res.status(404).json({ error: 'No label yet' });
   try {
     const raw = fs.readFileSync(labelFile, 'utf8');
@@ -304,14 +315,13 @@ router.get('/labels', (req, res) => {
 // tự động (learned corrections / auto-calibrate đã bị gỡ 2026-10-06).
 router.post('/labels', async (req, res) => {
   const name = String(req.query.name || '');
-  if (!name) return res.status(400).json({ error: 'Missing ?name=' });
-  if (path.basename(name) !== name) return res.status(400).json({ error: 'Invalid name' });
-  if (!fs.existsSync(path.join(folderPath, name))) return res.status(404).json({ error: 'Image not found in fake-data' });
+  if (!isDataName(name) || kindOf(name) !== 'image') return res.status(400).json({ error: 'Missing or invalid ?name=' });
+  if (!fs.existsSync(dataFile(folderPath, name))) return res.status(404).json({ error: 'Image not found in fake-data' });
   if (!Array.isArray(req.body?.published) || !Array.isArray(req.body?.planned)) {
     return res.status(400).json({ error: 'Body must have published[] and planned[]' });
   }
-  if (!fs.existsSync(labelsPath)) fs.mkdirSync(labelsPath, { recursive: true });
-  const labelFile = path.join(labelsPath, `${name}.json`);
+  const labelFile = labelPathOf(labelsPath, name);
+  fs.mkdirSync(path.dirname(labelFile), { recursive: true });
   try {
     const labelPayload = {
       published: req.body.published,
@@ -324,33 +334,28 @@ router.post('/labels', async (req, res) => {
     // Next upload of the same image returns this reviewed label.
     saveLabelResult(name, labelPayload, { source: 'manual-label', reviewedByUser: true });
     console.log(`[Labels] Saved label + cache for ${name}`);
-    res.json({ ok: true, file: `labels/${name}.json` });
+    res.json({ ok: true, file: `labels/${path.relative(labelsPath, labelFile).replace(/\\/g, '/')}` });
   } catch (e) {
     res.status(500).json({ error: String(e) });
   }
 });
 
-// Review one labeled image against its label (benchmark "Xem" -> /upload?review=<name>).
-// Prediction = cached one from this same model/parser (PIPELINE_ID), else a fresh
-// OCR run without Gemini, i.e. what the benchmark scores. Rows are paired with
-// the benchmark's own alignRows, so the marked cells are the benchmark's errors.
+// Review one labeled image against its label (/benchmark "Xem & sửa" -> /label?review=1).
+// Prediction = the AI model's reading, as /upload and the AI model benchmark read it.
+// Rows are paired with the benchmark's own alignRows, so the marked cells are the benchmark's errors.
 const REVIEW_FIELDS = ['date', 'day', 'duty', 'dep', 'begin', 'end', 'arr'];
 router.get('/review', async (req, res) => {
   const name = String(req.query.name || '');
-  if (!name || path.basename(name) !== name) return res.status(400).json({ error: 'Missing or invalid ?name=' });
-  const filePath = path.join(folderPath, name);
+  if (!isDataName(name) || kindOf(name) !== 'image') return res.status(400).json({ error: 'Missing or invalid ?name=' });
+  const filePath = dataFile(folderPath, name);
   if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Image not found in fake-data' });
-  const labelFile = path.join(labelsPath, `${name}.json`);
+  const labelFile = labelPathOf(labelsPath, name);
   if (!fs.existsSync(labelFile)) return res.status(404).json({ error: 'This image has no label yet' });
+  if (!modelInfo().ready) return res.status(409).json({ error: 'Chưa có AI model: bấm "Train" ở /models trước.' });
   try {
     const label = JSON.parse(fs.readFileSync(labelFile, 'utf8'));
     const t0 = Date.now();
-    let pred = getCachedPrediction(name);
-    const fromCache = !!pred && pred._pipeline === PIPELINE_ID;
-    if (!fromCache) {
-      pred = await extractRaw(filePath, { strategy: 'paddleocr', allowVlmFallback: false });
-      savePredictedResult(name, pred, { source: 'paddleocr', strategy: 'paddleocr', pipeline: PIPELINE_ID });
-    }
+    const pred = await readImageWithModel(filePath);
     const sections = {};
     let diffCells = 0, missingRows = 0, extraRows = 0;
     for (const sec of ['published', 'planned']) {
@@ -362,47 +367,38 @@ router.get('/review', async (req, res) => {
         return { kind: diff.length ? 'diff' : 'match', row: p, label: e, diff };
       });
     }
-    res.json({ fileName: name, sections, diffCells, missingRows, extraRows, fromCache, totalMs: Date.now() - t0 });
+    res.json({ fileName: name, sections, diffCells, missingRows, extraRows, totalMs: Date.now() - t0 });
   } catch (e) {
     console.error('[/api/review]', e);
     res.status(500).json({ error: e.message });
   }
 });
 
-// Predict (inference) trên ảnh trong fake-data — dùng cho Auto-fill trong label tool
+// Predict (inference) trên ảnh trong fake-data — dùng cho Auto-fill trong label tool.
+// ?engine=parser (mặc định: OCR + services/roster-parser.js) | model (OCR + AI model).
 router.get('/predict', async (req, res) => {
-  const name = req.query.name;
-  if (!name) return res.status(400).json({ error: 'Missing ?name=' });
-  const filePath = path.join(folderPath, name);
+  const engine = String(req.query.engine || 'parser');
+  if (!['parser', 'model'].includes(engine)) return res.status(400).json({ error: 'engine must be parser or model' });
+  const name = String(req.query.name || '');
+  if (!isDataName(name) || kindOf(name) !== 'image') return res.status(400).json({ error: 'Missing or invalid ?name=' });
+  const filePath = dataFile(folderPath, name);
   if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'File not found' });
   try {
-    const strategy = req.query.strategy; // 'vlm' | 'trocr'
-    const data = await extractRaw(filePath, strategy ? { strategy } : undefined);
-    savePredictedResult(name, data, {
-      source: data?._predictionSource || strategy || process.env.STRATEGY || 'paddleocr',
-      strategy: strategy || process.env.STRATEGY || 'paddleocr',
-    });
-    res.json(data);
+    if (engine === 'model') {
+      if (!modelInfo().ready) return res.status(409).json({ error: 'Chưa có AI model: bấm "Train" ở /models trước.' });
+      const data = await readImageWithModel(filePath);
+      return res.json({ ...data, source: 'model', vsLabel: scoreVsLabel(name, data) });
+    }
+    const data = await extractWithPaddleOCR(filePath);
+    savePredictedResult(name, data, { source: 'paddleocr', strategy: 'paddleocr' });
+    res.json({ ...data, source: 'parser', vsLabel: scoreVsLabel(name, data) });
   } catch (e) {
     console.error('[/api/predict]', e);
     res.status(500).json({ error: String(e) });
   }
 });
 
-// Benchmark JSON raw — view /benchmark sẽ fetch endpoint này
-router.get('/benchmark', async (req, res) => {
-  try {
-    const strategy = req.query.strategy;
-    // dedupe: byte-identical copies (69 of 160 files) are scored once, as in `npm run benchmark`.
-    const result = await runBenchmark({ strategy, folderPath, labelsPath, dedupe: true });
-    res.json(result);
-  } catch (e) {
-    console.error('[/api/benchmark]', e);
-    res.status(500).json({ error: String(e) });
-  }
-});
-
-// Stop benchmark đang chạy (SSE mode)
+// Stop a running AI model benchmark (GET /api/benchmark/model/stream below)
 router.post('/benchmark/stop', (req, res) => {
   const runId = String(req.query.runId || req.body?.runId || '').trim();
   if (!runId) return res.status(400).json({ ok: false, error: 'Missing runId' });
@@ -417,57 +413,30 @@ router.post('/benchmark/stop', (req, res) => {
   return res.json({ ok: true, runId, stopping: true });
 });
 
-// Benchmark stream (SSE) - realtime progress per file
-router.get('/benchmark/stream', async (req, res) => {
-  const strategy = req.query.strategy;
+// AI model over every labeled image and PDF (services/model-benchmark.js), streamed per file.
+// Stop with POST /api/benchmark/stop?runId=….
+router.get('/benchmark/model/stream', async (req, res) => {
   const runId = String(req.query.runId || `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`);
-  let closed = false;
-
-  if (activeBenchmarks.has(runId)) {
-    return res.status(409).json({ error: `Benchmark runId already active: ${runId}` });
-  }
-
-  const runState = {
-    runId,
-    stopRequested: false,
-    startedAt: Date.now(),
-    stoppedAt: null,
-  };
+  if (activeBenchmarks.has(runId)) return res.status(409).json({ error: `Benchmark runId already active: ${runId}` });
+  const runState = { runId, stopRequested: false, startedAt: Date.now(), stoppedAt: null };
   activeBenchmarks.set(runId, runState);
-
+  let closed = false;
   const send = (event, payload) => {
     if (closed) return;
-    res.write(`event: ${event}\n`);
-    res.write(`data: ${JSON.stringify({ runId, ...payload })}\n\n`);
+    res.write(`event: ${event}\ndata: ${JSON.stringify({ runId, ...payload })}\n\n`);
   };
-
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
   res.flushHeaders?.();
-
-  const heartbeat = setInterval(() => {
-    if (!closed) res.write(': keep-alive\n\n');
-  }, 15000);
-
-  req.on('close', () => {
-    closed = true;
-    runState.stopRequested = true;
-    clearInterval(heartbeat);
-  });
-
+  const heartbeat = setInterval(() => { if (!closed) res.write(': keep-alive\n\n'); }, 15000);
+  req.on('close', () => { closed = true; runState.stopRequested = true; clearInterval(heartbeat); });
+  const kinds = ['image', 'pdf'].filter(k => !req.query.kind || req.query.kind === k);
   try {
-    await runBenchmark({
-      strategy,
-      folderPath,
-      labelsPath,
-      dedupe: true,
+    await runModelBenchmark({
+      kinds,
       shouldStop: () => closed || runState.stopRequested,
-      onEvent: (evt) => {
-        if (evt?.type === 'start') send('start', evt);
-        else if (evt?.type === 'file') send('file', evt);
-        else if (evt?.type === 'done') send('done', evt);
-      },
+      onEvent: (evt) => send(evt.type, evt),
     });
   } catch (e) {
     send('error', { error: String(e?.message || e) });

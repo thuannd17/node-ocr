@@ -14,8 +14,8 @@
  * by GROUP so copies always land on the same side.
  */
 import fs from 'node:fs';
-import path from 'node:path';
 import crypto from 'node:crypto';
+import { dataFile, labelFile } from './data-files.js';
 
 const FIELDS = ['duty', 'dep', 'arr'];
 
@@ -27,7 +27,7 @@ export function hashFileContent(filePath) {
 export function groupByContent(dir, names) {
 	const groups = new Map();
 	for (const name of [...names].sort()) {
-		const id = hashFileContent(path.join(dir, name));
+		const id = hashFileContent(dataFile(dir, name));
 		if (!groups.has(id)) groups.set(id, []);
 		groups.get(id).push(name);
 	}
@@ -55,6 +55,8 @@ export function splitByGroup(groupId, trainRatio = 0.9) {
  * transitively.
  *
  * @param {Map<string,string>} canonical content-group id -> representative file name
+ * @param {string} labelsDir labels/ folder the rows are read from
+ * @param {number} [threshold=0.5] share of the smaller group's rows that must match
  * @returns {Map<string,string>} content-group id -> cluster id (a member group id)
  */
 export function rosterClusters(canonical, labelsDir, threshold = 0.5) {
@@ -84,6 +86,7 @@ export function rosterClusters(canonical, labelsDir, threshold = 0.5) {
  * first (ties by hash), each to the fold with the fewest images so far.
  * Deterministic for a given label set.
  * @param {Map<string,string>} clusterOf content-group id -> cluster id
+ * @param {number} k number of folds
  * @returns {Map<string,number>} content-group id -> fold index 0..k-1
  */
 export function assignFolds(clusterOf, k) {
@@ -107,7 +110,7 @@ export function assignFolds(clusterOf, k) {
 
 function readRows(labelsDir, name) {
 	try {
-		const j = JSON.parse(fs.readFileSync(path.join(labelsDir, `${name}.json`), 'utf8'));
+		const j = JSON.parse(fs.readFileSync(labelFile(labelsDir, name), 'utf8'));
 		return [...(j.published || []), ...(j.planned || [])];
 	} catch {
 		return null;

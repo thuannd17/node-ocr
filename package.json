@@ -5,11 +5,12 @@
   "main": "index.js",
   "type": "module",
   "dependencies": {
-    "@google/genai": "^2.16.0",
+    "@fortawesome/fontawesome-free": "^6.7.2",
     "express": "^5.2.1",
     "form-data": "^4.0.6",
-    "multer": "^2.2.0",
-    "sharp": "^0.35.3"
+    "multer": "^2.4.0",
+    "pdfjs-dist": "^4.10.38",
+    "sharp": "^0.35.5"
   },
   "scripts": {
     "start": "node --env-file=.env index.js",
@@ -18,10 +19,15 @@
     "ocr:check": ".\\.venv\\Scripts\\python scripts/ocr_healthcheck.py",
     "audit-labels": "node --env-file=.env scripts/audit-labels.mjs",
     "benchmark": "node --env-file=.env scripts/benchmark.mjs",
+    "benchmark:pdf": "node --env-file=.env scripts/benchmark-pdf.mjs",
+    "benchmark:model": "node --env-file=.env scripts/benchmark-model.mjs",
+    "parse-pdf": "node --env-file=.env scripts/parse-pdf.mjs",
     "build-recognition-groundtruth": "node --env-file=.env scripts/build-recognition-groundtruth.mjs",
     "kfold-recognition": "node --env-file=.env scripts/kfold-recognition.mjs",
     "retrain-check": "node --env-file=.env scripts/retrain-check.mjs",
-    "use-model": "node scripts/use-model.mjs"
+    "use-model": "node scripts/use-model.mjs",
+    "train:pdf": "node scripts/train-pdf-model.mjs",
+    "eval:pdf-model": "node scripts/eval-pdf-assembler.mjs"
   },
   "author": "ThuanND",
   "license": "ISC"

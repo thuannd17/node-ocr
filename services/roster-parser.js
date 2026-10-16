@@ -105,13 +105,6 @@ function levenshtein(a, b) {
 
 const pad2 = n => String(n).padStart(2, '0');
 
-function median(arr) {
-  if (!Array.isArray(arr) || arr.length === 0) return null;
-  const sorted = arr.filter(Number.isFinite).sort((a, b) => a - b);
-  if (sorted.length === 0) return null;
-  const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
-}
 
 function fuzzyMonth(s) {
   if (!s) return null;
@@ -1003,7 +996,7 @@ function parseContentRow(row, prevDate, colRanges, prevDay, findClosestDate) {
       right: Math.round(boxRight),
     };
 
-    const parsedRow = {
+    return {
       date,
       day: day.toUpperCase(),
       duty,
@@ -1022,8 +1015,6 @@ function parseContentRow(row, prevDate, colRanges, prevDay, findClosestDate) {
         ? row.lines.some(l => l.x0 < colRanges.dutyLeft - 5 && /[A-Za-z0-9]/.test(l.text))
         : null,
     };
-
-    return parsedRow;
  }
 
 const GLUED_WEEKDAY_RE = /^(?:(Mo|Tu|We|Th|Fr|Sa|Su|Sn)[a-z]{0,2}1?(?:\d{1,2}(?!\d)|(?=[\s,.]|$))|([FMW])(?=\d{1,3}(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)))/;
@@ -1580,13 +1571,13 @@ function parseContentOnly(lines, rows, learnedRanges) {
  }
 
  /**
-  * Analyze extraction quality and determine if VLM fallback should be triggered.
-  * Returns: { shouldUseVLM: boolean, confidence: number, reason: string }
+  * Analyze extraction quality: is the result worth a closer look?
+  * Returns: { lowQuality: boolean, confidence: number, reason: string }
   */
  export function analyzeExtractionQuality(result) {
    const allRows = [...(result.published || []), ...(result.planned || [])];
    if (allRows.length === 0) {
-     return { shouldUseVLM: true, confidence: 0, reason: 'No rows extracted' };
+     return { lowQuality: true, confidence: 0, reason: 'No rows extracted' };
    }
 
    // Calculate average confidence
@@ -1602,25 +1593,25 @@ function parseContentOnly(lines, rows, learnedRanges) {
    ).length;
    const criticalFailureRatio = criticalFailures / allRows.length;
 
-   // Determine if VLM fallback is needed
-   let shouldUseVLM = false;
+   // Is the result worth a closer look?
+   let lowQuality = false;
    let reason = '';
 
    if (allRows.length < 5) {
-     shouldUseVLM = true;
+     lowQuality = true;
      reason = `Too few rows extracted (${allRows.length})`;
    } else if (avgConfidence < 0.45) {
-     shouldUseVLM = true;
+     lowQuality = true;
      reason = `Low average confidence (${(avgConfidence * 100).toFixed(0)}%)`;
    } else if (lowConfRatio > 0.3) {
-     shouldUseVLM = true;
+     lowQuality = true;
      reason = `${Math.round(lowConfRatio * 100)}% of rows have low confidence`;
    } else if (criticalFailureRatio > 0.2) {
-     shouldUseVLM = true;
+     lowQuality = true;
      reason = `${Math.round(criticalFailureRatio * 100)}% of rows have critical field failures`;
    }
 
-   return { shouldUseVLM, confidence: avgConfidence, reason };
+   return { lowQuality, confidence: avgConfidence, reason };
  }
 
  /**
@@ -1639,3 +1630,22 @@ function parseContentOnly(lines, rows, learnedRanges) {
    };
  }
 
+
+/**
+ * The OCR repairs of this parser, for rows read another way (the learned
+ * extractor, services/pdf-row-assembler.js, on roster images): duty slips and
+ * date-cell debris, fixed OFF(Z)/C19 times, missing arrivals, airport chain,
+ * flight-number spacing. In place; returns the result.
+ */
+export function repairImageRows(result) {
+  const sections = [result.published || [], result.planned || []];
+  for (const r of sections.flat()) {
+    if (r.duty) r.duty = cleanDutyJunk(normDuty(r.duty));
+    const fixed = FIXED_DUTY_TIMES[r.duty];
+    if (fixed) { r.begin ||= fixed[0]; r.end ||= fixed[1]; }
+  }
+  for (const rows of sections) inferMissingArr(rows);
+  reconcileAirportChain(sections);
+  harmonizeFlightSpacing(sections.flat());
+  return result;
+}

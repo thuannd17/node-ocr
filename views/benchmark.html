@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Benchmark — Roster OCR</title>
   <link rel="stylesheet" href="/assets/app.css">
+  <link rel="stylesheet" href="/assets/fontawesome/css/all.min.css">
   <style>
     .controls {
       display: flex;
@@ -18,13 +19,6 @@
     }
     .controls select {
       padding: 8px 12px;
-      border: 1px solid #ddd;
-      border-radius: 6px;
-      font-size: 14px;
-    }
-    .controls input[type="number"] {
-      width: 90px;
-      padding: 8px 10px;
       border: 1px solid #ddd;
       border-radius: 6px;
       font-size: 14px;
@@ -77,318 +71,189 @@
     .error { color: #d32f2f; background: #ffebee; padding: 15px; border-radius: 6px; display: none; }
     .error.visible { display: block; }
     .empty { color: #999; font-style: italic; padding: 30px; text-align: center; background: white; border-radius: 8px; }
-    pre.detail {
-      font-size: 11px;
-      white-space: pre-wrap;
-      max-height: 300px;
-      overflow-y: auto;
-      background: #f7f7f7;
-      padding: 8px;
-      border-radius: 4px;
-    }
     details summary { cursor: pointer; color: #4a90e2; }
+    .bench-heading { color: #2b3a55; margin: 8px 0 12px 0; font-size: 20px; }
+    .bench-heading small { font-weight: normal; color: #888; font-size: 13px; }
+    ul.diff { margin: 6px 0 0 0; padding-left: 18px; font-size: 12px; max-height: 300px; overflow-y: auto; }
+    ul.diff code { background: #f3f3f3; padding: 0 3px; border-radius: 3px; }
   </style>
 </head>
 <body>
   <script src="/assets/nav.js"></script>
   <main class="page">
   <div class="page-header">
-    <h1>📊 Benchmark Accuracy</h1>
-    <p class="subtitle">So sánh kết quả OCR với ground-truth trong <code>labels/</code></p>
+    <h1><i class="fa-solid fa-chart-column" aria-hidden="true"></i> Benchmark Accuracy</h1>
+    <p class="subtitle">AI model đọc từng file đã gán nhãn đúng như ở /upload, rồi so với nhãn (<code>labels/&lt;đuôi&gt;/</code>)</p>
   </div>
 
-  <div class="controls">
-    <label for="strategySelect"><b>Strategy:</b></label>
-    <select id="strategySelect">
-      <option value="paddleocr" selected>PaddleOCR (offline, nhanh, khuyen dung)</option>
-      <option value="vlm">VLM — Gemini</option>
-    </select>
-    <span style="font-size:12px;color:#666;background:#eef;padding:3px 8px;border-radius:4px;display:inline">Stability mode: single worker</span>
-    <button id="runBtn">▶ Chạy benchmark</button>
-    <span id="status" style="color:#888;font-size:13px"></span>
-  </div>
-
-  <div id="error" class="error"></div>
-  <div id="result">
-    <div class="empty">Chọn strategy rồi bấm <b>Chạy benchmark</b> để bắt đầu.</div>
-  </div>
+  <section class="model-section">
+    <h2 class="bench-heading"><i class="fa-solid fa-brain" aria-hidden="true"></i> AI model: ảnh + PDF <small>đọc như ở /upload, so với ground-truth trong <code>labels/</code></small></h2>
+    <div class="controls">
+      <b>AI model</b>
+      <select id="modelKind" title="Loại file đo">
+        <option value="">Ảnh + PDF</option>
+        <option value="image">Chỉ ảnh</option>
+        <option value="pdf">Chỉ PDF</option>
+      </select>
+      <span style="font-size:12px;color:#666">Ảnh cần OCR server đang chạy · khoảng 10–15 phút cho toàn bộ</span>
+      <button id="modelRunBtn"><i class="fa-solid fa-play" aria-hidden="true"></i> Chạy benchmark AI model</button>
+      <span id="modelStatus" style="color:#888;font-size:13px"></span>
+    </div>
+    <div id="modelError" class="error"></div>
+    <div id="modelResult">
+      <div class="empty">Bấm <b>Chạy benchmark AI model</b> để đo xem AI model đọc đúng bao nhiêu % dòng so với nhãn.</div>
+    </div>
+  </section>
 
   </main>
 
+  <!-- "Xem & sửa": the /label viewer popup for one file, over this page -->
+  <iframe id="labelPopup" title="Xem &amp; sửa nhãn" hidden
+    style="position:fixed; inset:0; width:100%; height:100%; border:0; z-index:2000; background:transparent; color-scheme:normal"></iframe>
+
   <script>
-    const FIELDS = ['date', 'day', 'duty', 'dep', 'begin', 'end', 'arr'];
-    let benchmarkRunning = false;
-    let stopRequested = false;
-    let currentRunId = null;
-    let currentEventSource = null;
-    let legacyAbortController = null;
-
     const $ = (id) => document.getElementById(id);
-
-    function setRunButtonState() {
-      const btn = $('runBtn');
-      if (!benchmarkRunning) {
-        btn.textContent = '▶ Chạy benchmark';
-        btn.title = '';
-        return;
-      }
-      if (stopRequested) {
-        btn.textContent = '⏳ Đang dừng...';
-        btn.title = 'Đang chờ job hiện tại hoàn tất rồi dừng';
-        return;
-      }
-      btn.textContent = '■ Dừng benchmark';
-      btn.title = 'Dừng benchmark và trả report tại thời điểm dừng';
-    }
 
     function escapeHtml(s) {
       const m = { 38: 'amp', 60: 'lt', 62: 'gt', 34: 'quot', 39: '#039' };
       return String(s).replace(/[&<>"']/g, (c) => '&' + m[c.charCodeAt(0)] + ';');
     }
 
-    function pct(n, total) {
-      if (!total) return '—';
-      return ((n / total) * 100).toFixed(1) + '%';
+    // One difference between the model's rows and the label (services/model-benchmark.js diffs)
+    function diffLine(e) {
+      const sec = e.section === 'planned' ? '[planned] ' : '';
+      if (e.kind === 'field') {
+        return `${sec}${escapeHtml(e.date)} ${escapeHtml(e.duty || '')} · <b>${escapeHtml(e.field)}</b>: <code>${escapeHtml(e.pred) || '∅'}</code> (nhãn <code>${escapeHtml(e.exp) || '∅'}</code>)`;
+      }
+      if (e.kind === 'missing') return `${sec}thiếu dòng ${escapeHtml(e.exp.date)} ${escapeHtml(e.exp.duty || '')}`;
+      return `${sec}thừa dòng ${escapeHtml(e.pred.date)} ${escapeHtml(e.pred.duty || '')}`;
     }
 
-    async function runBenchmark() {
-      if (benchmarkRunning) {
-        await stopBenchmark();
+    // "Xem & sửa" opens the /label viewer in a popup over this page (a middle/ctrl
+    // click still opens /label in a new tab). The popup says when it is closed.
+    const labelPopup = $('labelPopup');
+    document.addEventListener('click', (e) => {
+      const a = e.target.closest('a[data-label-popup]');
+      if (!a || e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey) return;
+      e.preventDefault();
+      const name = a.dataset.labelPopup;
+      labelPopup.src = `/label?embed=1${a.dataset.review ? '&review=1' : ''}&name=${encodeURIComponent(name)}`;
+      labelPopup.hidden = false;
+      document.body.style.overflow = 'hidden';
+      labelPopup.onload = () => labelPopup.contentWindow.focus();
+    });
+    window.addEventListener('message', (e) => {
+      if (e.origin !== location.origin || e.data?.type !== 'label-popup-close') return;
+      labelPopup.hidden = true;
+      labelPopup.removeAttribute('src');
+      document.body.style.overflow = '';
+      if (!e.data.saved) return;
+      // The scores on this page were computed with the old label.
+      for (const a of document.querySelectorAll('a[data-label-popup]')) {
+        if (a.dataset.labelPopup !== e.data.name || a.nextElementSibling?.classList.contains('saved-note')) continue;
+        a.insertAdjacentHTML('afterend', ' <span class="saved-note" style="font-size:12px; color:#2e7d32" title="Chạy lại benchmark để cập nhật điểm"><i class="fa-solid fa-check" aria-hidden="true"></i> đã lưu nhãn</span>');
+      }
+    });
+
+    // ---- AI model over images and PDFs (/api/benchmark/model/stream) ----
+    let modelRun = null; // { es, runId } while running
+    const MODEL_COMMON = ['date', 'day', 'duty', 'dep', 'begin', 'end', 'arr'];
+    const MODEL_PDF_ONLY = ['hotel', 'dc', 'registration', 'ac', 'crew', 'info'];
+
+    function modelCards(r) {
+      const card = (v, label) => `<div class="stat-card"><div class="stat-value">${v}</div><div class="stat-label">${label}</div></div>`;
+      const pctOf = (s) => (s.rowTotal ? `${s.rowExact}%` : '–');
+      return `<div class="summary">
+        ${card(pctOf(r.overall), `<b>Chung</b>: đúng ${r.overall.rowMatches}/${r.overall.rowTotal} dòng · ${r.overall.files} file`)}
+        ${card(pctOf(r.image), `Ảnh: ${r.image.rowMatches}/${r.image.rowTotal} dòng · ${r.image.files} file`)}
+        ${card(pctOf(r.pdf), `PDF: ${r.pdf.rowMatches}/${r.pdf.rowTotal} dòng · ${r.pdf.files} file`)}
+        ${card(r.errors, 'file lỗi đọc')}
+      </div>`;
+    }
+
+    function modelFieldTable(r) {
+      const cell = (v) => (v && v.total ? `${v.pct}%<br/><small>${v.matches}/${v.total}</small>` : '–');
+      const row = (name, pf, fields) => `<tr><th style="text-align:left">${name}</th>${fields.map(f => `<td>${cell(pf[f])}</td>`).join('')}</tr>`;
+      const fields = [...MODEL_COMMON, ...MODEL_PDF_ONLY];
+      return `<h3 class="section-title">Độ chính xác theo cột</h3>
+        <div style="overflow-x:auto"><table>
+          <tr><th></th>${fields.map(f => `<th>${f}</th>`).join('')}</tr>
+          ${row('Chung', r.overall.perField, fields)}
+          ${row('Ảnh', r.image.perField, fields)}
+          ${row('PDF', r.pdf.perField, fields)}
+        </table></div>
+        <p style="font-size:12px;color:#888">Ảnh chỉ có 7 cột (so khớp chịu được lỗi OCR như benchmark ảnh); PDF có 13 cột, so khớp chính xác. "Chung" chỉ tính 7 cột cả hai loại đều có.</p>`;
+    }
+
+    function modelFileTable(files) {
+      const sorted = files.slice().sort((a, b) => (a.error ? -1 : b.error ? 1 : (a.rowExact ?? 0) - (b.rowExact ?? 0)));
+      const rows = sorted.map((f) => {
+        const review = f.kind === 'image' && !f.error ? ' data-review="1"' : '';
+        const link = `<a href="/label?name=${encodeURIComponent(f.file)}" data-label-popup="${escapeHtml(f.file)}"${review} title="Mở file và nhãn của nó${review ? ', các ô AI model đọc khác nhãn được đánh dấu' : ''}"><i class="fa-solid fa-pen-to-square" aria-hidden="true"></i> Xem &amp; sửa</a>`;
+        const tags = [f.source === 'parser' ? '<span title="PDF chỉ có ảnh: AI model không đọc được, parser đọc chữ OCR (như /upload)">parser</span>' : '',
+          f.afterTraining ? '<span title="Nhãn được tạo/sửa sau lần train model gần nhất">nhãn mới</span>' : ''].filter(Boolean).join(' · ');
+        const score = f.error ? `<span style="color:#d32f2f">${escapeHtml(f.error)}</span>` : `${f.rowMatches}/${f.rowTotal} (${f.rowExact ?? 0}%)`;
+        const more = f.diffCount > (f.diffs || []).length ? `<li>… và ${f.diffCount - f.diffs.length} khác biệt nữa</li>` : '';
+        const diff = f.diffCount
+          ? `<details><summary style="font-size:12px">${f.diffCount} khác biệt</summary><ul class="diff">${f.diffs.map((e) => `<li>${diffLine(e)}</li>`).join('')}${more}</ul></details>`
+          : '';
+        return `<tr><td>${f.kind === 'pdf' ? '<i class="fa-solid fa-file-pdf" title="PDF" aria-hidden="true"></i>' : '<i class="fa-solid fa-image" title="Ảnh" aria-hidden="true"></i>'}</td><td>${escapeHtml(f.file)}</td><td>${score}</td><td>${f.predCount ?? ''}</td><td style="font-size:12px;color:#888">${tags}</td><td>${link}${diff}</td></tr>`;
+      }).join('');
+      return `<h3 class="section-title">Từng file <small style="font-weight:normal;color:#888">(file sai nhiều nhất trước)</small></h3>
+        <table><tr><th></th><th>File</th><th>Dòng đúng / nhãn</th><th>Dòng model ra</th><th></th><th></th></tr>${rows}</table>`;
+    }
+
+    function renderModel(r) {
+      const trained = r.model?.trainedAt ? new Date(r.model.trainedAt).toLocaleString() : '?';
+      const note = `<p style="font-size:13px;color:#666">Model train lúc <b>${escapeHtml(trained)}</b> trên ${r.model?.files ?? '?'} file.
+        Model đã học từ chính các nhãn này nên điểm là trên dữ liệu đã thấy${r.labelsAfterTraining ? `; ${r.labelsAfterTraining} nhãn được tạo/sửa sau lần train (bấm Train ở /models để model học chúng)` : ''}.
+        ${r.stopped ? '<b>Đã dừng giữa chừng: điểm chỉ tính các file đã chạy.</b>' : ''}</p>`;
+      $('modelResult').innerHTML = modelCards(r) + note + modelFieldTable(r) + modelFileTable(r.files || []);
+    }
+
+    function runModelBenchmark() {
+      if (modelRun) { // the button stops a running benchmark
+        fetch(`/api/benchmark/stop?runId=${encodeURIComponent(modelRun.runId)}`, { method: 'POST' });
+        $('modelStatus').textContent = 'Đang dừng...';
         return;
       }
-
-      const strategy = $('strategySelect').value;
-      const errDiv = $('error');
-      const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-
-      benchmarkRunning = true;
-      stopRequested = false;
-      currentRunId = runId;
-      setRunButtonState();
-
-      errDiv.classList.remove('visible');
-      $('status').textContent = 'Đang chạy... (có thể mất vài phút)';
-      $('result').innerHTML = '';
-
-      if (!window.EventSource) {
-        await runBenchmarkLegacy(strategy, errDiv);
-        return;
-      }
-
-      const liveRows = [];
-      const renderLive = (progress, extra = '') => {
-        const p = progress?.total ? `${progress.current}/${progress.total}` : '0/0';
-        const pctText = progress?.total ? `${((progress.current / progress.total) * 100).toFixed(1)}%` : '0.0%';
-        $('result').innerHTML = `
-          <div class="summary">
-            <div class="stat-card"><div class="stat-value">${pctText}</div><div class="stat-label">Tiến độ benchmark</div></div>
-            <div class="stat-card"><div class="stat-value">${p}</div><div class="stat-label">Đã xử lý / Tổng</div></div>
-          </div>
-          <h3 class="section-title">Realtime progress ${extra ? `— ${escapeHtml(extra)}` : ''}</h3>
-          <table>
-            <tr><th>File</th><th>Pub (pred/exp)</th><th>Plan (pred/exp)</th><th>Row match</th><th>Field errors</th></tr>
-            ${liveRows.map((r) => `<tr>
-              <td>${escapeHtml(r.file || '-')}</td>
-              <td>${r.published ? `${r.published.predCount}/${r.published.expCount}` : '-'}</td>
-              <td>${r.planned ? `${r.planned.predCount}/${r.planned.expCount}` : '-'}</td>
-              <td>${r.error ? 'ERROR' : `${r.rowMatch}/${r.rowTotal} (${pct(r.rowMatch, r.rowTotal)})`}</td>
-              <td>${r.error ? escapeHtml(r.error) : (r.fieldErrors ?? 0)}</td>
-            </tr>`).join('')}
-          </table>`;
+      const btn = $('modelRunBtn');
+      const runId = `model-${Date.now()}`;
+      const kind = $('modelKind').value;
+      $('modelError').classList.remove('visible');
+      const started = Date.now();
+      const es = new EventSource(`/api/benchmark/model/stream?runId=${encodeURIComponent(runId)}${kind ? `&kind=${kind}` : ''}`);
+      modelRun = { es, runId };
+      btn.innerHTML = '<i class="fa-solid fa-stop" aria-hidden="true"></i> Dừng';
+      const done = (msg) => {
+        es.close();
+        modelRun = null;
+        btn.innerHTML = '<i class="fa-solid fa-play" aria-hidden="true"></i> Chạy benchmark AI model';
+        $('modelStatus').textContent = msg;
       };
-
-      const es = new EventSource(`/api/benchmark/stream?strategy=${encodeURIComponent(strategy)}&runId=${encodeURIComponent(runId)}`);
-      currentEventSource = es;
-
-      es.addEventListener('start', (ev) => {
-        const data = JSON.parse(ev.data || '{}');
-        $('status').textContent = `Đang chạy ${data.labeledCount || 0} ảnh...`;
-        renderLive(data.progress, 'starting');
+      const seen = [];
+      es.addEventListener('start', (e) => { $('modelStatus').textContent = `0/${JSON.parse(e.data).total} file...`; });
+      es.addEventListener('file', (e) => {
+        const { file, progress } = JSON.parse(e.data);
+        seen.push(file);
+        const m = seen.reduce((a, f) => a + (f.rowMatches || 0), 0), t = seen.reduce((a, f) => a + (f.rowTotal || 0), 0);
+        $('modelStatus').textContent = `${progress.current}/${progress.total} file · tạm tính ${t ? (100 * m / t).toFixed(1) : 0}% dòng đúng`;
       });
-
-      es.addEventListener('file', (ev) => {
-        const data = JSON.parse(ev.data || '{}');
-        if (data.file) liveRows.push(data.file);
-        $('status').textContent = `Đang chạy... ${data.progress?.current || 0}/${data.progress?.total || 0}`;
-        renderLive(data.progress, data.file?.file || 'processing');
+      es.addEventListener('done', (e) => {
+        renderModel(JSON.parse(e.data).result);
+        done(`Xong (${((Date.now() - started) / 60000).toFixed(1)} phút).`);
       });
-
-      es.addEventListener('done', (ev) => {
-        const data = JSON.parse(ev.data || '{}');
-        es.close();
-        if (currentEventSource === es) currentEventSource = null;
-        if (data.result) {
-          render(data.result);
-          $('status').textContent = data.result.stopped
-            ? `Đã dừng. Report tạm thời: ${data.result.processedCount || 0}/${data.result.labeledCount || 0} ảnh.`
-            : 'Xong.';
-        } else {
-          $('status').textContent = '';
-        }
-        benchmarkRunning = false;
-        stopRequested = false;
-        currentRunId = null;
-        setRunButtonState();
-      });
-
-      es.addEventListener('error', async () => {
-        es.close();
-        if (currentEventSource === es) currentEventSource = null;
-        if (stopRequested) {
-          $('status').textContent = 'Đã ngắt kết nối stream khi dừng benchmark.';
-          benchmarkRunning = false;
-          stopRequested = false;
-          currentRunId = null;
-          setRunButtonState();
-          return;
-        }
-        // Fallback to old non-stream endpoint if stream fails
-        await runBenchmarkLegacy(strategy, errDiv);
+      es.addEventListener('error', (e) => {
+        let msg = 'Mất kết nối tới server';
+        try { msg = JSON.parse(e.data).error || msg; } catch { /* a dropped connection has no data */ }
+        const box = $('modelError');
+        box.textContent = 'Lỗi: ' + msg;
+        box.classList.add('visible');
+        done('');
       });
     }
+    $('modelRunBtn').onclick = runModelBenchmark;
 
-    async function stopBenchmark() {
-      if (!benchmarkRunning || stopRequested) return;
-      stopRequested = true;
-      setRunButtonState();
-      $('status').textContent = 'Đang gửi yêu cầu dừng benchmark...';
-
-      // Legacy fetch mode: abort ngay request HTTP.
-      if (legacyAbortController) {
-        legacyAbortController.abort();
-      }
-
-      if (!currentRunId) return;
-      try {
-        await fetch(`/api/benchmark/stop?runId=${encodeURIComponent(currentRunId)}`, { method: 'POST' });
-        $('status').textContent = 'Đang dừng... chờ hoàn tất các ảnh đang xử lý.';
-      } catch (e) {
-        $('status').textContent = `Không gửi được lệnh dừng: ${e.message}`;
-      }
-    }
-
-    async function runBenchmarkLegacy(strategy, errDiv) {
-      legacyAbortController = new AbortController();
-      try {
-        const res = await fetch(`/api/benchmark?strategy=${encodeURIComponent(strategy)}`, {
-          signal: legacyAbortController.signal,
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
-        render(data);
-        $('status').textContent = '';
-      } catch (e) {
-        if (e.name === 'AbortError') {
-          $('status').textContent = 'Đã dừng benchmark (legacy mode).';
-        } else {
-          errDiv.textContent = 'Lỗi: ' + e.message;
-          errDiv.classList.add('visible');
-          $('status').textContent = '';
-        }
-      } finally {
-        legacyAbortController = null;
-        benchmarkRunning = false;
-        stopRequested = false;
-        currentRunId = null;
-        setRunButtonState();
-      }
-    }
-
-    function render(result) {
-      const out = $('result');
-
-      if (result.message) {
-        out.innerHTML = `<div class="empty">${escapeHtml(result.message)}</div>`;
-        return;
-      }
-
-      const agg = result.aggregate || {};
-      const perField = agg.perField || {};
-
-      // Summary cards
-      const cards = `
-        <div class="summary">
-          <div class="stat-card">
-            <div class="stat-value">${pct(agg.rowMatches || 0, agg.rowTotal || 0)}</div>
-            <div class="stat-label">Row exact match</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-value">${agg.rowMatches || 0}/${agg.rowTotal || 0}</div>
-            <div class="stat-label">Rows match</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-value">${result.labeledCount}</div>
-            <div class="stat-label">Ảnh đã label</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-value">${result.skipped}</div>
-            <div class="stat-label">Ảnh bỏ qua (chưa label)</div>
-          </div>
-        </div>`;
-
-      // Per-field accuracy table
-      const fieldHead = FIELDS.map((f) => {
-        const v = perField[f] || { matches: 0, total: 0 };
-        return `<th>${f}<br/><small>${pct(v.matches, v.total)}</small></th>`;
-      }).join('');
-      const fieldRow = FIELDS.map((f) => {
-        const v = perField[f] || { matches: 0, total: 0, levSum: 0 };
-        const levAvg = v.total ? (v.levSum / v.total).toFixed(2) : '0.00';
-        return `<td>${v.matches}/${v.total}<br/><small>lev avg: ${levAvg}</small></td>`;
-      }).join('');
-
-      const perFieldTable = `
-        <h3 class="section-title">Per-field accuracy (strategy=${escapeHtml(result.strategy || 'auto')})</h3>
-        <table>
-          <tr>${fieldHead}</tr>
-          <tr>${fieldRow}</tr>
-        </table>`;
-
-      const insights = Array.isArray(result.errorInsights) && result.errorInsights.length > 0
-        ? `
-          <h3 class="section-title">Top accuracy issues</h3>
-          <table>
-            <tr><th>#</th><th>Insight</th></tr>
-            ${result.errorInsights.map((s, i) => `<tr><td>${i + 1}</td><td>${escapeHtml(s)}</td></tr>`).join('')}
-          </table>`
-        : '';
-
-      // Per-file table
-      const fileRows = (result.files || []).map((r) => {
-        if (r.error) {
-          return `<tr style="color:#d32f2f"><td>${escapeHtml(r.file)}</td><td colspan="6">${escapeHtml(r.error)}</td></tr>`;
-        }
-        const pub = r.sections.published;
-        const plan = r.sections.planned;
-        const rowMatch = pub.rowMatches + plan.rowMatches;
-        const rowTotal = pub.rowTotal + plan.rowTotal;
-        const errors = pub.rowErrors.concat(plan.rowErrors);
-        return `
-          <tr>
-            <td>${escapeHtml(r.file)}</td>
-            <td>${pub.predCount}/${pub.expCount}</td>
-            <td>${plan.predCount}/${plan.expCount}</td>
-            <td>${rowMatch}/${rowTotal} (${pct(rowMatch, rowTotal)})</td>
-            <td>${errors.length}</td>
-            <td>
-              <a href="/upload?review=${encodeURIComponent(r.file)}" target="_blank" rel="noopener" title="Mở kết quả OCR với các ô sai được đánh dấu để sửa và lưu nhãn">Xem &amp; sửa</a>
-              <details><summary style="font-size:12px">JSON</summary><pre class="detail">${escapeHtml(JSON.stringify(errors, null, 2))}</pre></details>
-            </td>
-          </tr>`;
-      }).join('');
-
-      const perFileTable = `
-        <h3 class="section-title">Per-file results</h3>
-        <table>
-          <tr><th>File</th><th>Pub (pred/exp)</th><th>Plan (pred/exp)</th><th>Row match</th><th>Field errors</th><th>Detail</th></tr>
-          ${fileRows}
-        </table>`;
-
-      out.innerHTML = cards + perFieldTable + insights + perFileTable;
-    }
-
-    $('runBtn').onclick = runBenchmark;
-    setRunButtonState();
   </script>
 </body>
 </html>

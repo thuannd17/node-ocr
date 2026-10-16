@@ -27,6 +27,7 @@ import crypto from 'node:crypto';
 import { groupByContent, pickCanonicalLabels } from '../utils/content-groups.js';
 import { parseRoster, cleanExtractionResult } from '../services/roster-parser.js';
 import { compareSection } from '../services/benchmark.js';
+import { listData, dataFile, labelFile } from '../utils/data-files.js';
 
 const ROOT = process.cwd();
 const IS_WIN = process.platform === 'win32';
@@ -71,7 +72,7 @@ function deployedVersion() {
 
 /** Labeled images, one per distinct content: Map hash -> file name. */
 function labeledRosters() {
-	const names = fs.readdirSync(FAKE_DATA).filter(n => fs.existsSync(path.join(LABELS, `${n}.json`)));
+	const names = listData(FAKE_DATA, 'image').filter(n => fs.existsSync(labelFile(LABELS, n)));
 	const groups = groupByContent(FAKE_DATA, names);
 	const { canonical } = pickCanonicalLabels(groups, LABELS);
 	return { names, canonical };
@@ -133,7 +134,7 @@ async function ocrImages(inferDir, todo, outDir, suffix, prog) {
 		for (const n of todo) {
 			const res = await fetch(`${url}/ocr`, {
 				method: 'POST', headers: { 'content-type': 'application/json' },
-				body: JSON.stringify({ path: path.join(FAKE_DATA, n) }), signal: AbortSignal.timeout(300000),
+				body: JSON.stringify({ path: dataFile(FAKE_DATA, n) }), signal: AbortSignal.timeout(300000),
 			});
 			const data = await res.json();
 			if (!data?.ok) throw new Error(`OCR failed for ${n}: ${data?.error}`);
@@ -152,7 +153,7 @@ function score(linesDir, names) {
 	const perImage = {};
 	for (const n of names) {
 		const pred = cleanExtractionResult(parseRoster(readJson(path.join(linesDir, `${n}.lines.json`))));
-		const label = readJson(path.join(LABELS, `${n}.json`));
+		const label = readJson(labelFile(LABELS, n));
 		let ok = 0, total = 0;
 		for (const s of ['published', 'planned']) {
 			const r = compareSection(pred[s] || [], label[s] || []);
@@ -225,7 +226,7 @@ function trainProgress(log, from, epochs) {
 		if (m) itersPerEpoch.set(key, Number(m[1]));
 	}
 	const iters = itersPerEpoch.get(key) || null;
-	const steps = [...text.matchAll(/epoch: \[(\d+)\/(\d+)\], global_step: (\d+),.*?avg_batch_cost: ([\d.]+) s/g)];
+	const steps = [...text.matchAll(/epoch: \[(\d+)\/(\d+)], global_step: (\d+),.*?avg_batch_cost: ([\d.]+) s/g)];
 	if (!steps.length) return { text: 'starting (loading model and data) ...' };
 	const [, e, t, gs, batchCost] = steps[steps.length - 1];
 	const epoch = Number(e), total = Number(t || epochs), step = Number(gs);
@@ -251,7 +252,7 @@ async function main() {
 
 	console.log(`Deployed model: ${current} (${curMeta.name || ''}, ${curMeta.createdAt || '?'})`);
 	console.log(`Labeled rosters: ${canonical.size} distinct, ${fresh.length} never seen by ${current}${fresh.length ? ': ' + fresh.map(f => f.name).join(', ') : ''}`);
-	const unlabeled = fs.readdirSync(FAKE_DATA).filter(n => !fs.existsSync(path.join(LABELS, `${n}.json`)));
+	const unlabeled = listData(FAKE_DATA, 'image').filter(n => !fs.existsSync(labelFile(LABELS, n)));
 	if (unlabeled.length) console.log(`(${unlabeled.length} image(s) in fake-data still have no label — label them in /label to use them)`);
 	if (args.status) return;
 	if (fresh.length < args.minNew) {
@@ -313,7 +314,7 @@ This exact run was already done as ${repeatOf.v} (${repeatOf.m.createdAt}): ${c.
 	if (!state.done.dataset) {
 		console.log('[1/4] Building dataset ...');
 		await ocrMissing(path.join(REC_DIR, 'stock', 'infer'), [...canonical.values()], STOCK_LINES, '.json');
-		writeJson(foldMapPath, Object.fromEntries(labeledNames.map(n => [n, testHashes.has(md5File(path.join(FAKE_DATA, n))) ? 1 : 0])));
+		writeJson(foldMapPath, Object.fromEntries(labeledNames.map(n => [n, testHashes.has(md5File(dataFile(FAKE_DATA, n))) ? 1 : 0])));
 		await withStatus(run('node', [path.join(ROOT, 'scripts', 'build-recognition-groundtruth.mjs'), `--id=${path.basename(datasetDir)}`, '--folds=2', '--fold=1',
 			`--fold-map=${foldMapPath}`, `--general=${recipe.general}`, '--tight-crops', `--lines-dir=${recipe.linesDir}`], { logFile: log }),
 		(ms) => ({ text: `cropping labeled rows into training images ... (${fmtDur(ms)})` }));

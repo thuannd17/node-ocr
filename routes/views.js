@@ -13,6 +13,8 @@ const router = Router();
 
 // Shared stylesheet + nav used by every page.
 router.use('/assets', express.static(path.join(viewsDir, 'assets')));
+// Font Awesome Free (npm @fortawesome/fontawesome-free), served locally: /assets/fontawesome/css/all.min.css
+router.use('/assets/fontawesome', express.static(path.resolve(__dirname, '..', 'node_modules', '@fortawesome', 'fontawesome-free')));
 
 router.get('/', (req, res) => {
 	res.sendFile(path.join(viewsDir, 'home.html'));
@@ -28,6 +30,10 @@ router.get('/label', (req, res) => {
 
 router.get('/benchmark', (req, res) => {
 	res.sendFile(path.join(viewsDir, 'benchmark.html'));
+});
+
+router.get('/models', (req, res) => {
+	res.sendFile(path.join(viewsDir, 'models.html'));
 });
 
 // /ops and /crop-label were archived to archive/views/ (2026-10-06): they drove

@@ -1,30 +1,23 @@
 // /services/paddle-ocr.js
 /*
- * PaddleOCR strategy (offline) with VLM fallback.
+ * PaddleOCR strategy (offline).
  *
  * Kiến trúc:
  *   Node.js --HTTP--> Python micro-service (scripts/ocr_server.py, runtime
  *   PaddleOCR chính thức) --> raw lines {text, confidence, box}
  *   --> services/roster-parser.js parse bảng --> { published, planned }
  *
- * Gemini (VLM) when the OCR result looks poor (analyzeExtractionQuality):
- *   default            return the OCR result at once and flag it
- *                      (_vlmSuggested) so the page can offer a Gemini re-parse;
- *   VLM_FALLBACK=auto  call Gemini right away and wait for it (old behaviour,
- *                      up to VLM_TIMEOUT_MS);
- *   VLM_FALLBACK=0     never call or suggest Gemini.
- *   Waiting for Gemini by default made some uploads take 40 s+ even when its
- *   answer was then thrown away (2026-10-07). Gemini output never goes to labels/.
+ * The quality analysis (analyzeExtractionQuality) is returned as `_quality` so
+ * /upload can say when a result needs a closer look. (The Gemini/VLM fallback
+ * was removed 2026-10-09; backup in tmp/backup-remove-vlm-20261009.)
  *
- * Yêu cầu: chạy `npm run ocr-server` (hoặc `python scripts/ocr_server.py`)
- * trước khi dùng strategy paddleocr.
+ * Yêu cầu: chạy `npm run ocr-server` (hoặc `python scripts/ocr_server.py`).
  */
 import path from 'node:path';
 import fs from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import sharp from 'sharp';
 import { parseRoster, analyzeExtractionQuality, cleanExtractionResult } from './roster-parser.js';
-import { extractWithVLM } from './vlm.js';
 
 const OCR_SERVER_URL = (process.env.OCR_SERVER_URL || 'http://127.0.0.1:8501').replace(/\/+$/, '');
 const OCR_TIMEOUT_MS = Number(process.env.OCR_TIMEOUT_MS || 300000); // Increased to 5min for very large files
@@ -79,16 +72,11 @@ async function callOcrServer(filePath) {
 
 
 /**
- * Extract roster từ ảnh: OCR qua micro-service + parse bảng.
- * Low quality -> see the Gemini note at the top of this file.
- * Trả về { published: [], planned: [] } cùng format với VLM strategy.
+ * OCR lines of an image: [{ text, confidence, box: [[x, y] x4] }] in the
+ * original image's pixels. Wide images are read at MAX_OCR_WIDTH (faster) and
+ * the boxes scaled back. Also used for the learned extractor's training words.
  */
-export async function extractWithPaddleOCR(filePath, opts = {}) {
-  const vlmMode = opts.allowVlmFallback === false ? 'off'
-    : ({ '0': 'off', auto: 'auto' }[String(process.env.VLM_FALLBACK || '').toLowerCase()] || 'suggest');
-  const t0 = Date.now();
-  const timings = {};
-  
+export async function ocrLines(filePath) {
   // --- Smart Resize for Speed ---
   // We create a temporary resized image to speed up the OCR detection phase.
   // We then scale the resulting coordinates back to the original image size.
@@ -134,6 +122,17 @@ export async function extractWithPaddleOCR(filePath, opts = {}) {
       box: line.box.map(pt => [pt[0] * inverseScale, pt[1] * inverseScale])
     }));
   }
+  return lines;
+}
+
+/**
+ * Extract roster từ ảnh: OCR qua micro-service + parse bảng.
+ * Trả về { published: [], planned: [] } (+ _quality, _timings).
+ */
+export async function extractWithPaddleOCR(filePath) {
+  const t0 = Date.now();
+  const timings = {};
+  const lines = await ocrLines(filePath);
 
    timings.ocrMs = Date.now() - t0;
    console.log(`[PaddleOCR] OCR server responded: ${lines.length} lines in ${timings.ocrMs}ms`);
@@ -144,51 +143,18 @@ export async function extractWithPaddleOCR(filePath, opts = {}) {
    timings.parseMs = Date.now() - t1;
    console.log(`[PaddleOCR] Parser took ${timings.parseMs}ms: ${result.published?.length || 0} published, ${result.planned?.length || 0} planned`);
    
-   const totalRows = (result.published?.length || 0) + (result.planned?.length || 0);
-
-   // Analyze extraction quality and determine if VLM fallback is needed
+   // How trustworthy the result looks (shown on /upload when low).
    const qualityAnalysis = analyzeExtractionQuality(result);
-   let finalResult = result;
-   let predictionSource = 'paddleocr';
-   let vlmSuggested = false;
-   const lowQuality = qualityAnalysis.shouldUseVLM && process.env.VLM_API_KEY && vlmMode !== 'off';
-   if (lowQuality) {
-     console.log(`[PaddleOCR] Extraction quality is low (${(qualityAnalysis.confidence * 100).toFixed(0)}% confidence)`);
-     console.log(`[PaddleOCR] Reason: ${qualityAnalysis.reason}`);
-   }
-   if (lowQuality && vlmMode === 'suggest') {
-     vlmSuggested = true;
-     console.log('[PaddleOCR] Not waiting for Gemini (VLM_FALLBACK=auto to do so); the page offers a Gemini re-parse.');
-   } else if (lowQuality) {
-     console.log(`[PaddleOCR] Falling back to VLM...`);
-     const t2 = Date.now();
-     try {
-       const vlmResult = await extractWithVLM(filePath);
-       const vlmRows = (vlmResult.published?.length || 0) + (vlmResult.planned?.length || 0);
-       if (vlmRows > totalRows) {
-         console.log(`[PaddleOCR] VLM returned ${vlmRows} rows (better than ${totalRows}). Using VLM result.`);
-         finalResult = vlmResult;
-          predictionSource = 'vlm-fallback';
-         // Not written to labels/: an unreviewed Gemini answer must not become
-         // ground truth for the benchmark and training (4 such labels found 2026-10-06).
-       }
-     } catch (vlmErr) {
-       console.warn(`[PaddleOCR] VLM fallback failed: ${vlmErr.message}`);
-     }
-     timings.vlmMs = Date.now() - t2;
-     console.log(`[PaddleOCR] Gemini took ${timings.vlmMs}ms`);
-   } else if (!qualityAnalysis.shouldUseVLM) {
-     console.log(`[PaddleOCR] Extraction confidence: ${(qualityAnalysis.confidence * 100).toFixed(0)}% - satisfactory`);
-   }
+   console.log(`[PaddleOCR] Extraction confidence: ${(qualityAnalysis.confidence * 100).toFixed(0)}%`
+     + (qualityAnalysis.lowQuality ? ` - low (${qualityAnalysis.reason})` : ' - satisfactory'));
 
    // Clean internal confidence tracking from result
-   const cleanedResult = cleanExtractionResult(finalResult);
+   const cleanedResult = cleanExtractionResult(result);
     return {
       ...cleanedResult,
       totalLines: (cleanedResult.published?.length || 0) + (cleanedResult.planned?.length || 0),
-      _predictionSource: predictionSource,
+      _predictionSource: 'paddleocr',
       _quality: qualityAnalysis,
-      _vlmSuggested: vlmSuggested,
       _timings: timings,
       _parserMeta: cleanedResult._parserMeta || parserMeta,
     };

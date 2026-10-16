@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Roster OCR — Home</title>
   <link rel="stylesheet" href="/assets/app.css">
+  <link rel="stylesheet" href="/assets/fontawesome/css/all.min.css">
   <style>
     .grid {
       display: grid;
@@ -55,21 +56,21 @@
   <script src="/assets/nav.js"></script>
   <main class="page">
   <div class="page-header">
-    <h1>📋 Roster OCR</h1>
-    <p class="subtitle">Trích xuất 2 bảng "Published roster" và "Rest of this roster is planned" từ ảnh eCrew — PaddleOCR (model nhận dạng đã fine-tune) + parser; Gemini chỉ là phương án dự phòng.</p>
+    <h1>Roster OCR</h1>
+    <p class="subtitle">Trích xuất 2 bảng "Published roster" và "Rest of this roster is planned" từ ảnh eCrew — PaddleOCR (model nhận dạng đã fine-tune) + parser; PDF duty plan đọc thẳng lớp text.</p>
   </div>
 
   <div class="grid">
     <a class="card" href="/upload">
-      <div class="icon">📤</div>
-      <h2>Upload &amp; OCR</h2>
+      <div class="icon"><i class="fa-solid fa-upload" aria-hidden="true"></i></div>
+      <h2>Upload Roster</h2>
       <p>Upload ảnh roster (kéo-thả hoặc chọn file), xem kết quả Published/Planned dạng bảng, sửa và lưu thành nhãn.</p>
       <span class="url">/upload</span>
-      <span class="badge green">PaddleOCR</span>
+      <span class="badge green">AI Model</span>
     </a>
 
     <a class="card" href="/label">
-      <div class="icon">🏷️</div>
+      <div class="icon"><i class="fa-solid fa-tags" aria-hidden="true"></i></div>
       <h2>Label Tool</h2>
       <p>Gán nhãn (ground truth) cho từng ảnh trong <code>fake-data/</code>, có Auto-fill từ OCR để sửa tay.</p>
       <span class="url">/label</span>
@@ -77,9 +78,9 @@
     </a>
 
     <a class="card" href="/benchmark">
-      <div class="icon">📊</div>
+      <div class="icon"><i class="fa-solid fa-chart-column" aria-hidden="true"></i></div>
       <h2>Benchmark</h2>
-      <p>Độ chính xác từng ô (date, duty, dep, begin, end, arr…) so với nhãn trong <code>labels/</code>. Không dùng Gemini khi chấm.</p>
+      <p>Độ chính xác từng ô (date, duty, dep, begin, end, arr…) so với nhãn trong <code>labels/</code>.</p>
       <span class="url">/benchmark</span>
       <span class="badge orange">Đo lường</span>
     </a>

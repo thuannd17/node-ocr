@@ -14,6 +14,7 @@ import path from 'node:path';
 import { parseRoster, cleanExtractionResult } from '../services/roster-parser.js';
 import { compareSection } from '../services/benchmark.js';
 import { groupByContent, pickCanonicalLabels } from '../utils/content-groups.js';
+import { labelFile } from '../utils/data-files.js';
 
 const arg = (name, fallback = null) => {
 	const hit = process.argv.slice(2).find(a => a.startsWith(`--${name}=`));
@@ -27,7 +28,7 @@ const showErrors = Number(arg('errors', 30));
 const onlyFile = arg('file');
 
 const cached = fs.readdirSync(linesDir).filter(f => f.endsWith('.lines.json')).map(f => f.slice(0, -'.lines.json'.length));
-const labeled = cached.filter(n => fs.existsSync(path.join(labelsDir, `${n}.json`)));
+const labeled = cached.filter(n => fs.existsSync(labelFile(labelsDir, n)));
 const { canonical } = pickCanonicalLabels(groupByContent(folder, labeled), labelsDir);
 let names = [...new Set(canonical.values())].sort();
 if (onlyFile) names = names.filter(n => n === onlyFile);
@@ -38,7 +39,7 @@ const pairs = new Map();
 const perFile = [];
 for (const name of names) {
 	const lines = JSON.parse(fs.readFileSync(path.join(linesDir, `${name}.lines.json`), 'utf8'));
-	const label = JSON.parse(fs.readFileSync(path.join(labelsDir, `${name}.json`), 'utf8'));
+	const label = JSON.parse(fs.readFileSync(labelFile(labelsDir, name), 'utf8'));
 	const pred = cleanExtractionResult(parseRoster(lines));
 	for (const sec of ['published', 'planned']) {
 		const r = compareSection(pred[sec] || [], label[sec] || []);

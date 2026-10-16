@@ -32,7 +32,7 @@
  *   node --env-file=.env scripts/diagnose-errors.mjs [--limit=N] [--json=out.json]
  *        [--lines-dir=tmp/diag-lines] [--examples=3]
  * Needs `npm run ocr-server` running (only for images not already cached).
- * Side-effect free: does not write labels, review queues, or call the VLM.
+ * Side-effect free: does not write labels or review queues.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -40,6 +40,7 @@ import sharp from 'sharp';
 import { parseRoster, cleanExtractionResult } from '../services/roster-parser.js';
 import { alignRows, normalizeField, levenshtein } from '../services/benchmark.js';
 import { groupByContent, pickCanonicalLabels } from '../utils/content-groups.js';
+import { listData, dataFile, labelFile } from '../utils/data-files.js';
 
 const FIELDS = ['date', 'day', 'duty', 'dep', 'begin', 'end', 'arr'];
 const OCR_SERVER_URL = (process.env.OCR_SERVER_URL || 'http://127.0.0.1:8501').replace(/\/+$/, '');
@@ -91,7 +92,7 @@ async function fetchLines(filePath) {
 async function getLines(name) {
 	const cacheFile = path.join(opts.linesDir, `${name}.lines.json`);
 	if (fs.existsSync(cacheFile)) return JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
-	const lines = await fetchLines(path.join(opts.folder, name));
+	const lines = await fetchLines(dataFile(opts.folder, name));
 	fs.writeFileSync(cacheFile, JSON.stringify(lines), 'utf8');
 	return lines;
 }
@@ -104,7 +105,6 @@ function withGeom(l) {
 }
 const median = a => { const s = [...a].sort((x, y) => x - y); return s.length ? s[Math.floor(s.length / 2)] : 0; };
 
-const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
 const WEEKDAY_PREFIX_RE = /^(mon|tue|wed|thu|fri|sat|sun)[a-z]*[.,\s]+/i;
 const DATE_RE = /(\d{1,2})\s*([A-Za-z]{3})[A-Za-z]*\.?\s*(\d{2,4})/;
 
@@ -192,7 +192,7 @@ const stats = {
 
 const compact = t => String(t || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 
-function classifyField(field, expRaw, predRaw, band, anchors, multiRow) {
+function classifyField(field, expRaw, predRaw, band, anchors) {
 	const ev = normalizeField(field, expRaw);
 	const pv = normalizeField(field, predRaw);
 	if (!ev && pv) return { bucket: 'SPURIOUS' };
@@ -269,7 +269,7 @@ function diagnoseSection(name, predRows, expRows, lines, medH, rawByClean) {
 			const ev = normalizeField(f, exp[f]);
 			const pv = normalizeField(f, pred[f]);
 			if (ev === pv) { pf.ok += 1; continue; }
-			const c = classifyField(f, exp[f], pred[f], band, anchors, multiRow);
+			const c = classifyField(f, exp[f], pred[f], band, anchors);
 			pf.buckets[c.bucket] += 1;
 			rowBuckets.add(c.bucket);
 			const ex = stats.examples[c.bucket];
@@ -290,8 +290,8 @@ function diagnoseSection(name, predRows, expRows, lines, medH, rawByClean) {
 
 async function main() {
 	fs.mkdirSync(opts.linesDir, { recursive: true });
-	let names = fs.readdirSync(opts.folder)
-		.filter(n => /\.(jpe?g|png|jfif)$/i.test(n) && fs.existsSync(path.join(opts.labels, `${n}.json`)));
+	let names = listData(opts.folder, 'image')
+		.filter(n => fs.existsSync(labelFile(opts.labels, n)));
 	if (!process.argv.includes('--no-dedupe')) {
 		// score each byte-identical image once, using its most plausible label copy
 		const { canonical } = pickCanonicalLabels(groupByContent(opts.folder, names), opts.labels);
@@ -309,7 +309,7 @@ async function main() {
 			console.error(`Lines cached so far are kept in ${opts.linesDir}. Restart the OCR server and re-run: it resumes.`);
 			process.exit(2);
 		}
-		const exp = JSON.parse(fs.readFileSync(path.join(opts.labels, `${name}.json`), 'utf8'));
+		const exp = JSON.parse(fs.readFileSync(labelFile(opts.labels, name), 'utf8'));
 		const parsedLines = lines
 			.filter(l => l.text && Array.isArray(l.box) && l.box.length >= 4 && (l.confidence == null || l.confidence >= 0.3))
 			.map(l => withGeom({ ...l, text: String(l.text).trim() }));

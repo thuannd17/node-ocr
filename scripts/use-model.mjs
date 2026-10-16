@@ -11,13 +11,12 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { activateRec } from '../services/rec-models.js';
 
 const ROOT = process.cwd();
 const REC_DIR = path.join(ROOT, 'models', 'rec');
 const ENV = path.join(ROOT, '.env');
 const readJson = (p) => (fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, 'utf8')) : {});
-const writeJson = (p, o) => fs.writeFileSync(p, JSON.stringify(o, null, 2) + '\n', 'utf8');
-const today = () => new Date().toISOString().slice(0, 10);
 
 const envText = fs.readFileSync(ENV, 'utf8');
 const activeLine = /^OCR_CUSTOM_REC=(.*)$/m.exec(envText);
@@ -53,17 +52,7 @@ if (meta.comparison && meta.comparison.verdict !== 'better') {
 	console.log(`Note: ${target} was ${meta.comparison.verdict.toUpperCase()} than ${meta.comparison.against} in its retrain-check.`);
 }
 
-const newLine = `OCR_CUSTOM_REC=models/rec/${target}/infer`;
-const updated = activeLine
-	? envText.replace(activeLine[0], `# ${today()}: switched from ${active || activeLine[1]} (rollback: npm run use-model -- ${active || '?'})\n# ${activeLine[0]}\n${newLine}`)
-	: `${envText.trimEnd()}\n${newLine}\n`;
-fs.writeFileSync(ENV, updated, 'utf8');
-
-if (active && active !== 'stock') {
-	const prevPath = path.join(REC_DIR, active, 'model.json');
-	writeJson(prevPath, { ...readJson(prevPath), status: 'retired', retiredAt: today() });
-}
-writeJson(path.join(REC_DIR, target, 'model.json'), { ...meta, status: target === 'stock' ? 'baseline' : 'deployed', deployedAt: today() });
+activateRec(target); // .env + statuses, as the /models page does (services/rec-models.js)
 
 console.log(`.env now uses ${target} (was ${active || activeLine?.[1] || 'unset'}).`);
 console.log('Restart the OCR server (npm run ocr-server) and the app (npm start) to load it.');

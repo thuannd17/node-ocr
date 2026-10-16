@@ -17,6 +17,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import sharp from 'sharp';
+import { listData, dataFile } from '../utils/data-files.js';
 
 const args = Object.fromEntries(process.argv.slice(2).reduce((acc, a, i, all) => {
   if (a.startsWith('--')) acc.push([a.slice(2), all[i + 1]?.startsWith('--') ? 'true' : all[i + 1]]);
@@ -41,15 +42,12 @@ const avg = (arr) => (arr.length ? Math.round(arr.reduce((a, b) => a + b, 0) / a
 
 async function prepareImages() {
   fs.mkdirSync(WORK_DIR, { recursive: true });
-  const files = fs.readdirSync(SRC_DIR)
-    .filter((f) => /\.(png|jpe?g|jfif|webp)$/i.test(f))
-    .sort()
-    .slice(0, IMAGE_COUNT);
+  const files = listData(SRC_DIR, 'image').slice(0, IMAGE_COUNT);
   const out = [];
   for (const [i, f] of files.entries()) {
     const dest = path.join(WORK_DIR, `img_${String(i).padStart(3, '0')}.jpg`);
     if (!fs.existsSync(dest)) {
-      const img = sharp(path.join(SRC_DIR, f));
+      const img = sharp(dataFile(SRC_DIR, f));
       const { width } = await img.metadata();
       await (width > MAX_WIDTH ? img.resize(MAX_WIDTH) : img).jpeg({ quality: 92 }).toFile(dest);
     }

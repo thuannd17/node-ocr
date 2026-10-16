@@ -3,7 +3,7 @@
  *
  * Usage:
  *   npm run benchmark -- --strategy=paddleocr
- *   npm run benchmark -- --strategy=vlm --json
+ *   npm run benchmark -- --json
  *   npm run benchmark -- --no-dedupe   (score every file, even byte-identical copies)
  *   npm run benchmark -- --split=val   (only images held out of recognition training)
  *   npm run benchmark -- --split=val --folds=5 --fold=2 --fold-map=exports/kfold/<id>/folds.json
