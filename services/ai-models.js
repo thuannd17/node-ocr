@@ -88,9 +88,12 @@ export function newVersionDir(trainedAt) {
   return { id, dir: path.join(AI_DIR, id) };
 }
 
-/** Merge one benchmark run ({ at, image?, pdf?, overall? }) into the version's benchmark.json. */
+/** Merge one benchmark run ({ at, image?, pdf?, overall?, byType? }) into the version's benchmark.json. */
 export function saveBenchmark(dir, part) {
   if (!dir || !fs.existsSync(dir)) return;
   const file = path.join(dir, 'benchmark.json');
-  fs.writeFileSync(file, JSON.stringify({ ...readJson(file, {}), ...part }, null, 2));
+  const old = readJson(file, {});
+  // byType merges per type: a run of some types keeps the others' last scores
+  const byType = part.byType ? { ...old.byType, ...part.byType } : old.byType;
+  fs.writeFileSync(file, JSON.stringify({ ...old, ...part, ...(byType ? { byType } : {}) }, null, 2));
 }

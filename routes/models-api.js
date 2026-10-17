@@ -6,8 +6,8 @@
 //
 // Families (what reads a roster, in order):
 //   detect - OCR text detection (where the text is in an image): PaddleOCR's stock model, read only
-//   rec    - OCR text recognition (image crop -> text): services/rec-models.js, trained by scripts/retrain-check.mjs
-//   roster - AI roster reader (words -> roster rows): services/ai-models.js, trained by scripts/train-pdf-model.mjs
+//   rec    - OCR text recognition (image crop -> text): services/rec-models.js, trained by scripts/ocr-train.mjs
+//   roster - AI roster reader (words -> roster rows): services/ai-models.js, trained by scripts/model-train.mjs
 import { Router } from 'express';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -26,7 +26,23 @@ function envValue(key) {
 }
 
 const pct = (m, t) => (t ? `${Math.round((1000 * m) / t) / 10}%` : '–');
-const REC_STATUS = { deployed: 'đang dùng', candidate: 'ứng viên', rejected: 'bị loại', retired: 'đã thay', baseline: 'bản gốc' };
+const TYPE_NAMES = { image: 'Ảnh', pdf: 'PDF', csv: 'CSV', xls: 'XLS', xlsx: 'XLSX', txt: 'TXT' };
+
+/** Training files per type ("95 ảnh, 74 PDF, 20 CSV, ..."); older versions only kept images / text files. */
+const trainedOn = (m) => (m.filesByType
+  ? Object.entries(m.filesByType).filter(([, n]) => n).map(([t, n]) => `${n} ${t === 'image' ? 'ảnh' : TYPE_NAMES[t] || t}`).join(', ')
+  : `${m.images ?? '?'} ảnh, ${m.pdfs ?? '?'} file text`);
+
+/** A roster model's benchmark.json as lines: overall, then each file type (older runs: images + all text files). */
+function scoreLines(b) {
+  const line = (k, s) => `${k} ${pct(s.rowMatches, s.rowTotal)} (${s.rowMatches}/${s.rowTotal} dòng)`;
+  const parts = b.byType
+    ? [['Chung', b.overall], ...Object.keys(TYPE_NAMES).map(t => [TYPE_NAMES[t], b.byType[t]])]
+    : [['Chung', b.overall], ['Ảnh', b.image], ['File text (PDF, CSV, XLS…)', b.pdf]];
+  return parts.filter(([, s]) => s?.rowTotal).map(([k, s]) => line(k, s));
+}
+
+const REC_STATUS ={ deployed: 'đang dùng', candidate: 'ứng viên', rejected: 'bị loại', retired: 'đã thay', baseline: 'bản gốc' };
 
 const FAMILIES = {
   roster: {
@@ -34,15 +50,12 @@ const FAMILIES = {
     icon: 'fa-brain',
     description: 'Đọc các từ (chữ OCR của ảnh, hoặc lớp text của PDF) thành các dòng roster: gắn mỗi từ vào cột (date, duty, dep, begin…) rồi ghép thành dòng. Tự học từ các nhãn trong labels/.',
     applyNote: 'Kích hoạt có tác dụng ngay với /upload và benchmark AI model.',
-    trainNote: 'Train một phiên bản mới từ toàn bộ nhãn ảnh + PDF (khoảng 10 phút). Xong thì phiên bản mới tự kích hoạt; bản cũ vẫn giữ ở đây.',
-    train: () => ({ args: ['scripts/train-pdf-model.mjs'] }),
+    trainNote: 'Train một phiên bản mới từ toàn bộ nhãn ảnh + PDF, CSV, XLS, XLSX, TXT (khoảng 10 phút). Xong thì phiên bản mới tự kích hoạt; bản cũ vẫn giữ ở đây.',
+    train: () => ({ args: ['scripts/model-train.mjs'] }),
     versions: () => listModels().map(m => ({
       id: m.id, active: m.active, createdAt: m.trainedAt, status: m.active ? 'đang dùng' : '',
-      data: `${m.files ?? '?'} file (${m.pdfs ?? '?'} PDF, ${m.images ?? '?'} ảnh) · ${(m.rows ?? 0).toLocaleString('en')} dòng · ${(m.words ?? 0).toLocaleString('en')} từ`,
-      score: m.benchmark
-        ? [['Chung', m.benchmark.overall], ['Ảnh', m.benchmark.image], ['PDF', m.benchmark.pdf]].filter(([, s]) => s?.rowTotal)
-          .map(([k, s]) => `${k} ${pct(s.rowMatches, s.rowTotal)} (${s.rowMatches}/${s.rowTotal} dòng)`)
-        : [],
+      data: `${m.files ?? '?'} file (${trainedOn(m)}) · ${(m.rows ?? 0).toLocaleString('en')} dòng · ${(m.words ?? 0).toLocaleString('en')} từ`,
+      score: m.benchmark ? scoreLines(m.benchmark) : [],
       scoreNote: m.benchmark ? 'đo bằng benchmark AI model' : 'chưa benchmark (trang Benchmark → AI model)',
       scoreAt: m.benchmark?.at || null,
       sizeBytes: m.sizeBytes, deletable: !m.active, keepReason: m.active ? 'Đang kích hoạt' : '',
@@ -54,12 +67,12 @@ const FAMILIES = {
     name: 'OCR nhận dạng chữ',
     icon: 'fa-font',
     description: 'Đọc chữ trong từng vùng ảnh đã phát hiện (PaddleOCR recognition), fine-tune trên các ô của roster đã label.',
-    applyNote: 'Đổi model sửa OCR_CUSTOM_REC trong .env: cần khởi động lại OCR server (npm run ocr-server) để nạp model mới.',
+    applyNote: 'Đổi model sửa OCR_CUSTOM_REC trong .env: cần khởi động lại OCR server (npm run ocr:server) để nạp model mới.',
     trainNote: 'Train một phiên bản mới trên các roster đã label, rồi so với bản đang dùng trên những roster cả hai chưa từng học (khoảng 1 giờ). Cần GPU: tắt OCR server trước khi train. Không tự kích hoạt: xem kết quả rồi bấm Kích hoạt nếu tốt hơn.',
     train: () => {
       const env = { ...process.env };
       delete env.OCR_CUSTOM_REC; // read the current one from .env (--env-file does not override what is set)
-      return { args: ['--env-file=.env', 'scripts/retrain-check.mjs'], env };
+      return { args: ['--env-file=.env', 'scripts/ocr-train.mjs'], env };
     },
     versions: () => listRecModels().map(m => {
       const c = m.comparison;

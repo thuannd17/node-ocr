@@ -2,11 +2,11 @@
 /**
  * Train the next recognition model version and compare it with the deployed one.
  *
- *   npm run retrain-check                 # train v(N+1) if enough new rosters, then compare
- *   npm run retrain-check -- --status     # only report how many new rosters are waiting
- *   npm run retrain-check -- --min-new=3 --epochs=15 --keep-checkpoint
- *   npm run retrain-check -- --restart    # drop an unfinished run instead of resuming it
- *   npm run retrain-check -- --force      # train again even if this exact run was already done
+ *   npm run ocr:train                 # train v(N+1) if enough new rosters, then compare
+ *   npm run ocr:train -- --status     # only report how many new rosters are waiting
+ *   npm run ocr:train -- --min-new=3 --epochs=15 --keep-checkpoint
+ *   npm run ocr:train -- --restart    # drop an unfinished run instead of resuming it
+ *   npm run ocr:train -- --force      # train again even if this exact run was already done
  *
  * Fair comparison, rolling: the test set is every labeled roster the deployed
  * model has NOT seen (neither trained on nor tested on, per its model.json).
@@ -18,7 +18,7 @@
  * Scoring = the real pipeline offline: OCR server (det 1920, fast mode) per
  * model -> current services/roster-parser.js -> rows exactly right vs labels.
  * Nothing is deployed: the result is written to models/rec/vN/model.json and
- * printed; switch with `npm run use-model -- vN` if you agree.
+ * printed; switch with `npm run ocr:use-model -- vN` if you agree.
  */
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -315,7 +315,7 @@ This exact run was already done as ${repeatOf.v} (${repeatOf.m.createdAt}): ${c.
 		console.log('[1/4] Building dataset ...');
 		await ocrMissing(path.join(REC_DIR, 'stock', 'infer'), [...canonical.values()], STOCK_LINES, '.json');
 		writeJson(foldMapPath, Object.fromEntries(labeledNames.map(n => [n, testHashes.has(md5File(dataFile(FAKE_DATA, n))) ? 1 : 0])));
-		await withStatus(run('node', [path.join(ROOT, 'scripts', 'build-recognition-groundtruth.mjs'), `--id=${path.basename(datasetDir)}`, '--folds=2', '--fold=1',
+		await withStatus(run('node', [path.join(ROOT, 'scripts', 'ocr-groundtruth.mjs'), `--id=${path.basename(datasetDir)}`, '--folds=2', '--fold=1',
 			`--fold-map=${foldMapPath}`, `--general=${recipe.general}`, '--tight-crops', `--lines-dir=${recipe.linesDir}`], { logFile: log }),
 		(ms) => ({ text: `cropping labeled rows into training images ... (${fmtDur(ms)})` }));
 		markDone('dataset');
@@ -418,13 +418,13 @@ This exact run was already done as ${repeatOf.v} (${repeatOf.m.createdAt}): ${c.
 	console.log(`planned        ${pct(...a.planned).padEnd(10)} ${pct(...b.planned)}`);
 	console.log(`per roster: ${next} better on ${wins}, worse on ${losses}, same on ${fresh.length - wins - losses}`);
 	console.log(`\nVerdict: ${next} is ${verdict.toUpperCase()} (${diff >= 0 ? '+' : ''}${diff} rows; needs >= ${margin} to count)`);
-	if (verdict === 'better') console.log(`Switch with:  npm run use-model -- ${next}   (then restart npm run ocr-server)`);
+	if (verdict === 'better') console.log(`Switch with:  npm run ocr:use-model -- ${next}   (then restart npm run ocr:server)`);
 	else console.log(`Keep ${current}. ${next} stays in ${rel(vDir)} for the record.`);
 	console.log(`Saved: ${rel(path.join(vDir, 'model.json'))}`);
 }
 
 main().catch(err => {
-	console.error(`\nretrain-check failed: ${err.message}`);
-	console.error('No version was created. Run `npm run retrain-check` again to resume (finished steps are skipped), or add --restart to start over.');
+	console.error(`\nocr:train failed: ${err.message}`);
+	console.error('No version was created. Run `npm run ocr:train` again to resume (finished steps are skipped), or add --restart to start over.');
 	process.exit(1);
 });

@@ -2,9 +2,9 @@
  * Audit stale/wrong labels by comparing current labels against OCR + parser output.
  *
  * Usage:
- *   npm run audit-labels
- *   npm run audit-labels -- --strategy=paddleocr --top=20
- *   npm run audit-labels -- --json
+ *   npm run label:audit
+ *   npm run label:audit -- --strategy=paddleocr --top=20
+ *   npm run label:audit -- --json
  */
 import fs from 'node:fs';
 import path from 'node:path';

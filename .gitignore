@@ -36,7 +36,7 @@ labels/
 # Keep only what the app needs to run + small metadata:
 #   models/parser-patterns.json, models/dict/, models/rec/train-template.yml,
 #   models/rec/*/model.json, and the inference weights of
-#   models/rec/stock (baseline for retrain-check) and models/rec/v4 (deployed, see .env).
+#   models/rec/stock (baseline for ocr:train) and models/rec/v4 (deployed, see .env).
 models/pretrained/
 models/kfold/
 models/rec/_pending/
@@ -50,7 +50,7 @@ models/rec/v7/
 models/rec/*/infer/
 !models/rec/stock/infer/
 !models/rec/v4/infer/
-# Learned PDF extractor: trained on personal crew rosters (labels/pdf/), rebuilt by `npm run train:pdf`.
+# Learned PDF extractor: trained on personal crew rosters (labels/pdf/), rebuilt by `npm run model:train`.
 models/pdf-tagger/
 models/pdf-tagger-next/
 models/pdf-tagger-prev/

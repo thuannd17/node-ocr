@@ -34,19 +34,19 @@ flowchart TD
     subgraph MEASURE["3. Measure"]
         EP["eval-parser-cached.mjs"]
         DE["diagnose-errors.mjs"]
-        AL["audit-labels.mjs"]
-        BP["/benchmark page<br/>AI model, npm run benchmark:model"]
+        AL["label-audit.mjs"]
+        BP["/benchmark page<br/>AI model, npm run model:benchmark"]
     end
 
     subgraph RETRAIN["4. Retrain (manual)"]
-        RC["npm run retrain-check"] --> TS["Test set =<br/>rosters the model never saw"]
-        RC --> GT["build-recognition-groundtruth.mjs<br/>labeled rows to cell crops + text"]
+        RC["npm run ocr:train"] --> TS["Test set =<br/>rosters the model never saw"]
+        RC --> GT["ocr-groundtruth.mjs<br/>labeled rows to cell crops + text"]
         GT --> TR["Train models/rec/v(N+1)"]
         TR --> CMP{"OCR test set<br/>old vs new model"}
         TS --> CMP
-        CMP -->|"better"| UM["npm run use-model -- vN<br/>.env OCR_CUSTOM_REC<br/>restart servers"]
+        CMP -->|"better"| UM["npm run ocr:use-model -- vN<br/>.env OCR_CUSTOM_REC<br/>restart servers"]
         CMP -->|"tie / worse"| KEEP["Keep current model<br/>version marked rejected"]
-        KF["kfold-recognition.mjs<br/>only for a new training recipe"]
+        KF["ocr-kfold.mjs<br/>only for a new training recipe"]
     end
 
     API -->|"keeps image"| FD
@@ -95,19 +95,19 @@ Same diagram as plain text (for terminals):
               │                                       │
               ▼                                       ▼
  ┌────── 3. MEASURE ───────┐  ┌──────────── 4. RETRAIN (manual) ─────────────┐
- │ /benchmark (AI model,   │  │ npm run retrain-check                        │
+ │ /benchmark (AI model,   │  │ npm run ocr:train                        │
  │   OCR)                  │  │ ├ test = rosters the model never saw         │
- │                         │  │ ├ build-recognition-groundtruth.mjs:         │
+ │                         │  │ ├ ocr-groundtruth.mjs:         │
  │                         │  │ │   labeled rows -> cell crops + text        │
  │ eval-parser-cached.mjs  │  │ ├ train -> models/rec/v(N+1)                 │
  │ diagnose-errors.mjs     │  │ └ OCR test set with old + new model          │
- │ audit-labels.mjs        │  │     -> better / tie / worse                  │
+ │ label-audit.mjs        │  │     -> better / tie / worse                  │
  │                         │  │                                              │
- └─────────────────────────┘  │ better? npm run use-model -- vN              │
+ └─────────────────────────┘  │ better? npm run ocr:use-model -- vN              │
                               │   -> .env OCR_CUSTOM_REC, restart            │
                               │   -> back to 1 with the new model            │
                               │                                              │
-                              │ new recipe? kfold-recognition.mjs            │
+                              │ new recipe? ocr-kfold.mjs            │
                               └──────────────────────────────────────────────┘
 ```
 
@@ -118,7 +118,7 @@ The four steps:
 2. **Label.** Only a person writes labels.
 3. **Measure.** Scores always compare against `labels/`.
 4. **Retrain.** Run by hand. A new model version is used only after
-   `use-model` switches to it.
+   `ocr:use-model` switches to it.
 
 ## Getting started
 
@@ -129,7 +129,7 @@ The four steps:
 | Node.js | **20.6+** (tested on 20.18) | `npm start` uses `node --env-file` |
 | Python | **3.11** (tested on 3.11.3) | for the PaddleOCR server |
 | GPU (optional) | NVIDIA, CUDA 11.8 runtime | tested on a GTX 1660 Ti (6 GB). The CUDA/cuDNN DLLs come from pip, no separate CUDA install needed. Without a GPU the server falls back to CPU (much slower). |
-| OS | Windows 10/11 | the `npm run ocr-server` / `ocr:check` scripts call `.\.venv\Scripts\python`; on Linux/macOS run them with `.venv/bin/python` (see below) |
+| OS | Windows 10/11 | the `npm run ocr:server` / `ocr:check` scripts call `.\.venv\Scripts\python`; on Linux/macOS run them with `.venv/bin/python` (see below) |
 
 ### 1. Get the code and install
 
@@ -170,7 +170,7 @@ npm run ocr:check           # Paddle/PaddleOCR versions, GPU or CPU, test init
 Two processes, in two terminals:
 
 ```powershell
-npm run ocr-server          # terminal 1: PaddleOCR on http://127.0.0.1:8501 ("Ready" when loaded)
+npm run ocr:server          # terminal 1: PaddleOCR on http://127.0.0.1:8501 ("Ready" when loaded)
 npm start                   # terminal 2: app on http://localhost:3000
 ```
 
@@ -212,7 +212,7 @@ and `models/pretrained/` (downloaded, only needed for retraining, see
 
 | Symptom | Fix |
 |---|---|
-| Upload says *PaddleOCR server is not reachable* | start `npm run ocr-server` and wait for `Ready`; if it runs elsewhere set `OCR_SERVER_URL` |
+| Upload says *PaddleOCR server is not reachable* | start `npm run ocr:server` and wait for `Ready`; if it runs elsewhere set `OCR_SERVER_URL` |
 | Upload says *OCR server đang bận* | more than `OCR_MAX_QUEUE` (default 4) requests were waiting; retry, or raise `OCR_MAX_QUEUE` |
 | `EADDRINUSE` (app) or `WinError 10048` / *Address already in use* (OCR server) | port 3000 / 8501 already used (another copy running?): stop it, or change `PORT` / `OCR_SERVER_PORT` (+ `OCR_SERVER_URL`) |
 | OCR server exits with a CUDA/DLL error | rerun `npm run ocr:check`; reinstall `scripts/requirements.txt`, or use the CPU package |
@@ -225,7 +225,7 @@ and `models/pretrained/` (downloaded, only needed for retraining, see
 |---|---|
 | `/upload` | **Try the AI model**: every uploaded roster **image or duty-plan PDF** is read by the learned model (images: PaddleOCR lines -> model), never by the parser and never answered from a saved label. When the file already has a label, the info line shows how many label rows the model got exactly right. The page is read-only (no editing, no saving labels: that is /label). The toolbar holds the file picker (or drop a file anywhere) and, once a result is shown, **↻ Đọc lại** (read again, e.g. after retraining). An image-only PDF (no text layer) is read by OCR: a duty plan by the parser (the model has no words for it); any other one, e.g. a Ryanair eCrew roster screen printed to PDF, has its pages stacked into one tall roster picture that the model reads as an image (and, once labeled, trains on as an image). A PDF shows the PDF and 12 columns; empty optional columns (DC, Reg., AC, Crew) are hidden. `/upload?pdf=<file>` reads a stored PDF with the model. |
 | `/label` | Folder tree of `fake-data/` (one folder per extension; unlabeled 🆕 first, byte-identical image copies hidden unless asked). Hovering a file shows 🗑: it removes the file from the dataset (after a confirm) by moving it, its label and its cached OCR result to `tmp/trash/<date>/`. Clicking a file opens a popup (Esc / × closes; drag the bar in the middle to resize) with the file next to its label as editable Published / Planned tables (one cell per field, add / insert / delete rows; Enter moves down a column); the label is still saved as JSON (**{ } JSON** shows it). Making ground truth: **Auto-fill** proposes the rows with **Parser** (OCR + `roster-parser.js` for an image, the PDF parser for a PDF) or **AI model** (chosen in the list next to it), and says how many rows match the saved label; check, fix, save. Ctrl+S saves, Alt+↑/↓ moves between files. `/label?name=<file>` opens one. |
-| `/benchmark` | Two scores against `labels/`. **1. Nhận dạng chữ từ ảnh (OCR)**: PaddleOCR alone on every labeled image (`npm run benchmark:ocr`): each labeled cell (date, day, duty, dep, begin, end, arr; a day's date/weekday once) is looked for in the OCR lines; cells read exactly and characters right, per field and per image with the misread cells. **2. Đọc dữ liệu roster theo loại file**: the AI model, read as on /upload (`npm run benchmark:model -- --types=image,pdf,csv,xls,xlsx,txt`), with a score per file type; tick the types to run. A run of only some types of a kind does not overwrite the score /models shows. Each file lists its differences from the label. **Xem & sửa** on a file opens the /label editor in a popup over the page (`/label?embed=1&review=1&name=<file>`): for an image, the table is the label and cells where the model differs are marked (yellow, model value underneath: click to take it), label rows the model missed are blue, rows only the model has are struck through (**+ nhãn** adds one); a PDF opens without the marks. A saved label shows "✓ đã lưu nhãn": run the benchmark again to update the scores. |
+| `/benchmark` | Two scores against `labels/`. **1. Nhận dạng chữ từ ảnh (OCR)**: PaddleOCR alone on every labeled image (`npm run ocr:benchmark`): each labeled cell (date, day, duty, dep, begin, end, arr; a day's date/weekday once) is looked for in the OCR lines; cells read exactly and characters right, per field and per image with the misread cells. **2. Đọc dữ liệu roster theo loại file**: the AI model, read as on /upload (`npm run model:benchmark -- --types=image,pdf,csv,xls,xlsx,txt`), with a score per file type; tick the types to run. A run of only some types of a kind does not overwrite the score /models shows. Each file lists its differences from the label. **Xem & sửa** on a file opens the /label editor in a popup over the page (`/label?embed=1&review=1&name=<file>`): for an image, the table is the label and cells where the model differs are marked (yellow, model value underneath: click to take it), label rows the model missed are blue, rows only the model has are struck through (**+ nhãn** adds one); a PDF opens without the marks. A saved label shows "✓ đã lưu nhãn": run the benchmark again to update the scores. |
 
 New rosters: uploads are deduplicated by content and kept in `fake-data/`. A label
 is written only when a person presses **Save as Label**.
@@ -305,7 +305,7 @@ a later page range was printed, the first month whose weekdays all match is used
 
 A PDF **without** a text layer (e.g. printed from a browser as an image) is
 rendered page by page and read by the OCR server (`services/pdf-ocr.js`, needs
-`npm run ocr-server`); typical OCR slips (header words, "Sa227", "8325",
+`npm run ocr:server`); typical OCR slips (header words, "Sa227", "8325",
 statistics without brackets) are repaired before the same parser runs, and
 `/upload` warns that the result needs checking.
 
@@ -334,9 +334,9 @@ Same loop as for images: upload on `/upload`, check and fix the table, **Save as
 Label** (`labels/pdf/<file>.json`, `{ published: [...], planned: [...] }`), then measure:
 
 ```powershell
-npm run parse-pdf -- "fake-data/pdf/<file>.pdf"   # print the parsed rows
-npm run benchmark:model -- --pdf                   # AI model vs labels/pdf/ (and csv, xls, xlsx, txt)
-npm run check:autofill                             # the parser (/label Auto-fill) vs labels, and which files changed since the last run
+npm run label:parse -- "fake-data/pdf/<file>.pdf"   # print the parsed rows
+npm run model:benchmark -- --pdf                   # AI model vs labels/pdf/ (and csv, xls, xlsx, txt)
+npm run label:check                             # the parser (/label Auto-fill) vs labels, and which files changed since the last run
 ```
 
 PDFs are kept in `fake-data/pdf/`, labels in `labels/pdf/`; both are personal
@@ -348,7 +348,7 @@ An offline model, trained from all labels (`labels/pdf/` and the image labels),
 reads layouts without new parser code. `/upload` always uses it, to try out
 each newly trained model; `/label` Auto-fill can use it or the parser to make
 ground truth. The loop: label files on `/label` (or **Save as Label** on
-`/upload`), then **Train** on `/models` (or `npm run train:pdf`, ~7 min
+`/upload`), then **Train** on `/models` (or `npm run model:train`, ~7 min
 for 44 PDFs + 94 images; image OCR lines are cached in `exports/ocr-lines/`, so
 only new images need the OCR server). One labeled file of a layout is usually
 enough to read the others.
@@ -361,7 +361,7 @@ enough to read the others.
 | `services/ocr-tokens.js`, `scripts/build-image-token-data.mjs` | OCR lines of a labeled image -> words with positions, tagged from its label -> `exports/image-tokens/` |
 | `scripts/pdf_tagger.py`, `scripts/train_pdf_tagger.py` | the word tagger (scikit-learn, two stages: word + column-header features, then the neighbours' fields); every layout weighs the same in training |
 | `services/pdf-row-assembler.js` | tagged words -> rows (blocks, dates, C/I-C/O, hotels, time zones, legend; how `[Block: 3:25]` is written is learned from the labels) |
-| `scripts/train-pdf-model.mjs` | the whole retrain -> `models/pdf-tagger/` (previous one kept in `models/pdf-tagger-prev/`; not in git) |
+| `scripts/model-train.mjs` | the whole retrain -> `models/pdf-tagger/` (previous one kept in `models/pdf-tagger-prev/`; not in git) |
 | `services/pdf-ai-extract.js` | the app side: runs `scripts/pdf_tagger_predict.py` (~3-4 s per file) and assembles the rows (`extractWithModel` for PDFs, `extractImageWithModel` for images) |
 
 Measured on the 44 labeled PDFs (rows with all 12 fields right, each file read
@@ -372,10 +372,10 @@ trained with the images read 86.8% of rows when it had not seen the image
 better tool for making labels of the layouts it knows.
 
 ```powershell
-npm run train:pdf                                   # retrain from labels/pdf/
-npm run eval:pdf-model                              # assembler on the true tags
+npm run model:train                                   # retrain from every label (images + pdf, csv, xls, xlsx, txt)
+npm run model:eval-assembler                              # assembler on the true tags
 .venv/Scripts/python scripts/train_pdf_tagger.py --predict one   # tags for "one labeled file" ...
-npm run eval:pdf-model -- --pred exports/pdf-tokens-pred/one     # ... and their rows
+npm run model:eval-assembler -- --pred exports/pdf-tokens-pred/one     # ... and their rows
 ```
 
 ## `.env`
@@ -388,7 +388,7 @@ PORT=3000
 OCR_WORKERS=1
 OCR_FAST_MODE=1
 OCR_WARMUP=1
-OCR_CUSTOM_REC=models/rec/v4/infer    # recognition model in use (see npm run use-model)
+OCR_CUSTOM_REC=models/rec/v4/infer    # recognition model in use (see npm run ocr:use-model)
 OCR_TEXT_DET_LIMIT_SIDE_LEN=1920      # do not downscale; 736 merges table rows
 OCR_TIMEOUT_MS=300000
 # OCR_SERVER_URL=http://127.0.0.1:8501   # where the app finds the OCR server
@@ -423,11 +423,11 @@ reports throughput, latency and how much of it was queueing vs inference
 These need labeled rosters in `fake-data/` + `labels/` (see [Data](#5-data-not-in-git)).
 
 ```powershell
-npm run benchmark:model                                 # AI model vs every label (as /benchmark)
-npm run benchmark:ocr                                   # PaddleOCR alone on the labeled images
+npm run model:benchmark                                 # AI model vs every label (as /benchmark)
+npm run ocr:benchmark                                   # PaddleOCR alone on the labeled images
 node scripts/eval-parser-cached.mjs                     # parser only, from cached OCR lines (seconds)
 node --env-file=.env scripts/diagnose-errors.mjs        # which pipeline stage each wrong field came from
-npm run audit-labels                                    # spot label typos
+npm run label:audit                                    # spot label typos
 npm test
 ```
 
@@ -457,10 +457,10 @@ metadata lists roster image names).
 | v7 | rejected (2026-10-08) |
 
 ```powershell
-npm run use-model                    # list versions, * = in use
-npm run retrain-check -- --status    # how many labeled rosters the current model never saw
-npm run retrain-check                # train v(N+1) and compare (~45 min + OCR)
-npm run use-model -- v8              # switch only if the verdict was "better", then restart both servers
+npm run ocr:use-model                    # list versions, * = in use
+npm run ocr:train -- --status    # how many labeled rosters the current model never saw
+npm run ocr:train                # train v(N+1) and compare (~45 min + OCR)
+npm run ocr:use-model -- v8              # switch only if the verdict was "better", then restart both servers
 ```
 
 Retraining needs the PaddleOCR pretrained recognition model (not in git, 195 MB
@@ -474,7 +474,7 @@ tar -xf en_PP-OCRv3_rec_train.tar -C models/pretrained    # -> models/pretrained
 
 It also needs labeled rosters in `fake-data/` + `labels/`.
 
-`retrain-check` tests on every labeled roster the deployed model has never seen
+`ocr:train` tests on every labeled roster the deployed model has never seen
 (needs at least 5, `--min-new=N`), trains the next version on everything else with
 `models/rec/train-template.yml`, OCRs the test rosters with both models and scores
 them with the current parser. Verdict: better / tie / worse (margin
@@ -512,7 +512,7 @@ services/paddle-ocr.js       OCR client (resize, call server, parse, quality)
 services/roster-parser.js    OCR lines -> table rows
 services/benchmark.js        scoring
 scripts/ocr_server.py        PaddleOCR server (GPU auto-detect, CPU fallback)
-scripts/*.mjs                benchmark:model / :ocr, eval, retrain-check, use-model, load-test, ...
+scripts/*.mjs                model:*, ocr:*, label:* (see package.json), load-test, ...
 scripts/requirements.txt     Python dependencies of the OCR server
 services/pdf-*.js            PDF duty plans: text + positions, parser, row comparison
 routes/pdf-api.js            /api/pdf/* (upload, parse, labels)

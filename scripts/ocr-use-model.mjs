@@ -2,11 +2,11 @@
 /**
  * List recognition model versions, or switch the deployed one.
  *
- *   npm run use-model            # list models/rec/* with status and last comparison
- *   npm run use-model -- v5      # point .env OCR_CUSTOM_REC at models/rec/v5/infer
+ *   npm run ocr:use-model            # list models/rec/* with status and last comparison
+ *   npm run ocr:use-model -- v5      # point .env OCR_CUSTOM_REC at models/rec/v5/infer
  *
  * Switching only edits .env (the previous line is kept as a comment for
- * rollback) and the status fields in model.json; restart `npm run ocr-server`
+ * rollback) and the status fields in model.json; restart `npm run ocr:server`
  * (and `npm start`) afterwards to load it.
  */
 import fs from 'node:fs';
@@ -49,10 +49,10 @@ if (target === active) {
 }
 const meta = readJson(path.join(REC_DIR, target, 'model.json'));
 if (meta.comparison && meta.comparison.verdict !== 'better') {
-	console.log(`Note: ${target} was ${meta.comparison.verdict.toUpperCase()} than ${meta.comparison.against} in its retrain-check.`);
+	console.log(`Note: ${target} was ${meta.comparison.verdict.toUpperCase()} than ${meta.comparison.against} in its ocr:train.`);
 }
 
 activateRec(target); // .env + statuses, as the /models page does (services/rec-models.js)
 
 console.log(`.env now uses ${target} (was ${active || activeLine?.[1] || 'unset'}).`);
-console.log('Restart the OCR server (npm run ocr-server) and the app (npm start) to load it.');
+console.log('Restart the OCR server (npm run ocr:server) and the app (npm start) to load it.');

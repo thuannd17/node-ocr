@@ -324,7 +324,7 @@ function buildFinalResult({ strategy, split, labeled, allFiles, fileResults, com
 /**
  * dedupe: score each byte-identical image once (using its most plausible label copy) instead of once per file.
  * split: 'train' | 'val' scores only that side of the recognition dataset's
- *   content-group split (scripts/build-recognition-groundtruth.mjs, same
+ *   content-group split (scripts/ocr-groundtruth.mjs, same
  *   splitByGroup + trainRatio) — 'val' is the only honest score for a
  *   fine-tuned model, since it never saw those images. Default 'all'.
  * folds/fold: with folds=K, split picks fold `fold` ('val') or the rest
@@ -353,7 +353,7 @@ export async function runBenchmark({ strategy, folderPath, labelsPath, onEvent, 
     let sideOf = (name) => splitByGroup(groupOf.get(name), trainRatio);
     if (foldMap) {
       // Explicit image -> fold map, the same file the dataset builder used
-      // (kfold-recognition.mjs). Recomputing clusters here picked duplicate
+      // (ocr-kfold.mjs). Recomputing clusters here picked duplicate
       // copies differently from the builder (members[0] vs
       // pickCanonicalLabels), so ~half of each "held-out" fold had been
       // trained on (found 2026-10-01).

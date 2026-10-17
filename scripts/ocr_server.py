@@ -31,7 +31,7 @@ os.environ.setdefault("FLAGS_use_mkldnn_batch_norm", "0")
 # GPU allocator (2026-10-08): Paddle's default auto_growth lets VRAM balloon to
 # ~5.9 GB and recognition slows ~3x as the server runs. naive_best_fit: 2.8 s ->
 # 0.8 s per image, identical OCR text. Set here (not .env) so training processes
-# started by retrain-check / kfold keep the default. Override via env if needed.
+# started by ocr:train / kfold keep the default. Override via env if needed.
 os.environ.setdefault("FLAGS_allocator_strategy", "naive_best_fit")
 os.environ.setdefault("FLAGS_fraction_of_gpu_memory_to_use", "0.5")
 os.environ.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")

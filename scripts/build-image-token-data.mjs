@@ -6,7 +6,7 @@
  *   node --env-file=.env scripts/build-image-token-data.mjs [--refresh]
  *
  * Each distinct image (byte-identical copies once) is read by the OCR server
- * (npm run ocr-server; the lines are kept in exports/ocr-lines/, --refresh reads
+ * (npm run ocr:server; the lines are kept in exports/ocr-lines/, --refresh reads
  * again, e.g. after a new recognition model), turned into words with positions
  * (services/ocr-tokens.js) and tagged from its label (services/pdf-label-align.js
  * with OCR-tolerant matching). Output like build-pdf-token-data.mjs:

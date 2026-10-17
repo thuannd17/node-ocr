@@ -63,7 +63,7 @@ const CUTOFF_SLACK = 4;
 // which corrupts date/duty extraction for that row. Confirmed via a real
 // benchmark run 2026-09-21 that this reaches production, not just the
 // training-data exporter (which already filtered it — see
-// scripts/build-recognition-groundtruth.mjs).
+// scripts/ocr-groundtruth.mjs).
 const SIDEBAR_NOISE_RE = /(ecrew|printable roster|published every friday|irish time|duty changes notified|generate change notifications|change notifications in idp|primary\s*reference)/i;
 // Planned/published section marker
 // Tolerates the spacing/letter slips OCR makes on this title at det limit
@@ -456,7 +456,7 @@ const ROW_DATE_ANCHOR_RE = /\d{1,2}\s*[A-Za-z]{2,9}\s*['’]?\d{2,4}\b/;
  * row) and rebuild one row per anchor.
  *
  * This mirrors the date-anchor approach tried in
- * scripts/build-recognition-groundtruth.mjs, but scoped to only the rows
+ * scripts/ocr-groundtruth.mjs, but scoped to only the rows
  * that actually look fused (rather than replacing row detection globally,
  * which scored worse there — real images have missed OCR detections that
  * break a strict one-anchor-per-row assumption more often than groupRows

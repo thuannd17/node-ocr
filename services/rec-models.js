@@ -1,12 +1,12 @@
 /**
  * Versions of the OCR text-recognition model (PaddleOCR rec, fine-tuned on roster crops):
  * models/rec/<vN|stock>/infer (what the OCR server loads) + model.json (recipe, what it was
- * trained/tested on, its retrain-check comparison, status). The active one is .env
+ * trained/tested on, its ocr:train comparison, status). The active one is .env
  * OCR_CUSTOM_REC; the OCR server loads it at start, so switching needs a server restart.
  *
  *   listRecModels() -> [{ id, active, name, createdAt, status, trainedOn, testedOn, comparison, notes, sizeBytes }]
  *   activeRecId(), activateRec(id) (edits .env, keeps the old line as a comment), deleteRec(id)
- * Training a new version: scripts/retrain-check.mjs (npm run retrain-check).
+ * Training a new version: scripts/ocr-train.mjs (npm run ocr:train).
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -59,7 +59,7 @@ export function activateRec(id) {
   const line = envLine();
   const newLine = `OCR_CUSTOM_REC=models/rec/${id}/infer`;
   fs.writeFileSync(ENV, line
-    ? text.replace(line[0], `# ${today()}: switched from ${active || line[1]} (rollback: npm run use-model -- ${active || '?'})\n# ${line[0]}\n${newLine}`)
+    ? text.replace(line[0], `# ${today()}: switched from ${active || line[1]} (rollback: npm run ocr:use-model -- ${active || '?'})\n# ${line[0]}\n${newLine}`)
     : `${text.trimEnd()}\n${newLine}\n`, 'utf8');
   if (active && active !== 'stock') {
     const prev = path.join(REC_DIR, active, 'model.json');

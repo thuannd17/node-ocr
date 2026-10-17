@@ -11,7 +11,7 @@
  *   4. models/ai/.next -> a new version models/ai/<id>/, activated (earlier versions are kept:
  *      /models lists them, activates another one or deletes one; services/ai-models.js)
  *
- *   node scripts/train-pdf-model.mjs
+ *   node scripts/model-train.mjs
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -20,12 +20,19 @@ import { fileURLToPath } from 'node:url';
 import { learnConventions, mergeConventions } from '../services/pdf-row-assembler.js';
 import { PYTHON } from '../services/pdf-ai-extract.js';
 import { AI_DIR, newVersionDir, activateModel } from '../services/ai-models.js';
-import { labelFile, dataFile } from '../utils/data-files.js';
+import { labelFile, dataFile, extOf, PDF_EXTS } from '../utils/data-files.js';
 import { readPdfText } from '../services/pdf-text.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const TOKENS = path.join(ROOT, 'exports', 'pdf-tokens');
 const NEXT = path.join(AI_DIR, '.next');
+
+// training files per type as /benchmark counts them: every picture is 'image', a text file its extension
+const countByType = (names) => {
+  const out = Object.fromEntries(['image', ...PDF_EXTS].map(t => [t, 0]));
+  for (const n of names) out[PDF_EXTS.includes(extOf(n)) ? extOf(n) : 'image'] += 1;
+  return out;
+};
 
 const run = (cmd, args) => new Promise((resolve, reject) => {
   const child = spawn(cmd, args, { cwd: ROOT, windowsHide: true });
@@ -62,6 +69,7 @@ const meta = {
   files: summary.files.length + imageSummary.files.length,
   pdfs: summary.files.length,
   images: imageSummary.files.length,
+  filesByType: countByType([...summary.files, ...imageSummary.files].map(f => f.file)),
   fromLabelOnly: summary.aligned.length, // formats the parser misreads, learned from the label alone
   rows: summary.files.reduce((s, f) => s + f.rows, 0) + imageSummary.rows,
   words: summary.tokens + imageSummary.tokens,

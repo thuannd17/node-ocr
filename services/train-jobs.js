@@ -1,6 +1,6 @@
 /**
  * Training runs started from the app, one at a time per model family (a child
- * process: scripts/train-pdf-model.mjs, scripts/retrain-check.mjs, ...). The log
+ * process: scripts/model-train.mjs, scripts/ocr-train.mjs, ...). The log
  * is kept in memory for the page that follows the run.
  *
  *   startJob(family, args, { env }) -> job (throws 409 when that family is already training)

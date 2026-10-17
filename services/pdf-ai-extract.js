@@ -3,7 +3,7 @@
  * tagged by the trained model (scripts/pdf_tagger.py, run through
  * scripts/pdf_tagger_predict.py) and put into rows by services/pdf-row-assembler.js.
  * It reads layouts the parser has no code for once a file of that layout is
- * labeled in /label and the model retrained (scripts/train-pdf-model.mjs).
+ * labeled in /label and the model retrained (scripts/model-train.mjs).
  *
  *   modelInfo() -> { ready, id, trainedAt, files, rows, words } | { ready: false }  (the active version, services/ai-models.js)
  *   extractWithModel(pages, dir?) -> { format: 'ai-model', period, notices, published, planned }

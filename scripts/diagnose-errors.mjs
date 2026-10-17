@@ -31,7 +31,7 @@
  * Usage:
  *   node --env-file=.env scripts/diagnose-errors.mjs [--limit=N] [--json=out.json]
  *        [--lines-dir=tmp/diag-lines] [--examples=3]
- * Needs `npm run ocr-server` running (only for images not already cached).
+ * Needs `npm run ocr:server` running (only for images not already cached).
  * Side-effect free: does not write labels or review queues.
  */
 import fs from 'node:fs';

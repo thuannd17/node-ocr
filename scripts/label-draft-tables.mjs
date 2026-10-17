@@ -6,7 +6,7 @@
  * for every such file in fake-data/ that has no label yet. A label already there
  * (checked by a person in /label) is never touched.
  *
- *   node scripts/auto-label-tables.mjs [--dry] [--redo-auto]
+ *   node scripts/label-draft-tables.mjs [--dry] [--redo-auto]
  *     --redo-auto: also rewrite labels this script wrote before (`_autoLabel`, never saved in /label)
  *
  * The labels carry `_autoLabel: 'parser'` and `_reviewedByUser: false`; /label

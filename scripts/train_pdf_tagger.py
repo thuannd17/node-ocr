@@ -111,7 +111,7 @@ def learning_curve(docs):
 def predict(docs, split, out_dir):
     """
     Tags of every file from a model that never saw it, written like exports/pdf-tokens
-    (field = predicted) for scripts/eval-pdf-assembler.mjs --pred. split:
+    (field = predicted) for scripts/model-eval-assembler.mjs --pred. split:
       file   - 5 folds by file (its layout was seen in other files)
       layout - its whole layout left out (a format never seen)
       one    - its layout left out except its first file (a new format after labeling one file)
@@ -147,7 +147,7 @@ def predict(docs, split, out_dir):
 
 
 def main():
-    if '--conventions' in sys.argv:  # header words learned from the labels (scripts/train-pdf-model.mjs)
+    if '--conventions' in sys.argv:  # header words learned from the labels (scripts/model-train.mjs)
         use_learned_header_words(sys.argv[sys.argv.index('--conventions') + 1])
     docs = load()
     if '--predict' in sys.argv:

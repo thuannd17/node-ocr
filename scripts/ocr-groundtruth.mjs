@@ -59,7 +59,7 @@ function parseArgs(argv) {
 		else if (m[1] === 'folds') args.folds = Number(m[2]);
 		else if (m[1] === 'lines-dir') args.linesDir = m[2];
 		else if (m[1] === 'fold') args.fold = Number(m[2]);
-		// JSON { "<image name>": foldIndex } written by kfold-recognition.mjs: the
+		// JSON { "<image name>": foldIndex } written by ocr-kfold.mjs: the
 		// one split shared with the scoring benchmark (runBenchmark's foldMap)
 		else if (m[1] === 'fold-map') args.foldMap = m[2];
 	}

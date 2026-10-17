@@ -28,7 +28,7 @@
  * fold-k model on fold k (a real held-out baseline for a recipe change).
  *
  * Usage:
- *   node --env-file=.env scripts/kfold-recognition.mjs --id=tight --folds=5 --epochs=25 \
+ *   node --env-file=.env scripts/ocr-kfold.mjs --id=tight --folds=5 --epochs=25 \
  *     --config=models/rec/train-template.yml --lines-dir=cache/ocr-det1920-stock \
  *     --build-args="--general=table --tight-crops" \
  *     --baseline-rec=models/rec/v2/infer,models/rec/v3/infer
@@ -227,7 +227,7 @@ async function main() {
 		if (!fs.existsSync(path.join(datasetDir, 'manifest.json'))) {
 			const extra = args.buildArgs.split(/\s+/).filter(Boolean);
 			if (args.linesDir) extra.push(`--lines-dir=${args.linesDir}`);
-			await run('node', [path.join(ROOT, 'scripts', 'build-recognition-groundtruth.mjs'), `--id=${name}`, `--folds=${args.folds}`, `--fold=${k}`, `--fold-map=${foldMapPath}`, ...extra]);
+			await run('node', [path.join(ROOT, 'scripts', 'ocr-groundtruth.mjs'), `--id=${name}`, `--folds=${args.folds}`, `--fold=${k}`, `--fold-map=${foldMapPath}`, ...extra]);
 		}
 		if (!fs.existsSync(path.join(inferDir, 'inference.pdiparams'))) {
 			writeFoldConfig(path.resolve(ROOT, args.config), datasetDir, saveDir, args.epochs, cfg);

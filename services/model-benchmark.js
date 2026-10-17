@@ -172,7 +172,9 @@ export async function runModelBenchmark({ types = FILE_TYPES, onEvent, shouldSto
     const part = { at: new Date().toISOString() };
     for (const k of kinds) part[k] = brief(result[k]);
     if (kinds.length === 2) part.overall = brief(result.overall);
-    if (kinds.length) saveBenchmark(info.dir, part);
+    // every type asked for was run in full: its own score (/models lists each type)
+    part.byType = Object.fromEntries(types.map(t => [t, brief(result.byType[t] || { files: 0, rowMatches: 0, rowTotal: 0, rowExact: null })]));
+    saveBenchmark(info.dir, part);
   }
   onEvent?.({ type: 'done', result });
   return result;

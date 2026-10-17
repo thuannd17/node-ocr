@@ -11,7 +11,7 @@
  * /upload can say when a result needs a closer look. (The Gemini/VLM fallback
  * was removed 2026-10-09; backup in tmp/backup-remove-vlm-20261009.)
  *
- * Yêu cầu: chạy `npm run ocr-server` (hoặc `python scripts/ocr_server.py`).
+ * Yêu cầu: chạy `npm run ocr:server` (hoặc `python scripts/ocr_server.py`).
  */
 import path from 'node:path';
 import fs from 'node:fs';
@@ -22,7 +22,7 @@ import { parseRoster, analyzeExtractionQuality, cleanExtractionResult } from './
 const OCR_SERVER_URL = (process.env.OCR_SERVER_URL || 'http://127.0.0.1:8501').replace(/\/+$/, '');
 const OCR_TIMEOUT_MS = Number(process.env.OCR_TIMEOUT_MS || 300000); // Increased to 5min for very large files
 
-const START_HINT = 'PaddleOCR server is not reachable. Start it first: npm run ocr-server '
+const START_HINT = 'PaddleOCR server is not reachable. Start it first: npm run ocr:server '
   + `(expected ${OCR_SERVER_URL}, set OCR_SERVER_URL to override)`;
 
 const FAST_OCR_MAX_WIDTH = Number(process.env.OCR_FAST_OCR_MAX_WIDTH || 1600);
@@ -41,7 +41,7 @@ async function callOcrServer(filePath) {
   } catch (err) {
     if (err?.name === 'TimeoutError' || err?.name === 'AbortError') {
       throw new Error(`OCR server không trả kết quả sau ${Math.round(OCR_TIMEOUT_MS / 1000)} s `
-        + '(server có thể đang quá tải hoặc bị treo). Thử lại sau, hoặc restart: npm run ocr-server');
+        + '(server có thể đang quá tải hoặc bị treo). Thử lại sau, hoặc restart: npm run ocr:server');
     }
     const cause = err?.cause?.code || err?.code || '';
     if (cause === 'ECONNREFUSED' || err?.name === 'TypeError') {
@@ -61,7 +61,7 @@ async function callOcrServer(filePath) {
     if (res.status === 502 || /WinError 10061|ECONNREFUSED/i.test(errMsg)) {
       throw new Error(
         `OCR server không phản hồi ổn định.\n` +
-        `Hãy restart OCR server: npm run ocr-server\n` +
+        `Hãy restart OCR server: npm run ocr:server\n` +
         `Chi tiết: ${errMsg}`
       );
     }

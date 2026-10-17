@@ -3,7 +3,7 @@
  * The AI model over every labeled file, images and PDFs together, as /upload reads
  * them (services/model-benchmark.js). Images need the OCR server.
  *
- *   node --env-file=.env scripts/benchmark-model.mjs [--image | --pdf | --types=image,csv,...] [--json] [--files]
+ *   node --env-file=.env scripts/model-benchmark.mjs [--image | --pdf | --types=image,csv,...] [--json] [--files]
  *     --pdf = every text file (pdf, csv, xls, xlsx, txt); the scores are also given per file type
  */
 import { runModelBenchmark, FILE_TYPES, typeOf } from '../services/model-benchmark.js';

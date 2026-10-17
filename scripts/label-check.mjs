@@ -7,7 +7,7 @@
  * at once). Labels made from Auto-fill score about 100% by themselves: the change between
  * runs is what tells; a file whose label was edited since the last run is marked so.
  *
- *   npm run check:autofill [-- --files] [-- --errors=N] [-- --no-save]
+ *   npm run label:check [-- --files] [-- --errors=N] [-- --no-save]
  *     --files     every file's score, not only the changed ones
  *     --errors=N  the first N wrong fields of each changed file (default 3)
  *     --no-save   do not keep this run as the next run's baseline

@@ -2,7 +2,7 @@
 /**
  * Print the rows parsed from NetLine/Crew duty-plan PDFs.
  *
- *   node [--env-file=.env] scripts/parse-pdf.mjs <file.pdf | folder> [--json]
+ *   node [--env-file=.env] scripts/label-parse.mjs <file.pdf | folder> [--json]
  * Image-only PDFs are read with OCR: the OCR server must be running.
  */
 import fs from 'node:fs';

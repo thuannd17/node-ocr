@@ -3,14 +3,14 @@
  * Scores the learned PDF extractor's row assembler (services/pdf-row-assembler.js)
  * against the labels in labels/pdf/.
  *
- *   node scripts/eval-pdf-assembler.mjs                       # true tags (exports/pdf-tokens): the assembler alone
- *   node scripts/eval-pdf-assembler.mjs --pred exports/pdf-tokens-pred/file   # tags predicted by the tagger
+ *   node scripts/model-eval-assembler.mjs                       # true tags (exports/pdf-tokens): the assembler alone
+ *   node scripts/model-eval-assembler.mjs --pred exports/pdf-tokens-pred/file   # tags predicted by the tagger
  *   ... --verbose   # per file, and the first differences
  *   ... --file 790407bc --all   # only files whose name starts so; every difference
  *
  * Conventions (how values are written, where dates stand, time zones) are learned
  * from the other files only, so a file never teaches itself; --in-sample learns them
- * from every file, as the trained model does (scripts/train-pdf-model.mjs).
+ * from every file, as the trained model does (scripts/model-train.mjs).
  */
 import fs from 'node:fs';
 import path from 'node:path';

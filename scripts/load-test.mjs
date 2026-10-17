@@ -147,7 +147,7 @@ async function main() {
   for (const u of URLS) {
     health = await fetch(`${u}/health`).then((r) => r.json()).catch(() => null);
     if (!health?.ok) {
-      console.error(`OCR server not reachable at ${u}. Start one, e.g.:\n  OCR_SERVER_PORT=8502 npm run ocr-server`);
+      console.error(`OCR server not reachable at ${u}. Start one, e.g.:\n  OCR_SERVER_PORT=8502 npm run ocr:server`);
       process.exit(1);
     }
   }

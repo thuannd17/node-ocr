@@ -3,7 +3,7 @@
  * Text recognition alone: PaddleOCR on every labeled image, its reading of each
  * labeled cell (services/ocr-benchmark.js). Needs the OCR server.
  *
- *   node --env-file=.env scripts/benchmark-ocr.mjs [--json] [--files] [--misreads=30]
+ *   node --env-file=.env scripts/ocr-benchmark.mjs [--json] [--files] [--misreads=30]
  */
 import { runOcrBenchmark, OCR_FIELDS } from '../services/ocr-benchmark.js';
 
