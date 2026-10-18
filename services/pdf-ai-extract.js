@@ -58,7 +58,7 @@ export function runPython(script, args, input, { timeoutMs = 120000 } = {}) {
 
 /** Rows of a PDF (readPdfText pages) from the learned model. */
 export async function extractWithModel(pages, dir = activeModelDir()) {
-  if (!dir || !fs.existsSync(path.join(dir, 'tagger.joblib'))) throw new Error('Chưa có AI model: hãy label vài file rồi bấm "Train" ở /models.');
+  if (!dir || !fs.existsSync(path.join(dir, 'tagger.joblib'))) throw new Error('No AI model yet: label a few files, then click "Train" on /models.');
   const tagPages = plainTokens(wordsOf(pages));
   const { fields } = await runPython('pdf_tagger_predict.py', [dir], { pages: tagPages });
   tagPages.forEach((p, i) => p.tokens.forEach((t, k) => { t.field = fields[i][k]; }));
@@ -94,7 +94,7 @@ export async function readPdfWithModel(filePath, dir = activeModelDir()) {
 }
 
 export async function extractImageWithModel(lines, width, height, dir = activeModelDir()) {
-  if (!dir || !fs.existsSync(path.join(dir, 'tagger.joblib'))) throw new Error('Chưa có AI model: hãy label vài file rồi bấm "Train" ở /models.');
+  if (!dir || !fs.existsSync(path.join(dir, 'tagger.joblib'))) throw new Error('No AI model yet: label a few files, then click "Train" on /models.');
   const pages = ocrWordPages(lines, width, height);
   const { fields } = await runPython('pdf_tagger_predict.py', [dir], { pages });
   pages.forEach((p, i) => p.tokens.forEach((t, k) => { t.field = fields[i][k]; }));

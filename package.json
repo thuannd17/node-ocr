@@ -8,9 +8,12 @@
     "@fortawesome/fontawesome-free": "^6.7.2",
     "express": "^5.2.1",
     "form-data": "^4.0.6",
+    "leaflet": "^1.9.4",
     "multer": "^2.4.0",
     "pdfjs-dist": "^4.10.38",
     "sharp": "^0.35.5",
+    "suncalc": "^1.9.0",
+    "swagger-ui-dist": "^5.17.14",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "scripts": {
@@ -29,7 +32,8 @@
     "label:parse": "node --env-file=.env scripts/label-parse.mjs",
     "label:check": "node --env-file=.env scripts/label-check.mjs",
     "label:audit": "node --env-file=.env scripts/label-audit.mjs",
-    "label:draft-tables": "node --env-file=.env scripts/label-draft-tables.mjs"
+    "label:draft-tables": "node --env-file=.env scripts/label-draft-tables.mjs",
+    "airports:update": "node scripts/airports-update.mjs"
   },
   "author": "ThuanND",
   "license": "ISC"

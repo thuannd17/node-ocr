@@ -42,9 +42,9 @@ async function ocrPageNow(filePath, page) {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ path: path.resolve(filePath), page, dpi: DPI }),
     signal: AbortSignal.timeout(Number(process.env.OCR_TIMEOUT_MS || 300000)),
-  }).catch((e) => { throw new Error(`OCR server không phản hồi (${OCR_SERVER_URL}): ${e.cause?.code || e.message}. PDF này không có lớp text nên cần OCR: npm run ocr:server`); });
+  }).catch((e) => { throw new Error(`The OCR server is not responding (${OCR_SERVER_URL}): ${e.cause?.code || e.message}. This PDF has no text layer, so it needs OCR: npm run ocr:server`); });
   const data = await res.json().catch(() => null);
-  if (!res.ok || !data?.ok) throw new Error(`OCR PDF thất bại: ${data?.error || `HTTP ${res.status}`}`);
+  if (!res.ok || !data?.ok) throw new Error(`PDF OCR failed: ${data?.error || `HTTP ${res.status}`}`);
   return data;
 }
 

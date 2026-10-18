@@ -52,7 +52,7 @@ export function listRecModels() {
 
 /** Point .env at this version (the old line kept as a comment) and update the statuses. */
 export function activateRec(id) {
-  if (!isVersion(id)) throw fail(`Không có model OCR ${id}`, 404);
+  if (!isVersion(id)) throw fail(`No OCR model ${id}`, 404);
   const active = activeRecId();
   if (id === active) return;
   const text = fs.readFileSync(ENV, 'utf8');
@@ -70,8 +70,8 @@ export function activateRec(id) {
 }
 
 export function deleteRec(id) {
-  if (!isVersion(id)) throw fail(`Không có model OCR ${id}`, 404);
-  if (id === activeRecId()) throw fail('Không xoá được model đang kích hoạt: hãy kích hoạt model khác trước.', 409);
-  if (id === 'stock') throw fail('Không xoá model gốc (stock): nó là mốc để so sánh các bản fine-tune.', 409);
+  if (!isVersion(id)) throw fail(`No OCR model ${id}`, 404);
+  if (id === activeRecId()) throw fail('Cannot delete the active model: activate another one first.', 409);
+  if (id === 'stock') throw fail('Cannot delete the stock model: it is the baseline the fine-tuned versions are compared with.', 409);
   fs.rmSync(path.join(REC_DIR, id), { recursive: true, force: true });
 }

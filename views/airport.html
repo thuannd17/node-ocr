@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Airport Lookup</title>
+  <script src="/assets/i18n/vi.js"></script>
+  <script src="/assets/i18n.js"></script>
+  <link rel="stylesheet" href="/assets/app.css">
+  <link rel="stylesheet" href="/assets/fontawesome/css/all.min.css">
+  <link rel="stylesheet" href="/assets/leaflet/leaflet.css">
+  <style>
+    .search { position: relative; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .search .box { position: relative; flex: 1; min-width: 240px; }
+    .search input { width: 100%; box-sizing: border-box; padding: 10px 12px 10px 36px; font-size: 15px; border: 1px solid var(--border); border-radius: 6px; }
+    .search input:focus { outline: 2px solid color-mix(in srgb, var(--primary) 40%, white); border-color: var(--primary); }
+    .search .box > i { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--muted); }
+    .search .hint { font-size: 13px; color: var(--muted); flex-basis: 100%; }
+    .btn { background: var(--primary); color: #fff; border: none; padding: 9px 14px; border-radius: 6px; cursor: pointer; font-size: 14px; display: inline-flex; gap: 6px; align-items: center; text-decoration: none; }
+    .btn:hover { background: var(--primary-dark); }
+    .btn.secondary { background: #fff; color: var(--text); border: 1px solid var(--border); }
+    .btn.secondary:hover { background: #f0f2f5; }
+    .results { position: absolute; z-index: 1100; left: 0; right: 0; top: calc(100% + 4px); background: #fff; border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 8px 24px rgba(0,0,0,0.12); max-height: 420px; overflow: auto; display: none; }
+    .results.visible { display: block; }
+    .results .item { display: grid; grid-template-columns: 92px 1fr; gap: 10px; padding: 8px 12px; cursor: pointer; border-top: 1px solid var(--border); align-items: center; }
+    .results .item:first-child { border-top: none; }
+    .results .item:hover, .results .item.sel { background: #f2f6fc; }
+    .results .codes { font-family: ui-monospace, Consolas, monospace; font-size: 13px; font-weight: 600; color: var(--nav-bg); }
+    .results .codes small { display: block; font-weight: 400; color: var(--muted); }
+    .results .name { font-size: 14px; }
+    .results .name small { display: block; color: var(--muted); font-size: 12px; }
+    .results .none { padding: 12px; color: var(--muted); font-size: 14px; }
+
+    .head { display: flex; gap: 14px; align-items: flex-start; flex-wrap: wrap; }
+    .head .flag { padding-top: 4px; }
+    .flag-img { vertical-align: -2px; border-radius: 2px; box-shadow: 0 0 0 1px rgba(0,0,0,0.08); }
+    .head h2 { margin: 0 0 4px; font-size: 22px; color: var(--nav-bg); }
+    .head .where { color: var(--muted); font-size: 14px; }
+    .head .links { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
+    .badge { display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: #eef2f8; color: var(--nav-bg); margin-left: 6px; vertical-align: middle; }
+    .badge.green { background: #e8f5e9; color: #2e7d32; }
+
+    .cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: 20px; }
+    .codes-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px; margin: 16px 0; }
+    .code { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; }
+    .code .k { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; display: flex; gap: 4px; align-items: center; }
+    .code .v { font-family: ui-monospace, Consolas, monospace; font-size: 20px; font-weight: 700; color: var(--nav-bg); }
+    .code .v.empty { color: #c0c5cd; font-weight: 400; font-size: 16px; }
+    .code.main { border-color: var(--primary); background: #f5f9fe; }
+    .facts { display: grid; grid-template-columns: 26px 130px 1fr; gap: 8px 6px; font-size: 14px; align-items: baseline; }
+    .facts i { color: var(--muted); }
+    .facts .k { color: var(--muted); }
+    .facts .mono { font-family: ui-monospace, Consolas, monospace; }
+    .copy { border: none; background: none; color: var(--muted); cursor: pointer; padding: 0 4px; }
+    .copy:hover { color: var(--primary); }
+    .note { font-size: 12px; color: var(--muted); margin-top: 12px; }
+    #map { height: 380px; border-radius: 8px; border: 1px solid var(--border); }
+    .others { font-size: 13px; margin-top: 12px; }
+    .others a { margin-right: 10px; }
+
+    .now { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
+    .now .big { font-size: 34px; font-weight: 700; color: var(--nav-bg); display: flex; gap: 10px; align-items: center; }
+    .now .big i { font-size: 30px; }
+    .now .det { font-size: 13px; color: var(--muted); display: flex; gap: 14px; flex-wrap: wrap; }
+    .days { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; }
+    .dayw { border: 1px solid var(--border); border-radius: 8px; padding: 10px 8px; text-align: center; font-size: 13px; display: flex; flex-direction: column; gap: 4px; }
+    .dayw.today { border-color: var(--primary); background: #f5f9fe; }
+    .dayw .d { font-weight: 600; color: var(--nav-bg); }
+    .dayw .ico { font-size: 26px; margin: 4px 0; }
+    .dayw .desc { color: var(--muted); font-size: 12px; min-height: 2.4em; }
+    .dayw .t { font-size: 15px; } .dayw .t b { color: #c0392b; } .dayw .t span { color: #2471a3; }
+    .dayw .sm { color: var(--muted); font-size: 12px; }
+    .arrow { display: inline-block; }
+    .ico.sun { color: #f39c12; } .ico.cloud { color: #7f8c9a; } .ico.rain { color: #2e86c1; } .ico.snow { color: #5dade2; } .ico.storm { color: #8e44ad; } .ico.fog { color: #95a5a6; }
+    .msg { padding: 10px 12px; border-radius: 6px; font-size: 14px; }
+    .msg.error { background: #ffebee; color: #c62828; }
+    .msg.muted { background: #f6f7f9; color: var(--muted); }
+    .empty { text-align: center; color: var(--muted); padding: 40px 10px; }
+    .empty i { font-size: 40px; display: block; margin-bottom: 10px; opacity: 0.5; }
+    .empty .eg a { font-family: ui-monospace, Consolas, monospace; margin: 0 4px; }
+
+    @media (max-width: 900px) {
+      .cols { grid-template-columns: 1fr; }
+      .days { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); }
+      .facts { grid-template-columns: 22px 110px 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <script src="/assets/nav.js"></script>
+  <main class="page">
+    <div class="page-header">
+      <h1><i class="fa-solid fa-plane-departure" aria-hidden="true"></i> Airport</h1>
+      <p class="subtitle">Find an airport by IATA, ICAO, FAA or WMO code, or by name, city or country. See its codes, coordinates, position on a map and a 7-day weather forecast.</p>
+    </div>
+
+    <div class="card">
+      <div class="search">
+        <div class="box">
+          <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+          <input id="q" type="search" placeholder="VIE, LOWW, JFK, Noi Bai, Vienna, Japan…" autocomplete="off" spellcheck="false" aria-label="Find an airport" aria-controls="results">
+          <div class="results" id="results" role="listbox"></div>
+        </div>
+        <button class="btn" id="goBtn"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i> Search</button>
+        <span class="hint">Type a code (3 letters is usually IATA, 4 letters ICAO) and press Enter, or type a name and pick from the list (↑ ↓ Enter).</span>
+      </div>
+    </div>
+
+    <div id="detail"></div>
+    <div class="empty" id="empty">
+      <i class="fa-solid fa-tower-observation" aria-hidden="true"></i>
+      <span>No airport selected. Try:</span>
+      <span class="eg"><a href="?code=HAN">HAN</a><a href="?code=VIE">VIE</a><a href="?code=KJFK">KJFK</a><a href="?code=AUH">AUH</a><a href="?code=LHR">LHR</a></span>
+      <div style="margin-top:8px;font-size:13px" data-i18n>On <a href="/calendar">Calendar</a>, click an airport code in an event's details to open it here.</div>
+    </div>
+  </main>
+
+  <script src="/assets/leaflet/leaflet.js"></script>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const escapeHtml = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const getJson = async (url, opts) => {
+      const r = await fetch(url, opts);
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(body.error || `HTTP ${r.status}`);
+      return body;
+    };
+    // Flag images (Windows does not draw flag emoji); hidden if offline.
+    const flag = (cc, h = 14) => (/^[A-Z]{2}$/.test(cc || '') ? `<img class="flag-img" src="https://flagcdn.com/h40/${cc.toLowerCase()}.png" alt="" style="height:${h}px" onerror="this.remove()">` : '');
+    const TYPE_NAMES = { large: __('Large airport'), medium: __('Medium airport'), small: __('Small airport'), seaplane: __('Seaplane base') };
+
+    // ---- search ----
+    let results = [], sel = -1, searchSeq = 0, timer = null;
+    const mainCode = (a) => a.iata || a.icao || a.faa || a.gps || a.id;
+
+    function renderResults(list, q) {
+      results = list; sel = list.length ? 0 : -1;
+      $('results').innerHTML = list.length
+        ? list.map((a, i) => `<div class="item${i === sel ? ' sel' : ''}" role="option" data-i="${i}">
+            <span class="codes">${escapeHtml(a.iata || '—')} <small>${escapeHtml(a.icao || a.faa || a.gps || a.id)}</small></span>
+            <span class="name">${escapeHtml(a.name)}<small>${flag(a.country)} ${escapeHtml([a.city, a.region, a.countryName].filter(Boolean).join(', '))}</small></span></div>`).join('')
+        : `<div class="none">${__('No airport matches "{q}".', { q: escapeHtml(q) })}</div>`;
+      $('results').classList.add('visible');
+    }
+    const hideResults = () => $('results').classList.remove('visible');
+
+    async function search(q) {
+      const seq = ++searchSeq;
+      if (q.trim().length < 2) { hideResults(); return; }
+      try {
+        const { results: list } = await getJson(`/api/airports?q=${encodeURIComponent(q.trim())}&limit=15`);
+        if (seq === searchSeq && $('q').value === q) renderResults(list, q);
+      } catch (err) { if (seq === searchSeq) { $('results').innerHTML = `<div class="none">${escapeHtml(err.message)}</div>`; $('results').classList.add('visible'); } }
+    }
+
+    $('q').addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(() => search($('q').value), 180); });
+    $('q').addEventListener('keydown', (e) => {
+      const open = $('results').classList.contains('visible') && results.length;
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        if (!open) return;
+        e.preventDefault();
+        sel = (sel + (e.key === 'ArrowDown' ? 1 : -1) + results.length) % results.length;
+        [...$('results').children].forEach((el, i) => el.classList.toggle('sel', i === sel));
+        $('results').children[sel]?.scrollIntoView({ block: 'nearest' });
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        go();
+      } else if (e.key === 'Escape') hideResults();
+    });
+    $('results').addEventListener('mousedown', (e) => {
+      const item = e.target.closest('.item');
+      if (!item) return;
+      e.preventDefault();
+      show(mainCode(results[item.dataset.i]), true);
+    });
+    $('q').addEventListener('blur', () => setTimeout(hideResults, 100));
+    $('q').addEventListener('focus', () => { if (results.length && $('q').value.trim().length >= 2) $('results').classList.add('visible'); });
+    $('goBtn').addEventListener('click', go);
+
+    /** Enter / Tìm: the highlighted result if the list is open, else the text as a code. */
+    async function go() {
+      const q = $('q').value.trim();
+      if (!q) return;
+      if ($('results').classList.contains('visible') && results[sel]) return show(mainCode(results[sel]), true);
+      clearTimeout(timer);
+      try {
+        await getJson(`/api/airports/${encodeURIComponent(q)}`);
+        show(q, true);
+      } catch {
+        await search(q);
+        if (results.length === 1) show(mainCode(results[0]), true);
+      }
+    }
+
+    // ---- details ----
+    let map = null;
+    const dms = (v, pos, neg) => {
+      const a = Math.abs(v), d = Math.floor(a), m = Math.floor((a - d) * 60), s = ((a - d) * 60 - m) * 60;
+      return `${d}°${String(m).padStart(2, '0')}′${s.toFixed(1).padStart(4, '0')}″${v >= 0 ? pos : neg}`;
+    };
+    const codeBox = (label, value, title, main) => `<div class="code${main ? ' main' : ''}" title="${escapeHtml(title)}">
+      <div class="k">${label}${value ? `<button class="copy" data-copy="${escapeHtml(value)}" title="Copy"><i class="fa-regular fa-copy" aria-hidden="true"></i></button>` : ''}</div>
+      <div class="v${value ? '' : ' empty'}">${value ? escapeHtml(value) : __('none')}</div></div>`;
+
+    async function show(code, push) {
+      hideResults();
+      $('empty').style.display = 'none';
+      $('detail').innerHTML = `<div class="card msg muted"><i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i> ${__('Looking up {code}…', { code: escapeHtml(code) })}</div>`;
+      let a;
+      try { a = await getJson(`/api/airports/${encodeURIComponent(code)}`); } catch (err) {
+        $('detail').innerHTML = `<div class="card msg error"><i class="fa-solid fa-circle-exclamation" aria-hidden="true"></i> ${escapeHtml(err.message)}. ${__('Try a name or a city instead.')}</div>`;
+        $('q').value = code; search(code);
+        return;
+      }
+      const url = `/airport?code=${encodeURIComponent(code.toUpperCase())}`;
+      if (push) history.pushState({ code }, '', url); else history.replaceState({ code }, '', url);
+      document.title = `${a.iata || a.icao || a.id} · ${a.name}`;
+      $('q').value = '';
+
+      const by = a.matchedBy && a.matchedBy !== 'iata' && a.matchedBy !== 'icao' ? ` <span class="badge">${__('matched by {code} code', { code: a.matchedBy.toUpperCase() })}</span>` : '';
+      const elevM = a.elev == null ? '' : ` (${Math.round(a.elev * 0.3048)} m)`;
+      const osm = `https://www.openstreetmap.org/?mlat=${a.lat}&mlon=${a.lon}#map=14/${a.lat}/${a.lon}`;
+      const gmaps = `https://www.google.com/maps/search/?api=1&query=${a.lat},${a.lon}`;
+      $('detail').innerHTML = `
+        <div class="card">
+          <div class="head">
+            <span class="flag" aria-hidden="true">${flag(a.country, 34)}</span>
+            <div>
+              <h2>${escapeHtml(a.name)}<span class="badge">${TYPE_NAMES[a.type] || a.type}</span>${a.scheduled ? `<span class="badge green">${__('Scheduled service')}</span>` : ''}${by}</h2>
+              <div class="where"><i class="fa-solid fa-city" aria-hidden="true"></i> ${escapeHtml([a.city, a.region, a.countryName].filter(Boolean).join(', '))}</div>
+            </div>
+            <div class="links">
+              ${a.web ? `<a class="btn secondary" href="${escapeHtml(a.web)}" target="_blank" rel="noopener"><i class="fa-solid fa-globe" aria-hidden="true"></i> Website</a>` : ''}
+              ${a.wiki ? `<a class="btn secondary" href="${escapeHtml(a.wiki)}" target="_blank" rel="noopener"><i class="fa-brands fa-wikipedia-w" aria-hidden="true"></i> Wikipedia</a>` : ''}
+            </div>
+          </div>
+          <div class="codes-grid">
+            ${codeBox('ICAO', a.icao, __('4-letter ICAO code: unique worldwide, use it as the airport id'), true)}
+            ${codeBox('IATA', a.iata, __('3-letter IATA code (tickets, baggage, rosters)'), false)}
+            ${codeBox('FAA', a.faa, __('FAA location identifier: US airports only'), false)}
+            ${codeBox('WMO', a.wmo, __('WMO number of the weather station at the airport (NOAA ISD)'), false)}
+            ${a.gps && a.gps !== a.icao ? codeBox('GPS', a.gps, __('Code used by GPS / navigation units'), false) : ''}
+            ${a.local ? codeBox(__('Local code'), a.local, __('Code given by the country'), false) : ''}
+          </div>
+          <div class="cols">
+            <div>
+              <div class="facts">
+                <i class="fa-solid fa-location-crosshairs" aria-hidden="true"></i><span class="k">${__('Coordinates')}</span>
+                <span><span class="mono">${a.lat.toFixed(5)}, ${a.lon.toFixed(5)}</span><button class="copy" data-copy="${a.lat}, ${a.lon}" title="Copy"><i class="fa-regular fa-copy" aria-hidden="true"></i></button><br><span class="mono" style="color:var(--muted);font-size:13px">${dms(a.lat, 'N', 'S')} ${dms(a.lon, 'E', 'W')}</span></span>
+                <i class="fa-solid fa-mountain" aria-hidden="true"></i><span class="k">${__('Elevation')}</span><span>${a.elev == null ? '—' : `${a.elev.toLocaleString('en')} ft${elevM}`}</span>
+                <i class="fa-solid fa-city" aria-hidden="true"></i><span class="k">${__('City')}</span><span>${escapeHtml(a.city || '—')}</span>
+                <i class="fa-solid fa-map" aria-hidden="true"></i><span class="k">${__('Region')}</span><span>${escapeHtml(a.region || '—')}</span>
+                <i class="fa-solid fa-flag" aria-hidden="true"></i><span class="k">${__('Country')}</span><span>${flag(a.country)} ${escapeHtml(a.countryName)} <span class="mono" style="color:var(--muted)">(${escapeHtml(a.country)})</span></span>
+                <i class="fa-regular fa-clock" aria-hidden="true"></i><span class="k">${__('Time zone')}</span><span id="tz">…</span>
+                <i class="fa-solid fa-fingerprint" aria-hidden="true"></i><span class="k">OurAirports id</span><span class="mono">${escapeHtml(a.id)}</span>
+              </div>
+              <div class="note"><i class="fa-solid fa-circle-info" aria-hidden="true"></i> ${__('Use the <b>ICAO</b> code as the airport\'s id: every airport has one and no two share it. <b>WMO</b> is the number of a <i>weather station</i>, not of the airport: many airports have no station, stations get renumbered or sit outside the airport, so it cannot be an id. IATA codes can also repeat or be reassigned, and small airports often have none.')}</div>
+              ${a.others?.length ? `<div class="others"><b>${__('This code is also used by:')}</b> ${a.others.slice(0, 8).map(o => `<a href="?code=${encodeURIComponent(o.icao || o.id)}">${escapeHtml(o.icao || o.id)} ${escapeHtml(o.name)}</a>`).join('')}</div>` : ''}
+            </div>
+            <div>
+              <div id="map" role="img" aria-label="${__('Map of {name}', { name: escapeHtml(a.name) })}"></div>
+              <div style="font-size:13px;margin-top:6px;display:flex;gap:14px"><a href="${osm}" target="_blank" rel="noopener"><i class="fa-solid fa-up-right-from-square" aria-hidden="true"></i> OpenStreetMap</a><a href="${gmaps}" target="_blank" rel="noopener"><i class="fa-solid fa-up-right-from-square" aria-hidden="true"></i> Google Maps</a></div>
+            </div>
+          </div>
+        </div>
+        <div class="card" id="weather"><h2><i class="fa-solid fa-cloud-sun" aria-hidden="true"></i> ${__('7-day weather')}</h2><div class="msg muted"><i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i> ${__('Loading the forecast…')}</div></div>`;
+      drawMap(a);
+      loadWeather(a, code);
+    }
+
+    function drawMap(a) {
+      if (map) { map.remove(); map = null; }
+      if (!window.L) { $('map').innerHTML = `<div class="msg error">${__('Could not load the map library.')}</div>`; return; }
+      map = L.map('map', { scrollWheelZoom: false }).setView([a.lat, a.lon], a.type === 'large' ? 12 : 13);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+      }).addTo(map);
+      L.marker([a.lat, a.lon], { title: a.name }).addTo(map)
+        .bindPopup(`<b>${escapeHtml(a.iata || a.icao || a.id)}</b> ${escapeHtml(a.name)}<br>${a.lat.toFixed(4)}, ${a.lon.toFixed(4)}`).openPopup();
+      map.on('focus', () => map.scrollWheelZoom.enable());
+      map.on('blur', () => map.scrollWheelZoom.disable());
+    }
+
+    // WMO weather interpretation codes (the ones Open-Meteo returns)
+    const WX = [
+      [[0], 'fa-sun', 'sun', 'Clear sky'], [[1], 'fa-sun', 'sun', 'Mainly clear'], [[2], 'fa-cloud-sun', 'cloud', 'Partly cloudy'], [[3], 'fa-cloud', 'cloud', 'Overcast'],
+      [[45, 48], 'fa-smog', 'fog', 'Fog'], [[51, 53, 55], 'fa-cloud-rain', 'rain', 'Drizzle'], [[56, 57], 'fa-icicles', 'snow', 'Freezing drizzle'],
+      [[61, 63], 'fa-cloud-rain', 'rain', 'Rain'], [[65], 'fa-cloud-showers-heavy', 'rain', 'Heavy rain'], [[66, 67], 'fa-icicles', 'snow', 'Freezing rain'],
+      [[71, 73, 75, 77], 'fa-snowflake', 'snow', 'Snow'], [[80, 81], 'fa-cloud-sun-rain', 'rain', 'Rain showers'], [[82], 'fa-cloud-showers-heavy', 'rain', 'Violent rain showers'],
+      [[85, 86], 'fa-snowflake', 'snow', 'Snow showers'], [[95], 'fa-cloud-bolt', 'storm', 'Thunderstorm'], [[96, 99], 'fa-cloud-bolt', 'storm', 'Thunderstorm with hail'],
+    ];
+    const wx = (code) => { const w = WX.find(([codes]) => codes.includes(code)) || [[], 'fa-question', 'cloud', __('Code {code}', { code })]; return { icon: w[1], cls: w[2], text: __(w[3]) }; };
+    // all 16 points in one key, so single letters are not dictionary keys of their own
+    const COMPASS = __('N NNE NE ENE E ESE SE SSE S SSW SW WSW W WNW NW NNW').split(' ');
+    const compass = (deg) => COMPASS[Math.round(((deg % 360) / 22.5)) % 16];
+    // The arrow points where the wind blows to (the reported direction is where it comes from).
+    const windArrow = (deg) => (deg == null ? '' : `<i class="fa-solid fa-arrow-up arrow" style="transform:rotate(${deg + 180}deg)" title="${__('Wind from {deg}°', { deg })}" aria-hidden="true"></i>`);
+    const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => __(d));
+    const num = (v, d = 0) => (v == null ? '—' : Number(v).toFixed(d));
+
+    async function loadWeather(a, code) {
+      const box = $('weather');
+      try {
+        const w = await getJson(`/api/airports/${encodeURIComponent(code)}/weather`);
+        if (!box.isConnected) return;
+        const off = w.utcOffsetSeconds / 3600;
+        const offText = `UTC${off >= 0 ? '+' : '−'}${Math.floor(Math.abs(off))}${Math.abs(off) % 1 ? `:${String(Math.round((Math.abs(off) % 1) * 60)).padStart(2, '0')}` : ''}`;
+        let localNow = '';
+        try { localNow = new Intl.DateTimeFormat(I18N.lang === 'vi' ? 'vi-VN' : 'en-GB', { timeZone: w.timezone, hour: '2-digit', minute: '2-digit', weekday: 'short', day: '2-digit', month: '2-digit' }).format(new Date()); } catch {}
+        if ($('tz')) $('tz').innerHTML = `${escapeHtml(w.timezone)} <span class="mono">(${offText})</span>${localNow ? ` · ${__('now {time}', { time: escapeHtml(localNow) })}` : ''}`;
+        const c = w.current;
+        const now = c ? (() => { const x = wx(c.code); return `<div class="now">
+            <div class="big"><i class="fa-solid ${x.icon} ico ${x.cls}" aria-hidden="true"></i>${num(c.temp, 1)}°C</div>
+            <div><div><b>${x.text}</b> · ${__('at {time} local time', { time: escapeHtml(c.time.slice(11)) })}</div>
+            <div class="det"><span><i class="fa-solid fa-wind" aria-hidden="true"></i> ${num(c.wind)} kt ${compass(c.windDir)} ${windArrow(c.windDir)}</span>
+              <span><i class="fa-solid fa-droplet" aria-hidden="true"></i> ${num(c.humidity)}%</span>
+              <span><i class="fa-solid fa-gauge" aria-hidden="true"></i> ${num(c.pressure)} hPa</span>
+              <span><i class="fa-solid fa-eye" aria-hidden="true"></i> ${c.visibility == null ? '—' : `${(c.visibility / 1000).toFixed(1)} km`}</span>
+              <span><i class="fa-solid fa-cloud" aria-hidden="true"></i> ${num(c.cloud)}%</span></div></div></div>`; })() : '';
+        const today = w.current?.time?.slice(0, 10);
+        const days = w.daily.map((d) => {
+          const x = wx(d.code);
+          const dt = new Date(`${d.date}T00:00:00Z`);
+          return `<div class="dayw${d.date === today ? ' today' : ''}">
+            <div class="d">${d.date === today ? __('Today') : WEEKDAYS[dt.getUTCDay()]} ${dt.getUTCDate()}/${dt.getUTCMonth() + 1}</div>
+            <i class="fa-solid ${x.icon} ico ${x.cls}" aria-hidden="true"></i>
+            <div class="desc">${x.text}</div>
+            <div class="t"><b>${num(d.tmax)}°</b> / <span>${num(d.tmin)}°</span></div>
+            <div class="sm"><i class="fa-solid fa-umbrella" aria-hidden="true"></i> ${num(d.rain, 1)} mm${d.rainChance == null ? '' : ` · ${d.rainChance}%`}</div>
+            <div class="sm"><i class="fa-solid fa-wind" aria-hidden="true"></i> ${num(d.wind)} kt ${windArrow(d.windDir)}${d.gust ? `<br>${__('gusts {n} kt', { n: num(d.gust) })}` : ''}</div>
+            <div class="sm"><i class="fa-solid fa-sun" aria-hidden="true"></i> ${escapeHtml(d.sunrise?.slice(11) || '—')} – ${escapeHtml(d.sunset?.slice(11) || '—')}</div></div>`;
+        }).join('');
+        box.innerHTML = `<h2><i class="fa-solid fa-cloud-sun" aria-hidden="true"></i> ${__('7-day weather')}</h2>${now}<div class="days">${days}</div>
+          <div class="note">${__('Forecast at the airport\'s coordinates, local time ({tz}). Wind in knots, the arrow points where the wind blows to. Source: <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo.com</a>, refreshed every 30 minutes. For reference only, not a substitute for METAR/TAF.', { tz: escapeHtml(w.timezone) })}</div>`;
+      } catch (err) {
+        if (box.isConnected) box.innerHTML = `<h2><i class="fa-solid fa-cloud-sun" aria-hidden="true"></i> ${__('7-day weather')}</h2><div class="msg error">${escapeHtml(err.message)}</div>`;
+        if ($('tz')) $('tz').textContent = '—';
+      }
+    }
+
+    document.addEventListener('click', async (e) => {
+      const btn = e.target.closest('[data-copy]');
+      if (!btn) return;
+      try { await navigator.clipboard.writeText(btn.dataset.copy); btn.innerHTML = '<i class="fa-solid fa-check" aria-hidden="true"></i>'; } catch {}
+      setTimeout(() => { btn.innerHTML = '<i class="fa-regular fa-copy" aria-hidden="true"></i>'; }, 1200);
+    });
+
+    function fromUrl() {
+      const q = new URLSearchParams(location.search);
+      const code = q.get('code');
+      if (code) show(code, false);
+      else { $('detail').innerHTML = ''; $('empty').style.display = ''; document.title = 'Airport Lookup'; if (q.get('q')) { $('q').value = q.get('q'); search(q.get('q')); } }
+    }
+    window.addEventListener('popstate', fromUrl);
+    fromUrl();
+    if (!new URLSearchParams(location.search).get('code')) $('q').focus();
+  </script>
+</body>
+</html>

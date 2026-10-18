@@ -1,9 +1,11 @@
 <!DOCTYPE html>
-<html lang="vi">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Benchmark — Roster OCR</title>
+  <script src="/assets/i18n/vi.js"></script>
+  <script src="/assets/i18n.js"></script>
   <link rel="stylesheet" href="/assets/app.css">
   <link rel="stylesheet" href="/assets/fontawesome/css/all.min.css">
   <style>
@@ -83,43 +85,43 @@
   <main class="page">
   <div class="page-header">
     <h1><i class="fa-solid fa-chart-column" aria-hidden="true"></i> Benchmark Accuracy</h1>
-    <p class="subtitle">Chấm điểm trên các file đã gán nhãn (<code>labels/&lt;đuôi&gt;/</code>): (1) OCR nhận dạng chữ từ ảnh, (2) AI model đọc dữ liệu roster theo từng loại file</p>
+    <p class="subtitle" data-i18n>Scores on the labeled files (<code>labels/&lt;ext&gt;/</code>): (1) OCR text recognition from images, (2) the AI model reading roster data, per file type</p>
   </div>
 
   <section class="ocr-section">
-    <h2 class="bench-heading"><i class="fa-solid fa-font" aria-hidden="true"></i> 1. Nhận dạng chữ từ ảnh (OCR) <small>chỉ PaddleOCR, chưa qua parser/model: mỗi ô trong nhãn ảnh có được OCR đọc ra đúng chữ không</small></h2>
+    <h2 class="bench-heading"><i class="fa-solid fa-font" aria-hidden="true"></i> <span data-i18n>1. Text recognition from images (OCR) <small>PaddleOCR only, before the parser / model: is every cell of an image label read out with the right text</small></span></h2>
     <div class="controls">
       <b>OCR</b>
       <span id="ocrCount" style="font-size:12px;color:#666"></span>
-      <span style="font-size:12px;color:#666">Cần OCR server đang chạy</span>
-      <button id="ocrRunBtn"><i class="fa-solid fa-play" aria-hidden="true"></i> Chạy benchmark OCR</button>
+      <span style="font-size:12px;color:#666">Needs the OCR server running</span>
+      <button id="ocrRunBtn"><i class="fa-solid fa-play" aria-hidden="true"></i> Run OCR benchmark</button>
       <span id="ocrStatus" style="color:#888;font-size:13px"></span>
     </div>
     <div id="ocrError" class="error"></div>
     <div id="ocrResult">
-      <div class="empty">Bấm <b>Chạy benchmark OCR</b> để đo OCR đọc đúng bao nhiêu % ô (date, day, duty, dep, begin, end, arr) và bao nhiêu % ký tự.</div>
+      <div class="empty" data-i18n>Click <b>Run OCR benchmark</b> to measure what % of cells (date, day, duty, dep, begin, end, arr) and what % of characters OCR reads right.</div>
     </div>
   </section>
 
   <section class="model-section" style="margin-top:32px">
-    <h2 class="bench-heading"><i class="fa-solid fa-brain" aria-hidden="true"></i> 2. Đọc dữ liệu roster theo loại file <small>AI model đọc như ở /upload, so với nhãn</small></h2>
+    <h2 class="bench-heading"><i class="fa-solid fa-brain" aria-hidden="true"></i> <span data-i18n>2. Reading roster data per file type <small>the AI model reads like on /upload, compared with the labels</small></span></h2>
     <div class="controls" style="flex-wrap:wrap">
-      <b>Loại file</b>
-      <span id="typeChoices" style="display:flex;gap:12px;flex-wrap:wrap;font-size:13px">đang tải…</span>
-      <span style="font-size:12px;color:#666">Ảnh cần OCR server · toàn bộ khoảng 10–15 phút</span>
-      <button id="modelRunBtn"><i class="fa-solid fa-play" aria-hidden="true"></i> Chạy benchmark roster</button>
+      <b>File types</b>
+      <span id="typeChoices" style="display:flex;gap:12px;flex-wrap:wrap;font-size:13px">loading…</span>
+      <span style="font-size:12px;color:#666">Images need the OCR server · about 10–15 minutes for all</span>
+      <button id="modelRunBtn"><i class="fa-solid fa-play" aria-hidden="true"></i> Run roster benchmark</button>
       <span id="modelStatus" style="color:#888;font-size:13px"></span>
     </div>
     <div id="modelError" class="error"></div>
     <div id="modelResult">
-      <div class="empty">Chọn loại file rồi bấm <b>Chạy benchmark roster</b> để đo AI model đọc đúng bao nhiêu % dòng so với nhãn, tách theo từng loại file.</div>
+      <div class="empty" data-i18n>Pick the file types, then click <b>Run roster benchmark</b> to measure what % of rows the AI model reads right against the labels, per file type.</div>
     </div>
   </section>
 
   </main>
 
-  <!-- "Xem & sửa": the /label viewer popup for one file, over this page -->
-  <iframe id="labelPopup" title="Xem &amp; sửa nhãn" hidden
+  <!-- "Review & fix": the /label viewer popup for one file, over this page -->
+  <iframe id="labelPopup" title="Review &amp; fix the label" hidden
     style="position:fixed; inset:0; width:100%; height:100%; border:0; z-index:2000; background:transparent; color-scheme:normal"></iframe>
 
   <script>
@@ -134,13 +136,13 @@
     function diffLine(e) {
       const sec = e.section === 'planned' ? '[planned] ' : '';
       if (e.kind === 'field') {
-        return `${sec}${escapeHtml(e.date)} ${escapeHtml(e.duty || '')} · <b>${escapeHtml(e.field)}</b>: <code>${escapeHtml(e.pred) || '∅'}</code> (nhãn <code>${escapeHtml(e.exp) || '∅'}</code>)`;
+        return `${sec}${escapeHtml(e.date)} ${escapeHtml(e.duty || '')} · <b>${escapeHtml(e.field)}</b>: <code>${escapeHtml(e.pred) || '∅'}</code> (${__('label')} <code>${escapeHtml(e.exp) || '∅'}</code>)`;
       }
-      if (e.kind === 'missing') return `${sec}thiếu dòng ${escapeHtml(e.exp.date)} ${escapeHtml(e.exp.duty || '')}`;
-      return `${sec}thừa dòng ${escapeHtml(e.pred.date)} ${escapeHtml(e.pred.duty || '')}`;
+      if (e.kind === 'missing') return `${sec}${__('missing row')} ${escapeHtml(e.exp.date)} ${escapeHtml(e.exp.duty || '')}`;
+      return `${sec}${__('extra row')} ${escapeHtml(e.pred.date)} ${escapeHtml(e.pred.duty || '')}`;
     }
 
-    // "Xem & sửa" opens the /label viewer in a popup over this page (a middle/ctrl
+    // "Review & fix" opens the /label viewer in a popup over this page (a middle/ctrl
     // click still opens /label in a new tab). The popup says when it is closed.
     const labelPopup = $('labelPopup');
     document.addEventListener('click', (e) => {
@@ -162,12 +164,12 @@
       // The scores on this page were computed with the old label.
       for (const a of document.querySelectorAll('a[data-label-popup]')) {
         if (a.dataset.labelPopup !== e.data.name || a.nextElementSibling?.classList.contains('saved-note')) continue;
-        a.insertAdjacentHTML('afterend', ' <span class="saved-note" style="font-size:12px; color:#2e7d32" title="Chạy lại benchmark để cập nhật điểm"><i class="fa-solid fa-check" aria-hidden="true"></i> đã lưu nhãn</span>');
+        a.insertAdjacentHTML('afterend', ` <span class="saved-note" style="font-size:12px; color:#2e7d32" title="${__('Run the benchmark again to update the score')}"><i class="fa-solid fa-check" aria-hidden="true"></i> ${__('label saved')}</span>`);
       }
     });
 
     const card = (v, label) => `<div class="stat-card"><div class="stat-value">${v}</div><div class="stat-label">${label}</div></div>`;
-    const reviewLink = (file, review) => `<a href="/label?name=${encodeURIComponent(file)}" data-label-popup="${escapeHtml(file)}"${review ? ' data-review="1"' : ''} title="Mở file và nhãn của nó${review ? ', các ô AI model đọc khác nhãn được đánh dấu' : ''}"><i class="fa-solid fa-pen-to-square" aria-hidden="true"></i> Xem &amp; sửa</a>`;
+    const reviewLink = (file, review) => `<a href="/label?name=${encodeURIComponent(file)}" data-label-popup="${escapeHtml(file)}"${review ? ' data-review="1"' : ''} title="${review ? __('Open the file and its label, with the cells the AI model read differently marked') : __('Open the file and its label')}"><i class="fa-solid fa-pen-to-square" aria-hidden="true"></i> ${__('Review &amp; fix')}</a>`;
 
     /**
      * Runs a benchmark stream (/api/benchmark/<what>/stream): the button starts it and,
@@ -179,7 +181,7 @@
       btn.onclick = () => {
         if (run) {
           fetch(`/api/benchmark/stop?runId=${encodeURIComponent(run.runId)}`, { method: 'POST' });
-          status.textContent = 'Đang dừng...';
+          status.textContent = __('Stopping…');
           return;
         }
         const target = url();
@@ -189,23 +191,23 @@
         const started = Date.now();
         const es = new EventSource(`${target}${target.includes('?') ? '&' : '?'}runId=${encodeURIComponent(runId)}`);
         run = { es, runId };
-        btn.innerHTML = '<i class="fa-solid fa-stop" aria-hidden="true"></i> Dừng';
+        btn.innerHTML = `<i class="fa-solid fa-stop" aria-hidden="true"></i> ${__('Stop')}`;
         const done = (msg) => { es.close(); run = null; btn.innerHTML = idle; status.textContent = msg; };
         const seen = [];
-        es.addEventListener('start', (e) => { status.textContent = `0/${JSON.parse(e.data).total} file...`; });
+        es.addEventListener('start', (e) => { status.textContent = __('0/{n} files…', { n: JSON.parse(e.data).total }); });
         es.addEventListener('file', (e) => {
           const d = JSON.parse(e.data);
           seen.push(d.file);
-          status.textContent = `${d.progress.current}/${d.progress.total} file · ${progress(seen)}`;
+          status.textContent = `${__('{done}/{total} files', { done: d.progress.current, total: d.progress.total })} · ${progress(seen)}`;
         });
         es.addEventListener('done', (e) => {
           render(JSON.parse(e.data).result);
-          done(`Xong (${((Date.now() - started) / 60000).toFixed(1)} phút).`);
+          done(__('Done ({n} min).', { n: ((Date.now() - started) / 60000).toFixed(1) }));
         });
         es.addEventListener('error', (e) => {
-          let msg = 'Mất kết nối tới server';
+          let msg = __('Lost the connection to the server');
           try { msg = JSON.parse(e.data).error || msg; } catch { /* a dropped connection has no data */ }
-          error.textContent = 'Lỗi: ' + msg;
+          error.textContent = __('Error: {error}', { error: __(msg) });
           error.classList.add('visible');
           done('');
         });
@@ -218,44 +220,42 @@
     function renderOcr(r) {
       const o = r.overall;
       const cards = `<div class="summary">
-        ${card(o.wordAcc != null ? `${o.wordAcc}%` : '–', `<b>Ô đọc đúng nguyên văn</b>: ${o.exact}/${o.cells} ô`)}
-        ${card(o.charAcc != null ? `${o.charAcc}%` : '–', `Ký tự đúng: ${o.chars - o.charErrors}/${o.chars}`)}
-        ${card(o.files, `ảnh · ${o.lines} dòng OCR`)}
-        ${card(r.meanConfidence != null ? `${r.meanConfidence}%` : '–', 'độ tự tin trung bình của OCR')}
-        ${card(r.errors, 'ảnh lỗi đọc')}
+        ${card(o.wordAcc != null ? `${o.wordAcc}%` : '–', __('<b>Cells read exactly</b>: {ok}/{total} cells', { ok: o.exact, total: o.cells }))}
+        ${card(o.charAcc != null ? `${o.charAcc}%` : '–', __('Characters right: {ok}/{total}', { ok: o.chars - o.charErrors, total: o.chars }))}
+        ${card(o.files, __('images · {n} OCR lines', { n: o.lines }))}
+        ${card(r.meanConfidence != null ? `${r.meanConfidence}%` : '–', __('mean OCR confidence'))}
+        ${card(r.errors, __('images that failed'))}
       </div>`;
-      const note = `<p style="font-size:13px;color:#666">Model nhận dạng: <code>${escapeHtml(r.ocrModel || '?')}</code>.
-        Mỗi ô của nhãn được tìm trong các dòng OCR (bỏ qua khoảng trắng, hoa/thường); không thấy nguyên văn thì lấy đoạn OCR gần giống nhất để tính ký tự sai.
-        Ô mà nhãn điền nhưng ảnh không in ra cũng bị tính là sai.
-        ${r.stopped ? '<b>Đã dừng giữa chừng: điểm chỉ tính các ảnh đã chạy.</b>' : ''}</p>`;
-      const cell = (v) => (v && v.cells ? `${v.wordAcc}%<br/><small>${v.exact}/${v.cells} · ký tự ${v.charAcc}%</small>` : '–');
-      const fields = `<h3 class="section-title">Theo cột</h3><div style="overflow-x:auto"><table>
+      const note = `<p style="font-size:13px;color:#666">${__('Recognition model: <code>{model}</code>. Every label cell is looked up in the OCR lines (ignoring spaces and case); without an exact match the closest OCR text is used to count wrong characters. A cell the label fills in but the image does not print counts as wrong too.', { model: escapeHtml(r.ocrModel || '?') })}
+        ${r.stopped ? `<b>${__('Stopped part way: the score only counts the images already run.')}</b>` : ''}</p>`;
+      const cell = (v) => (v && v.cells ? `${v.wordAcc}%<br/><small>${v.exact}/${v.cells} · ${__('chars {pct}%', { pct: v.charAcc })}</small>` : '–');
+      const fields = `<h3 class="section-title">${__('By column')}</h3><div style="overflow-x:auto"><table>
         <tr>${OCR_FIELDS.map(f => `<th>${f}</th>`).join('')}</tr>
         <tr>${OCR_FIELDS.map(f => `<td>${cell(r.perField[f])}</td>`).join('')}</tr></table></div>`;
       const files = r.files.slice().sort((a, b) => (a.error ? -1 : b.error ? 1 : (a.wordAcc ?? 0) - (b.wordAcc ?? 0))).map((f) => {
         const score = f.error ? `<span style="color:#d32f2f">${escapeHtml(f.error)}</span>` : `${f.exact}/${f.cells} (${f.wordAcc ?? 0}%)`;
-        const more = f.misreadCount > (f.misreads || []).length ? `<li>… và ${f.misreadCount - f.misreads.length} ô nữa</li>` : '';
+        const more = f.misreadCount > (f.misreads || []).length ? `<li>${__('… and {n} more cells', { n: f.misreadCount - f.misreads.length })}</li>` : '';
         const list = f.misreadCount
-          ? `<details><summary style="font-size:12px">${f.misreadCount} ô đọc sai</summary><ul class="diff">${f.misreads.map(m => `<li>${escapeHtml(m.date || '')} ${escapeHtml(m.duty || '')} · <b>${escapeHtml(m.field)}</b>: nhãn <code>${escapeHtml(m.label)}</code> → OCR <code>${escapeHtml(m.read) || '∅'}</code></li>`).join('')}${more}</ul></details>`
+          ? `<details><summary style="font-size:12px">${__('{n} cells misread', { n: f.misreadCount })}</summary><ul class="diff">${f.misreads.map(m => `<li>${escapeHtml(m.date || '')} ${escapeHtml(m.duty || '')} · <b>${escapeHtml(m.field)}</b>: ${__('label')} <code>${escapeHtml(m.label)}</code> → OCR <code>${escapeHtml(m.read) || '∅'}</code></li>`).join('')}${more}</ul></details>`
           : '';
         return `<tr><td>${escapeHtml(f.file)}</td><td>${score}</td><td>${f.error ? '' : `${f.charAcc}%`}</td><td>${f.lines ?? ''}</td><td>${reviewLink(f.file, false)}${list}</td></tr>`;
       }).join('');
-      $('ocrResult').innerHTML = cards + note + fields + `<h3 class="section-title">Từng ảnh <small style="font-weight:normal;color:#888">(ảnh đọc sai nhiều nhất trước)</small></h3>
-        <table><tr><th>File</th><th>Ô đúng</th><th>Ký tự đúng</th><th>Dòng OCR</th><th></th></tr>${files}</table>`;
+      $('ocrResult').innerHTML = cards + note + fields + `<h3 class="section-title">${__('Per image')} <small style="font-weight:normal;color:#888">${__('(worst first)')}</small></h3>
+        <table><tr><th>File</th><th>${__('Cells right')}</th><th>${__('Characters right')}</th><th>${__('OCR lines')}</th><th></th></tr>${files}</table>`;
     }
 
     streamRunner({
-      btn: $('ocrRunBtn'), status: $('ocrStatus'), error: $('ocrError'), label: 'Chạy benchmark OCR',
+      btn: $('ocrRunBtn'), status: $('ocrStatus'), error: $('ocrError'), label: __('Run OCR benchmark'),
       url: () => '/api/benchmark/ocr/stream',
       progress: (seen) => {
         const e = seen.reduce((a, f) => a + (f.exact || 0), 0), c = seen.reduce((a, f) => a + (f.cells || 0), 0);
-        return `tạm tính ${c ? (100 * e / c).toFixed(1) : 0}% ô đúng`;
+        return __('so far {pct}% of cells right', { pct: c ? (100 * e / c).toFixed(1) : 0 });
       },
       render: renderOcr,
     });
 
     // ---- 2. AI model per file type (/api/benchmark/model/stream?types=...) ----
-    const TYPE_NAMES = { image: 'Ảnh', pdf: 'PDF', csv: 'CSV', xls: 'XLS', xlsx: 'XLSX', txt: 'TXT' };
+    const TYPE_NAMES = { image: __('Image'), pdf: 'PDF', csv: 'CSV', xls: 'XLS', xlsx: 'XLSX', txt: 'TXT' };
     const TYPE_ICONS = { image: 'fa-image', pdf: 'fa-file-pdf', csv: 'fa-file-csv', xls: 'fa-file-excel', xlsx: 'fa-file-excel', txt: 'fa-file-lines' };
     const IMAGE_ONLY = ['date', 'day', 'duty', 'dep', 'begin', 'end', 'arr'];
     const ALL_FIELDS = ['date', 'day', 'dc', 'duty', 'registration', 'dep', 'begin', 'end', 'arr', 'ac', 'crew', 'info'];
@@ -263,58 +263,57 @@
     const typeOfFile = (name) => { const ext = name.split('.').pop().toLowerCase(); return ext in TYPE_NAMES ? ext : 'image'; };
 
     fetch('/api/benchmark/types').then(r => r.json()).then(({ types, counts }) => {
-      $('typeChoices').innerHTML = types.map(t => `<label title="${counts[t] || 0} file đã gán nhãn"><input type="checkbox" value="${t}" ${counts[t] ? 'checked' : 'disabled'}>
+      $('typeChoices').innerHTML = types.map(t => `<label title="${__('{n} labeled files', { n: counts[t] || 0 })}"><input type="checkbox" value="${t}" ${counts[t] ? 'checked' : 'disabled'}>
         <i class="fa-solid ${TYPE_ICONS[t]}" aria-hidden="true"></i> ${TYPE_NAMES[t] || t} <small style="color:#888">(${counts[t] || 0})</small></label>`).join('');
-      $('ocrCount').textContent = `${counts.image || 0} ảnh đã gán nhãn`;
-    }).catch(() => { $('typeChoices').textContent = 'Không tải được danh sách loại file'; });
+      $('ocrCount').textContent = __('{n} labeled images', { n: counts.image || 0 });
+    }).catch(() => { $('typeChoices').textContent = __('Could not load the file types'); });
 
     function renderModel(r) {
       const types = Object.keys(r.byType || {});
       const pctOf = (s) => (s && s.rowTotal ? `${s.rowExact}%` : '–');
       const cards = `<div class="summary">
-        ${card(pctOf(r.overall), `<b>Chung</b>: đúng ${r.overall.rowMatches}/${r.overall.rowTotal} dòng · ${r.overall.files} file`)}
-        ${types.map(t => card(pctOf(r.byType[t]), `<i class="fa-solid ${TYPE_ICONS[t]}" aria-hidden="true"></i> ${TYPE_NAMES[t] || t}: ${r.byType[t].rowMatches}/${r.byType[t].rowTotal} dòng · ${r.byType[t].files} file`)).join('')}
-        ${card(r.errors, 'file lỗi đọc')}
+        ${card(pctOf(r.overall), `<b>${__('Overall')}</b>: ${__('{ok}/{total} rows right · {n} files', { ok: r.overall.rowMatches, total: r.overall.rowTotal, n: r.overall.files })}`)}
+        ${types.map(t => card(pctOf(r.byType[t]), `<i class="fa-solid ${TYPE_ICONS[t]}" aria-hidden="true"></i> ${TYPE_NAMES[t] || t}: ${__('{ok}/{total} rows · {n} files', { ok: r.byType[t].rowMatches, total: r.byType[t].rowTotal, n: r.byType[t].files })}`)).join('')}
+        ${card(r.errors, __('files that failed'))}
       </div>`;
       const trained = r.model?.trainedAt ? new Date(r.model.trainedAt).toLocaleString() : '?';
-      const note = `<p style="font-size:13px;color:#666">Model train lúc <b>${escapeHtml(trained)}</b> trên ${r.model?.files ?? '?'} file.
-        Model đã học từ chính các nhãn này nên điểm là trên dữ liệu đã thấy${r.labelsAfterTraining ? `; ${r.labelsAfterTraining} nhãn được tạo/sửa sau lần train (bấm Train ở /models để model học chúng)` : ''}.
-        ${r.stopped ? '<b>Đã dừng giữa chừng: điểm chỉ tính các file đã chạy.</b>' : ''}</p>`;
+      const note = `<p style="font-size:13px;color:#666">${__('Model trained <b>{time}</b> on {n} files. The model learned from these very labels, so the score is on data it has seen', { time: escapeHtml(trained), n: r.model?.files ?? '?' })}${r.labelsAfterTraining ? `; ${__('{n} labels were made or changed after training (click Train on /models so the model learns them)', { n: r.labelsAfterTraining })}` : ''}.
+        ${r.stopped ? `<b>${__('Stopped part way: the score only counts the files already run.')}</b>` : ''}</p>`;
       const cell = (v) => (v && v.total ? `${v.pct}%<br/><small>${v.matches}/${v.total}</small>` : '–');
       const row = (name, pf) => `<tr><th style="text-align:left">${name}</th>${ALL_FIELDS.map(f => `<td>${cell(pf[f])}</td>`).join('')}</tr>`;
-      const fields = `<h3 class="section-title">Độ chính xác theo cột</h3>
+      const fields = `<h3 class="section-title">${__('Accuracy by column')}</h3>
         <div style="overflow-x:auto"><table>
           <tr><th></th>${ALL_FIELDS.map(f => `<th>${f}</th>`).join('')}</tr>
-          ${types.length > 1 ? row('Chung', r.overall.perField) : ''}
+          ${types.length > 1 ? row(__('Overall'), r.overall.perField) : ''}
           ${types.map(t => row(TYPE_NAMES[t] || t, r.byType[t].perField)).join('')}
         </table></div>
-        <p style="font-size:12px;color:#888">Ảnh chỉ có 7 cột (${IMAGE_ONLY.join(', ')}; so khớp chịu được lỗi OCR); các file text (PDF, CSV, XLS, XLSX, TXT) có 13 cột, so khớp chính xác. "Chung" chỉ tính 7 cột mọi loại đều có.</p>`;
+        <p style="font-size:12px;color:#888">${__('Images have only 7 columns ({cols}; matched allowing for OCR errors); text files (PDF, CSV, XLS, XLSX, TXT) have 13 columns, matched exactly. "Overall" only counts the 7 columns every type has.', { cols: IMAGE_ONLY.join(', ') })}</p>`;
       const sorted = (r.files || []).slice().sort((a, b) => (a.error ? -1 : b.error ? 1 : (a.rowExact ?? 0) - (b.rowExact ?? 0)));
       const rows = sorted.map((f) => {
         const t = typeOfFile(f.file);
-        const tags = [f.source === 'parser' ? '<span title="PDF chỉ có ảnh: AI model không đọc được, parser đọc chữ OCR (như /upload)">parser</span>' : '',
-          f.afterTraining ? '<span title="Nhãn được tạo/sửa sau lần train model gần nhất">nhãn mới</span>' : ''].filter(Boolean).join(' · ');
+        const tags = [f.source === 'parser' ? `<span title="${__('A PDF of images only: the AI model cannot read it, the parser reads the OCR text (as on /upload)')}">parser</span>` : '',
+          f.afterTraining ? `<span title="${__('Label made or changed after the last model training')}">${__('new label')}</span>` : ''].filter(Boolean).join(' · ');
         const score = f.error ? `<span style="color:#d32f2f">${escapeHtml(f.error)}</span>` : `${f.rowMatches}/${f.rowTotal} (${f.rowExact ?? 0}%)`;
-        const more = f.diffCount > (f.diffs || []).length ? `<li>… và ${f.diffCount - f.diffs.length} khác biệt nữa</li>` : '';
+        const more = f.diffCount > (f.diffs || []).length ? `<li>${__('… and {n} more differences', { n: f.diffCount - f.diffs.length })}</li>` : '';
         const diff = f.diffCount
-          ? `<details><summary style="font-size:12px">${f.diffCount} khác biệt</summary><ul class="diff">${f.diffs.map((e) => `<li>${diffLine(e)}</li>`).join('')}${more}</ul></details>`
+          ? `<details><summary style="font-size:12px">${__('{n} differences', { n: f.diffCount })}</summary><ul class="diff">${f.diffs.map((e) => `<li>${diffLine(e)}</li>`).join('')}${more}</ul></details>`
           : '';
         return `<tr><td style="white-space:nowrap"><i class="fa-solid ${TYPE_ICONS[t]}" aria-hidden="true"></i> ${TYPE_NAMES[t]}</td><td>${escapeHtml(f.file)}</td><td>${score}</td><td>${f.predCount ?? ''}</td><td style="font-size:12px;color:#888">${tags}</td><td>${reviewLink(f.file, f.kind === 'image' && !f.error)}${diff}</td></tr>`;
       }).join('');
-      $('modelResult').innerHTML = cards + note + fields + `<h3 class="section-title">Từng file <small style="font-weight:normal;color:#888">(file sai nhiều nhất trước)</small></h3>
-        <table><tr><th>Loại</th><th>File</th><th>Dòng đúng / nhãn</th><th>Dòng model ra</th><th></th><th></th></tr>${rows}</table>`;
+      $('modelResult').innerHTML = cards + note + fields + `<h3 class="section-title">${__('Per file')} <small style="font-weight:normal;color:#888">${__('(worst first)')}</small></h3>
+        <table><tr><th>${__('Type')}</th><th>File</th><th>${__('Rows right / label')}</th><th>${__('Rows from the model')}</th><th></th><th></th></tr>${rows}</table>`;
     }
 
     streamRunner({
-      btn: $('modelRunBtn'), status: $('modelStatus'), error: $('modelError'), label: 'Chạy benchmark roster',
+      btn: $('modelRunBtn'), status: $('modelStatus'), error: $('modelError'), label: __('Run roster benchmark'),
       url: () => {
         const types = [...document.querySelectorAll('#typeChoices input:checked')].map(i => i.value);
-        if (!types.length) { $('modelStatus').textContent = 'Chọn ít nhất một loại file.'; return null; }
+        if (!types.length) { $('modelStatus').textContent = __('Pick at least one file type.'); return null; }
         return `/api/benchmark/model/stream?types=${types.join(',')}`;
       },
       progress: (seen) => {
         const m = seen.reduce((a, f) => a + (f.rowMatches || 0), 0), t = seen.reduce((a, f) => a + (f.rowTotal || 0), 0);
-        return `tạm tính ${t ? (100 * m / t).toFixed(1) : 0}% dòng đúng`;
+        return __('so far {pct}% of rows right', { pct: t ? (100 * m / t).toFixed(1) : 0 });
       },
       render: renderModel,
     });

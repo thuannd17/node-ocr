@@ -59,14 +59,14 @@ async function resultFor(name, { engine = 'model', useLabel = false } = {}) {
     };
   }
   if (engine === 'model') {
-    if (!modelInfo().ready) throw new Error('Chưa có AI model: label vài file rồi bấm "Train" ở /models.');
+    if (!modelInfo().ready) throw new Error('No AI model yet: label a few files, then click "Train" on /models.');
     // text layer: the model on its words; a roster picture printed to PDF: the model on its OCR lines, as for an image;
     // an image-only duty plan: the parser on OCR text (the model has no words for it)
     const read = await readPdfWithModel(file);
     parsed = { ...parsed, ...read, period: read.period || parsed.period };
     source = read.source;
-    if (read.source === 'parser') notices.unshift('PDF này chỉ có ảnh (không có lớp text) nên AI model chưa đọc được; bảng dưới là kết quả của parser trên chữ OCR.');
-    else if (read.readMode === 'ocr-image') notices.unshift('PDF này chỉ có ảnh: các trang được OCR, nối thành một ảnh roster rồi AI model đọc như ảnh.');
+    if (read.source === 'parser') notices.unshift('This PDF only has images (no text layer), so the AI model cannot read it yet; the table below is what the parser read from the OCR text.');
+    else if (read.readMode === 'ocr-image') notices.unshift('This PDF only has images: its pages were OCRed, joined into one roster image and read by the AI model like an image.');
   }
   let vsLabel = null;
   if (labeled) {
@@ -99,13 +99,13 @@ async function resultFor(name, { engine = 'model', useLabel = false } = {}) {
 const upload = multer({
   dest: 'tmp/uploads/',
   limits: { fileSize: 10 * 1024 * 1024 },
-  fileFilter: (req, file, cb) => (PDF_EXTS.includes(extOf(file.originalname)) ? cb(null, true) : cb(new Error('Chỉ nhận file PDF, CSV, XLS, XLSX, TXT'))),
+  fileFilter: (req, file, cb) => (PDF_EXTS.includes(extOf(file.originalname)) ? cb(null, true) : cb(new Error('Only PDF, CSV, XLS, XLSX and TXT files are accepted'))),
 });
 
 const uploadFile = (req, res, next) => upload.single('file')(req, res, (err) => (err ? res.status(400).json({ error: err.message }) : next()));
 
 router.post('/upload', uploadFile, async (req, res) => {
-  if (!req.file) return res.status(400).json({ error: 'Vui lòng chọn file PDF' });
+  if (!req.file) return res.status(400).json({ error: 'Please choose a PDF file' });
   try {
     const buf = fs.readFileSync(req.file.path);
     const name = storedNameFor(path.basename(req.file.originalname), md5(buf));
@@ -157,7 +157,7 @@ router.get('/raw', (req, res) => {
   try {
     res.type('html').send(previewHtml(file)); // CSV / Excel / TXT: shown as a table or as text
   } catch (e) {
-    res.status(500).send(`Không đọc được file: ${e.message}`);
+    res.status(500).send(req.__('Could not read the file: {error}', { error: e.message }));
   }
 });
 

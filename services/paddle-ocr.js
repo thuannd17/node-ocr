@@ -40,8 +40,8 @@ async function callOcrServer(filePath) {
     });
   } catch (err) {
     if (err?.name === 'TimeoutError' || err?.name === 'AbortError') {
-      throw new Error(`OCR server không trả kết quả sau ${Math.round(OCR_TIMEOUT_MS / 1000)} s `
-        + '(server có thể đang quá tải hoặc bị treo). Thử lại sau, hoặc restart: npm run ocr:server');
+      throw new Error(`The OCR server gave no result after ${Math.round(OCR_TIMEOUT_MS / 1000)} s `
+        + '(it may be overloaded or stuck). Try again later, or restart it: npm run ocr:server');
     }
     const cause = err?.cause?.code || err?.code || '';
     if (cause === 'ECONNREFUSED' || err?.name === 'TypeError') {
@@ -52,7 +52,7 @@ async function callOcrServer(filePath) {
 
   const data = await res.json().catch(() => null);
   if (res.status === 503 && data?.busy) {
-    const busy = new Error(`OCR server đang bận (${data.inflight} ảnh đang xử lý/chờ). Vui lòng thử lại sau vài giây.`);
+    const busy = new Error(`The OCR server is busy (${data.inflight} images in progress / waiting). Please try again in a few seconds.`);
     busy.code = 'OCR_BUSY';
     throw busy;
   }
@@ -60,9 +60,9 @@ async function callOcrServer(filePath) {
     const errMsg = data?.error || `HTTP ${res.status}`;
     if (res.status === 502 || /WinError 10061|ECONNREFUSED/i.test(errMsg)) {
       throw new Error(
-        `OCR server không phản hồi ổn định.\n` +
-        `Hãy restart OCR server: npm run ocr:server\n` +
-        `Chi tiết: ${errMsg}`
+        `The OCR server is not responding reliably.\n` +
+        `Restart it: npm run ocr:server\n` +
+        `Details: ${errMsg}`
       );
     }
     throw new Error(`PaddleOCR server error: ${errMsg}`);

@@ -90,7 +90,7 @@ const upload = multer({
   },
   fileFilter: (req, file, cb) => {
     if (!file.originalname.match(/\.(jpg|jpeg|png|bmp|jfif)$/i)) {
-      return cb(new Error('Chỉ accept JPG, PNG, BMP, JFIF'));
+      return cb(new Error('Only JPG, PNG, BMP and JFIF files are accepted'));
     }
     cb(null, true);
   },
@@ -107,7 +107,7 @@ router.post('/ocr/upload', upload.single('image'), async (req, res) => {
   let finalPath = null; // the temp file, also removed when reading fails
   try {
     if (!req.file) {
-      return res.status(400).json({ error: 'Vui lòng chọn ảnh' });
+      return res.status(400).json({ error: 'Please choose an image' });
     }
 
     const tempPath = req.file.path;
@@ -153,7 +153,7 @@ router.post('/ocr/upload', upload.single('image'), async (req, res) => {
 
     // /upload is for trying the AI model: every upload is read by the model (OCR + learned
     // tagger), never answered from a saved label or the parser. /label Auto-fill offers the parser.
-    if (!modelInfo().ready) throw new Error('Chưa có AI model: label vài file rồi bấm "Train" ở /models.');
+    if (!modelInfo().ready) throw new Error('No AI model yet: label a few files, then click "Train" on /models.');
     uploadPhase = 'ocr+model';
     const result = await readImageWithModel(finalPath);
     const timings = result._timings;
@@ -162,7 +162,7 @@ router.post('/ocr/upload', upload.single('image'), async (req, res) => {
     console.log(`[OCR Upload] Result: published=${result?.published?.length || 0}, planned=${result?.planned?.length || 0}`);
 
     if (!result || (!result.published && !result.planned)) {
-      throw new Error('Layout không phù hợp - Không tìm thấy dòng text nào');
+      throw new Error('Layout not supported: no text lines found');
     }
 
     // Move file to fake-data/ (rename if same filesystem, else copy)
@@ -231,7 +231,7 @@ router.post('/ocr/upload', upload.single('image'), async (req, res) => {
     }
 
     res.status(err.code === 'OCR_BUSY' ? 503 : 500).json({
-      error: err.message || 'Đã có lỗi xảy ra khi OCR',
+      error: err.message || 'Something went wrong during OCR',
       busy: err.code === 'OCR_BUSY' || undefined,
       success: false
     });
@@ -353,7 +353,7 @@ router.get('/review', async (req, res) => {
   if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Image not found in fake-data' });
   const labelFile = labelPathOf(labelsPath, name);
   if (!fs.existsSync(labelFile)) return res.status(404).json({ error: 'This image has no label yet' });
-  if (!modelInfo().ready) return res.status(409).json({ error: 'Chưa có AI model: bấm "Train" ở /models trước.' });
+  if (!modelInfo().ready) return res.status(409).json({ error: 'No AI model yet: click "Train" on /models first.' });
   try {
     const label = JSON.parse(fs.readFileSync(labelFile, 'utf8'));
     const t0 = Date.now();
@@ -387,7 +387,7 @@ router.get('/predict', async (req, res) => {
   if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'File not found' });
   try {
     if (engine === 'model') {
-      if (!modelInfo().ready) return res.status(409).json({ error: 'Chưa có AI model: bấm "Train" ở /models trước.' });
+      if (!modelInfo().ready) return res.status(409).json({ error: 'No AI model yet: click "Train" on /models first.' });
       const data = await readImageWithModel(filePath);
       return res.json({ ...data, source: 'model', vsLabel: scoreVsLabel(name, data) });
     }

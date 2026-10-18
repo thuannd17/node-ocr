@@ -16,6 +16,15 @@ router.use('/assets', express.static(path.join(viewsDir, 'assets')));
 // Font Awesome Free (npm @fortawesome/fontawesome-free), served locally: /assets/fontawesome/css/all.min.css
 router.use('/assets/fontawesome', express.static(path.resolve(__dirname, '..', 'node_modules', '@fortawesome', 'fontawesome-free')));
 
+// Leaflet (npm leaflet), served locally for the airport map: /assets/leaflet/leaflet.js
+router.use('/assets/leaflet', express.static(path.resolve(__dirname, '..', 'node_modules', 'leaflet', 'dist')));
+
+// SunCalc (npm suncalc) for /night-time: /assets/suncalc/suncalc.js
+router.use('/assets/suncalc', express.static(path.resolve(__dirname, '..', 'node_modules', 'suncalc')));
+
+// Swagger UI (npm swagger-ui-dist) for /api-docs
+router.use('/assets/swagger-ui', express.static(path.resolve(__dirname, '..', 'node_modules', 'swagger-ui-dist')));
+
 router.get('/', (req, res) => {
 	res.sendFile(path.join(viewsDir, 'home.html'));
 });
@@ -34,6 +43,29 @@ router.get('/benchmark', (req, res) => {
 
 router.get('/models', (req, res) => {
 	res.sendFile(path.join(viewsDir, 'models.html'));
+});
+
+// .ics files (exported from /upload, or any calendar) shown as a month calendar, read in the browser
+router.get('/calendar', (req, res) => {
+	res.sendFile(path.join(viewsDir, 'calendar.html'));
+});
+
+// Airport search + details, map and 7-day weather; /airport?code=VIE (linked from /calendar)
+router.get('/airport', (req, res) => {
+	res.sendFile(path.join(viewsDir, 'airport.html'));
+});
+
+// Night time of a flight along the great circle (sun altitude at the aircraft), map + chart; linked from /calendar flights
+router.get('/night-time', (req, res) => {
+	res.sendFile(path.join(viewsDir, 'night-time.html'));
+});
+
+// Public API reference (Swagger UI over docs/openapi.json, also served raw for other tools)
+router.get('/api-docs', (req, res) => {
+	res.sendFile(path.join(viewsDir, 'api-docs.html'));
+});
+router.get('/api/openapi.json', (req, res) => {
+	res.sendFile(path.resolve(__dirname, '..', 'docs', 'openapi.json'));
 });
 
 // /ops and /crop-label were archived to archive/views/ (2026-10-06): they drove

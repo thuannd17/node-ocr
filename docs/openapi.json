@@ -1,0 +1,441 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Roster OCR public API",
+    "version": "1.0.0",
+    "description": "Public endpoints of Roster OCR: read a crew roster (image, PDF, CSV, Excel, text) into rows, turn rows into an iCalendar file, look up airports with their weather, and compute the night time of a flight.\n\n**Base URL**: the host serving this page (all paths start with `/api`).\n\n**Authentication**: none for now. These endpoints are meant to stay public; the administration endpoints (labels, benchmarks, models) are not part of this API and will require an account later.\n\n**Formats**: JSON in and out (UTF-8) unless stated; uploads are `multipart/form-data`. Times are ISO 8601; roster times keep the roster's notation (`HH:MM Z` = UTC, `L` / `LB` = local).\n\n**Errors**: a non-2xx status with `{ \"error\": \"message\" }`. Messages are English by default; send the cookie `lang=vi` for Vietnamese.\n\n**Limits**: uploads up to 10 MB. Roster reading uses one OCR server for everyone: requests queue, and `503` with `busy: true` means the queue is full, retry after a few seconds. Weather is cached for 30 minutes per airport.\n\n**Privacy**: an uploaded roster is kept on the server (deduplicated by content) as training data for the model. Do not upload rosters you may not share."
+  },
+  "servers": [{ "url": "/", "description": "This server" }],
+  "tags": [
+    { "name": "Roster", "description": "Read a roster file into Published / Planned rows (the AI model, as on /upload)." },
+    { "name": "Calendar", "description": "Roster rows to iCalendar (.ics), as on /calendar." },
+    { "name": "Airports", "description": "Airport codes, positions and weather, as on /airport. Data: OurAirports and NOAA (public domain), forecast by Open-Meteo." },
+    { "name": "Night time", "description": "Night time of a flight along the great circle, as on /night-time." }
+  ],
+  "paths": {
+    "/api/ocr/upload": {
+      "post": {
+        "tags": ["Roster"],
+        "summary": "Read a roster image",
+        "description": "OCR (PaddleOCR) + the AI model read an eCrew roster screenshot into its two tables, \"Published roster\" and \"Rest of this roster is planned\". Images give the columns date, day, duty, dep, begin, end, arr. Takes from about one second to a minute depending on the queue.",
+        "operationId": "readRosterImage",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": ["image"],
+                "properties": { "image": { "type": "string", "format": "binary", "description": "JPG, PNG, BMP or JFIF, up to 10 MB" } }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Rows read", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ImageResult" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "500": { "$ref": "#/components/responses/Error" },
+          "503": { "description": "The OCR server is busy: retry in a few seconds", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" }, "example": { "error": "The OCR server is busy (5 images in progress / waiting). Please try again in a few seconds.", "busy": true, "success": false } } } }
+        },
+        "x-codeSamples": [{ "lang": "curl", "source": "curl -F image=@roster.png http://localhost:3000/api/ocr/upload" }]
+      }
+    },
+    "/api/pdf/upload": {
+      "post": {
+        "tags": ["Roster"],
+        "summary": "Read a roster PDF, CSV, XLS, XLSX or TXT file",
+        "description": "A PDF with a text layer (duty plans, crew schedule reports, ...) and CSV / Excel / text exports are read from their text by the AI model, with up to 12 columns. A PDF that only has images is OCRed first (needs the OCR server).",
+        "operationId": "readRosterFile",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": ["file"],
+                "properties": { "file": { "type": "string", "format": "binary", "description": "PDF, CSV, XLS, XLSX or TXT, up to 10 MB" } }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Rows read", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/FileResult" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "500": { "$ref": "#/components/responses/Error" }
+        },
+        "x-codeSamples": [{ "lang": "curl", "source": "curl -F file=@duty-plan.pdf http://localhost:3000/api/pdf/upload" }]
+      }
+    },
+    "/api/calendar/ics": {
+      "post": {
+        "tags": ["Calendar"],
+        "summary": "Roster rows to an .ics calendar",
+        "description": "Turns rows (as returned by the Roster endpoints) into iCalendar events: a check-in .. check-out (C/I .. C/O) becomes one duty event with its flights, sims and hotel inside it (RELATED-TO the duty); a hotel lasts from the event before it to the event after it; rows without times are all-day; `Z` times are UTC, local times are floating; Planned rows are TENTATIVE. Rows whose date cannot be read are skipped.",
+        "operationId": "rowsToIcs",
+        "parameters": [
+          { "name": "format", "in": "query", "required": false, "description": "`json` returns the calendar inside JSON with the counts, instead of the file", "schema": { "type": "string", "enum": ["json"] } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/IcsRequest" },
+              "example": {
+                "name": "March 2025",
+                "published": [
+                  { "date": "11 Mar 25", "duty": "C/I", "dep": "VIE", "begin": "20:35 Z" },
+                  { "date": "11 Mar 25", "duty": "OS 769", "dep": "VIE", "arr": "PRN", "begin": "21:45 Z", "end": "23:20 Z" },
+                  { "date": "11 Mar 25", "duty": "C/O", "arr": "PRN", "end": "23:50 Z" },
+                  { "date": "12 Mar 25", "duty": "HT", "dep": "PRN" },
+                  { "date": "13 Mar 25", "duty": "OS 770", "dep": "PRN", "arr": "VIE", "begin": "03:50 Z", "end": "05:30 Z" }
+                ],
+                "planned": [{ "date": "14 Mar 25", "duty": "OFF" }]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The calendar file (`Content-Disposition: attachment`; headers `X-Events` and `X-Skipped-Rows` give the counts), or JSON with `format=json`",
+            "headers": {
+              "X-Events": { "schema": { "type": "integer" }, "description": "Events in the calendar" },
+              "X-Skipped-Rows": { "schema": { "type": "integer" }, "description": "Rows left out (no readable date)" }
+            },
+            "content": {
+              "text/calendar": { "schema": { "type": "string" }, "example": "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Roster OCR//Roster export//EN\r\n...\r\nEND:VCALENDAR\r\n" },
+              "application/json": { "schema": { "$ref": "#/components/schemas/IcsJson" } }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" }
+        },
+        "x-codeSamples": [{ "lang": "curl", "source": "curl -X POST -H 'Content-Type: application/json' -d @rows.json -o roster.ics http://localhost:3000/api/calendar/ics" }]
+      }
+    },
+    "/api/airports": {
+      "get": {
+        "tags": ["Airports"],
+        "summary": "Search airports, or look up several codes",
+        "description": "With `q`: airports whose code is exactly `q` (IATA, ICAO, FAA, GPS, local, ident or WMO) come first, then those whose name, city, region or country contain every word of `q` (accents ignored); bigger airports with scheduled service first.\n\nWith `codes`: a map from each code that is an airport to that airport (codes that are not airports are left out). Useful to annotate roster rows.",
+        "operationId": "searchAirports",
+        "parameters": [
+          { "name": "q", "in": "query", "required": false, "description": "Code or text, at least 2 characters for a text search", "schema": { "type": "string" }, "example": "vienna" },
+          { "name": "limit", "in": "query", "required": false, "description": "Results with `q` (1-50)", "schema": { "type": "integer", "minimum": 1, "maximum": 50, "default": 20 } },
+          { "name": "codes", "in": "query", "required": false, "description": "Comma-separated codes (up to 50); takes precedence over `q`", "schema": { "type": "string" }, "example": "VIE,PRN,OFF" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Search results (`q`) or a code map (`codes`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    { "$ref": "#/components/schemas/AirportSearch" },
+                    { "type": "object", "additionalProperties": { "$ref": "#/components/schemas/Airport" }, "description": "Code -> airport" }
+                  ]
+                }
+              }
+            }
+          },
+          "503": { "description": "The airport list has not been built on this server (`npm run airports:update`)", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        },
+        "x-codeSamples": [{ "lang": "curl", "source": "curl 'http://localhost:3000/api/airports?q=noi%20bai'\ncurl 'http://localhost:3000/api/airports?codes=VIE,PRN'" }]
+      }
+    },
+    "/api/airports/{code}": {
+      "get": {
+        "tags": ["Airports"],
+        "summary": "One airport",
+        "description": "The airport for an IATA, ICAO, FAA, GPS, local, OurAirports ident or WMO code (tried in that order; IATA first, so `VIE` is Vienna). `matchedBy` says which code matched; `others` lists other airports using the same code. Use `icao` as the airport's id: a WMO number identifies a weather station, not the airport.",
+        "operationId": "getAirport",
+        "parameters": [{ "$ref": "#/components/parameters/AirportCode" }],
+        "responses": {
+          "200": { "description": "The airport", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AirportDetail" } } } },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        },
+        "x-codeSamples": [{ "lang": "curl", "source": "curl http://localhost:3000/api/airports/HAN" }]
+      }
+    },
+    "/api/airports/{code}/weather": {
+      "get": {
+        "tags": ["Airports"],
+        "summary": "Current weather and a 7-day forecast at an airport",
+        "description": "From Open-Meteo at the airport's coordinates, in the airport's local time. Wind in knots, direction in degrees the wind comes from. Cached 30 minutes per airport. For reference only, not a substitute for METAR / TAF.",
+        "operationId": "getAirportWeather",
+        "parameters": [{ "$ref": "#/components/parameters/AirportCode" }],
+        "responses": {
+          "200": { "description": "Weather", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Weather" } } } },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "502": { "description": "The forecast service did not answer", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/night-time": {
+      "get": {
+        "tags": ["Night time"],
+        "summary": "Night time of a flight",
+        "description": "The aircraft flies the great circle from `dep` to `arr` at a constant speed between off-block and on-block; the sun's altitude is taken at its position (SunCalc), and each day / night edge is found to the second. Night = the sun below −6° (`civil`: end of evening to beginning of morning civil twilight, ICAO Annex 1 / EASA / FAA) or below −0.833° (`sunset`: sunset to sunrise). Minutes are rounded; `nightMinutes + dayMinutes = blockMinutes`.",
+        "operationId": "getNightTime",
+        "parameters": [
+          { "name": "dep", "in": "query", "required": true, "description": "Departure: airport code or `lat,lon`", "schema": { "type": "string" }, "example": "VIE" },
+          { "name": "arr", "in": "query", "required": true, "description": "Arrival: airport code or `lat,lon`", "schema": { "type": "string" }, "example": "HAN" },
+          { "name": "off", "in": "query", "required": true, "description": "Off-block time, ISO 8601 (UTC: end with Z)", "schema": { "type": "string", "format": "date-time" }, "example": "2025-03-11T13:00Z" },
+          { "name": "on", "in": "query", "required": true, "description": "On-block time, ISO 8601; at most 24 h after `off`", "schema": { "type": "string", "format": "date-time" }, "example": "2025-03-11T23:50Z" },
+          { "name": "rule", "in": "query", "required": false, "schema": { "type": "string", "enum": ["civil", "sunset"], "default": "civil" } },
+          { "name": "track", "in": "query", "required": false, "description": "`1` adds the flight track (about 300 points) with the sun altitude at each", "schema": { "type": "string", "enum": ["0", "1"] } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Night, day and block time with the day / night segments",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/NightTime" },
+                "example": {
+                  "rule": "civil", "sunAltitudeLimit": -6,
+                  "departure": { "code": "VIE", "icao": "LOWW", "name": "Vienna International Airport", "lat": 48.1103, "lon": 16.5697 },
+                  "arrival": { "code": "HAN", "icao": "VVNB", "name": "Noi Bai International Airport", "lat": 21.2212, "lon": 105.807 },
+                  "offBlock": "2025-03-11T13:00:00.000Z", "onBlock": "2025-03-11T23:50:00.000Z",
+                  "blockMinutes": 650, "nightMinutes": 447, "dayMinutes": 203, "block": "10:50", "night": "7:27", "day": "3:23",
+                  "takeoffAtNight": false, "landingAtNight": false,
+                  "distanceKm": 8214.5, "distanceNm": 4435.4, "initialCourseDeg": 76,
+                  "segments": [
+                    { "night": false, "from": "2025-03-11T13:00:00.000Z", "to": "2025-03-11T15:36:12.000Z", "minutes": 156, "fromPosition": { "lat": 48.1103, "lon": 16.5697 }, "toPosition": { "lat": 49.31, "lon": 43.56 }, "fromSunAltitude": 32.4, "toSunAltitude": -6 },
+                    { "night": true, "from": "2025-03-11T15:36:12.000Z", "to": "2025-03-11T23:03:22.000Z", "minutes": 447, "fromPosition": { "lat": 49.31, "lon": 43.56 }, "toPosition": { "lat": 24.98, "lon": 101.75 }, "fromSunAltitude": -6, "toSunAltitude": -6 },
+                    { "night": false, "from": "2025-03-11T23:03:22.000Z", "to": "2025-03-11T23:50:00.000Z", "minutes": 47, "fromPosition": { "lat": 24.98, "lon": 101.75 }, "toPosition": { "lat": 21.2212, "lon": 105.807 }, "fromSunAltitude": -6, "toSunAltitude": 8.7 }
+                  ]
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        },
+        "x-codeSamples": [{ "lang": "curl", "source": "curl 'http://localhost:3000/api/night-time?dep=VIE&arr=HAN&off=2025-03-11T13:00Z&on=2025-03-11T23:50Z'" }]
+      }
+    }
+  },
+  "components": {
+    "parameters": {
+      "AirportCode": { "name": "code", "in": "path", "required": true, "description": "IATA, ICAO, FAA, GPS, local, ident or WMO code (case-insensitive)", "schema": { "type": "string" }, "example": "VIE" }
+    },
+    "responses": {
+      "BadRequest": { "description": "Missing or invalid input", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "NotFound": { "description": "Unknown airport", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" }, "example": { "error": "Airport \"ZZZ9\" not found" } } } },
+      "Error": { "description": "The file could not be read", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "required": ["error"],
+        "properties": {
+          "error": { "type": "string", "description": "What went wrong (English, or Vietnamese with the cookie lang=vi)" },
+          "busy": { "type": "boolean", "description": "Only on 503: the OCR queue is full" }
+        }
+      },
+      "RosterRow": {
+        "type": "object",
+        "description": "One roster row, values as printed in the roster. Images only give date, day, duty, dep, begin, end, arr; text files may give all.",
+        "properties": {
+          "date": { "type": "string", "example": "11 Mar 25" },
+          "day": { "type": "string", "example": "Tue" },
+          "dc": { "type": "string", "description": "Duty code / deadhead marker", "example": "" },
+          "duty": { "type": "string", "description": "Flight number or activity (C/I, C/O, SBY, OFF, SIM, HT/H1 = hotel, ...)", "example": "OS 769" },
+          "registration": { "type": "string", "example": "OE-LBA" },
+          "dep": { "type": "string", "description": "Departure airport code", "example": "VIE" },
+          "begin": { "type": "string", "description": "`HH:MM Z` = UTC, `L`/`LB` = local; `A`/`E` prefix = actual/estimated; `+1` = next day", "example": "21:45 Z" },
+          "end": { "type": "string", "example": "23:20 Z" },
+          "arr": { "type": "string", "description": "Arrival airport code", "example": "PRN" },
+          "ac": { "type": "string", "description": "Aircraft type", "example": "320" },
+          "crew": { "type": "string", "example": "" },
+          "info": { "type": "string", "description": "Extra information, e.g. [Block: 1:35]", "example": "" }
+        }
+      },
+      "Tables": {
+        "type": "object",
+        "properties": {
+          "published": { "type": "array", "items": { "$ref": "#/components/schemas/RosterRow" }, "description": "\"Published roster\" table" },
+          "planned": { "type": "array", "items": { "$ref": "#/components/schemas/RosterRow" }, "description": "\"Rest of this roster is planned\" table" }
+        }
+      },
+      "VsLabel": {
+        "type": "object", "nullable": true,
+        "description": "When the server already has a verified label for this file: how many label rows the model read exactly right",
+        "properties": { "rowMatches": { "type": "integer" }, "rowTotal": { "type": "integer" } }
+      },
+      "ImageResult": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Tables" },
+          {
+            "type": "object",
+            "properties": {
+              "success": { "type": "boolean" },
+              "fileName": { "type": "string", "description": "Name the file is stored under on the server", "example": "3f2b0c1e-....png" },
+              "newRoster": { "type": "boolean", "description": "false when the same image was uploaded before" },
+              "totalLines": { "type": "integer" },
+              "totalMs": { "type": "integer" },
+              "timings": { "type": "object", "properties": { "ocrMs": { "type": "integer" }, "modelMs": { "type": "integer" }, "totalMs": { "type": "integer" } } },
+              "source": { "type": "string", "enum": ["model"] },
+              "model": { "type": "object", "properties": { "trainedAt": { "type": "string", "format": "date-time", "nullable": true } } },
+              "labeled": { "type": "boolean" },
+              "vsLabel": { "$ref": "#/components/schemas/VsLabel" }
+            }
+          }
+        ]
+      },
+      "FileResult": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Tables" },
+          {
+            "type": "object",
+            "properties": {
+              "fileName": { "type": "string" },
+              "newFile": { "type": "boolean", "description": "false when the same file was uploaded before" },
+              "period": { "type": "string", "description": "Roster period as printed", "example": "01Mar25 - 31Mar25" },
+              "source": { "type": "string", "enum": ["model", "parser"], "description": "`parser` for an image-only duty plan the model cannot read yet" },
+              "readMode": { "type": "string", "nullable": true, "description": "`ocr` / `ocr-image` when the PDF had no text layer" },
+              "notices": { "type": "array", "items": { "type": "string" }, "description": "Notes about how the file was read" },
+              "labeled": { "type": "boolean" },
+              "vsLabel": { "$ref": "#/components/schemas/VsLabel" },
+              "ms": { "type": "integer" }
+            }
+          }
+        ]
+      },
+      "IcsRequest": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Tables" },
+          { "type": "object", "properties": { "name": { "type": "string", "description": "Calendar name (X-WR-CALNAME) and file name", "default": "Roster" } } }
+        ]
+      },
+      "IcsJson": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "events": { "type": "integer" },
+          "skipped": { "type": "array", "items": { "type": "object" }, "description": "Rows left out (no readable date)" },
+          "ics": { "type": "string", "description": "The iCalendar text" }
+        }
+      },
+      "Airport": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "description": "OurAirports ident (the ICAO code when there is one)", "example": "LOWW" },
+          "icao": { "type": "string", "description": "ICAO code: unique, use it as the airport id", "example": "LOWW" },
+          "iata": { "type": "string", "example": "VIE" },
+          "faa": { "type": "string", "description": "FAA location identifier (US airports only)", "example": "" },
+          "local": { "type": "string", "description": "Local code given by the country (outside the US)", "example": "" },
+          "gps": { "type": "string", "example": "LOWW" },
+          "wmo": { "type": "string", "description": "WMO number of the weather station at the airport (NOAA ISD); not an airport id", "example": "11036" },
+          "name": { "type": "string", "example": "Vienna International Airport" },
+          "type": { "type": "string", "enum": ["large", "medium", "small", "seaplane"] },
+          "lat": { "type": "number", "example": 48.1103 },
+          "lon": { "type": "number", "example": 16.5697 },
+          "elev": { "type": "number", "nullable": true, "description": "Elevation in feet", "example": 600 },
+          "city": { "type": "string", "example": "Vienna" },
+          "region": { "type": "string", "example": "Vienna" },
+          "country": { "type": "string", "description": "ISO 3166-1 alpha-2", "example": "AT" },
+          "countryName": { "type": "string", "example": "Austria" },
+          "scheduled": { "type": "boolean", "description": "Has scheduled airline service" },
+          "web": { "type": "string" },
+          "wiki": { "type": "string" }
+        }
+      },
+      "AirportDetail": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Airport" },
+          {
+            "type": "object",
+            "properties": {
+              "matchedBy": { "type": "string", "enum": ["iata", "icao", "faa", "gps", "local", "id", "wmo"] },
+              "others": { "type": "array", "items": { "$ref": "#/components/schemas/Airport" }, "description": "Other airports using the same code" }
+            }
+          }
+        ]
+      },
+      "AirportSearch": {
+        "type": "object",
+        "properties": {
+          "q": { "type": "string" },
+          "total": { "type": "integer", "description": "All matches (results are cut at `limit`)" },
+          "results": { "type": "array", "items": { "$ref": "#/components/schemas/Airport" } }
+        }
+      },
+      "Weather": {
+        "type": "object",
+        "properties": {
+          "source": { "type": "string", "example": "Open-Meteo.com" },
+          "timezone": { "type": "string", "example": "Asia/Bangkok" },
+          "utcOffsetSeconds": { "type": "integer", "example": 25200 },
+          "current": {
+            "type": "object", "nullable": true,
+            "properties": {
+              "time": { "type": "string", "description": "Local time", "example": "2026-10-18T13:15" },
+              "temp": { "type": "number", "description": "°C" },
+              "humidity": { "type": "number", "description": "%" },
+              "code": { "type": "integer", "description": "WMO weather interpretation code" },
+              "wind": { "type": "number", "description": "kt" },
+              "windDir": { "type": "number", "description": "Degrees, where the wind comes from" },
+              "pressure": { "type": "number", "description": "hPa (MSL)" },
+              "visibility": { "type": "number", "description": "m" },
+              "cloud": { "type": "number", "description": "%" }
+            }
+          },
+          "daily": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "date": { "type": "string", "format": "date" },
+                "code": { "type": "integer", "description": "WMO weather interpretation code" },
+                "tmax": { "type": "number" }, "tmin": { "type": "number" },
+                "rain": { "type": "number", "description": "mm" }, "rainChance": { "type": "number", "description": "%" },
+                "wind": { "type": "number", "description": "kt" }, "gust": { "type": "number", "description": "kt" }, "windDir": { "type": "number" },
+                "sunrise": { "type": "string", "description": "Local time" }, "sunset": { "type": "string", "description": "Local time" }
+              }
+            }
+          }
+        }
+      },
+      "Place": {
+        "type": "object",
+        "properties": {
+          "code": { "type": "string" }, "icao": { "type": "string", "nullable": true }, "name": { "type": "string", "nullable": true },
+          "lat": { "type": "number" }, "lon": { "type": "number" }
+        }
+      },
+      "Position": { "type": "object", "properties": { "lat": { "type": "number" }, "lon": { "type": "number" } } },
+      "NightTime": {
+        "type": "object",
+        "properties": {
+          "rule": { "type": "string", "enum": ["civil", "sunset"] },
+          "sunAltitudeLimit": { "type": "number", "description": "Degrees: night when the sun is below this" },
+          "departure": { "$ref": "#/components/schemas/Place" },
+          "arrival": { "$ref": "#/components/schemas/Place" },
+          "offBlock": { "type": "string", "format": "date-time" },
+          "onBlock": { "type": "string", "format": "date-time" },
+          "blockMinutes": { "type": "integer" }, "nightMinutes": { "type": "integer" }, "dayMinutes": { "type": "integer" },
+          "block": { "type": "string", "description": "h:mm" }, "night": { "type": "string", "description": "h:mm" }, "day": { "type": "string", "description": "h:mm" },
+          "takeoffAtNight": { "type": "boolean" }, "landingAtNight": { "type": "boolean" },
+          "distanceKm": { "type": "number" }, "distanceNm": { "type": "number" }, "initialCourseDeg": { "type": "number" },
+          "segments": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "night": { "type": "boolean" },
+                "from": { "type": "string", "format": "date-time" }, "to": { "type": "string", "format": "date-time" },
+                "minutes": { "type": "integer" },
+                "fromPosition": { "$ref": "#/components/schemas/Position" }, "toPosition": { "$ref": "#/components/schemas/Position" },
+                "fromSunAltitude": { "type": "number" }, "toSunAltitude": { "type": "number" }
+              }
+            }
+          },
+          "track": {
+            "type": "array",
+            "description": "Only with track=1",
+            "items": { "type": "object", "properties": { "time": { "type": "string", "format": "date-time" }, "lat": { "type": "number" }, "lon": { "type": "number" }, "sunAltitude": { "type": "number" } } }
+          }
+        }
+      }
+    }
+  }
+}

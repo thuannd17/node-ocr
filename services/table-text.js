@@ -83,7 +83,7 @@ function load(file) {
   const buf = fs.readFileSync(file);
   const content = contentOf(buf);
   if (content === 'binary' || (content === 'text' && extName(file) === 'xlsx')) {
-    throw new Error(`File .${extName(file)} bị hỏng hoặc không đúng định dạng (không phải CSV, Excel hay text)`);
+    throw new Error(`The .${extName(file)} file is damaged or not in a known format (not CSV, Excel or text)`);
   }
   return { buf, content };
 }
@@ -172,7 +172,7 @@ export function readTableText(file) {
   const pages = extName(file) === 'txt' && loaded.content === 'text'
     ? readTextFile(loaded.buf)
     : readSheets(file, loaded).map((s, i) => gridPage(s.rows, i + 1));
-  if (!pages.some(p => p.items.length)) throw new Error('File không có dữ liệu');
+  if (!pages.some(p => p.items.length)) throw new Error('The file has no data');
   // marked so hasTextLayer() never sends them to OCR
   for (const p of pages) p.fromTextFile = true;
   return pages;
@@ -197,7 +197,7 @@ export function previewHtml(file) {
   } else {
     const sheets = readSheets(file, loaded);
     body = sheets.map(s => `${sheets.length > 1 ? `<h3>${esc(s.name)}</h3>` : ''}<table>${s.rows.map((r, i) => `<tr><td class="n">${i + 1}</td>${r.map(c => `<td>${esc(c)}</td>`).join('')}</tr>`).join('')}</table>`).join('')
-      || '<p>(file rỗng)</p>';
+      || '<p>(empty file)</p>';
   }
   return `<!doctype html><html><head><meta charset="utf-8">${style}</head><body>${body}</body></html>`;
 }

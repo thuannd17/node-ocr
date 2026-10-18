@@ -4,6 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>AI Models</title>
+  <script src="/assets/i18n/vi.js"></script>
+  <script src="/assets/i18n.js"></script>
   <link rel="stylesheet" href="/assets/app.css">
   <link rel="stylesheet" href="/assets/fontawesome/css/all.min.css">
   <style>
@@ -51,7 +53,7 @@
   <main class="page">
     <div class="page-header">
       <h1><i class="fa-solid fa-brain" aria-hidden="true"></i> AI Models</h1>
-      <p class="subtitle">Các model đọc roster, mỗi loại với các phiên bản đã train và phiên bản đang kích hoạt. Train lại khi có thêm nhãn để model tự học thêm.</p>
+      <p class="subtitle">The models that read rosters, each with its trained versions and the active one. Retrain when there are new labels so the model keeps learning.</p>
     </div>
 
     <div class="card pipeline" id="pipeline"></div>
@@ -86,8 +88,8 @@
         const a = f?.versions.find(v => v.active);
         return `<span class="step"><i class="fa-solid ${f?.icon || 'fa-cube'}" aria-hidden="true"></i> <b>${escapeHtml(f?.name || id)}</b> ${a ? `<span class="muted">(${escapeHtml(a.id)})</span>` : ''}</span>`;
       };
-      $('pipeline').innerHTML = `<span><i class="fa-solid fa-image" aria-hidden="true"></i> Ảnh roster</span><span class="arrow">→</span>${step('detect')}<span class="arrow">→</span>${step('rec')}<span class="arrow">→</span>${step('roster')}<span class="arrow">→</span><span>Dòng roster</span>
-        <span class="muted" style="flex-basis:100%">PDF có lớp text đi thẳng vào <b>${escapeHtml(by.roster?.name || 'AI đọc roster')}</b> (không cần OCR).</span>`;
+      $('pipeline').innerHTML = `<span><i class="fa-solid fa-image" aria-hidden="true"></i> ${__('Roster image')}</span><span class="arrow">→</span>${step('detect')}<span class="arrow">→</span>${step('rec')}<span class="arrow">→</span>${step('roster')}<span class="arrow">→</span><span>${__('Roster rows')}</span>
+        <span class="muted" style="flex-basis:100%">${__('PDFs with a text layer go straight to <b>{name}</b> (no OCR).', { name: escapeHtml(by.roster?.name || __('Roster AI')) })}</span>`;
     }
 
     function versionRow(f, v) {
@@ -96,11 +98,11 @@
         <td><b>${escapeHtml(v.title || v.id)}</b> ${v.status ? `<span class="badge ${v.active ? 'active' : ''}">${escapeHtml(v.status)}</span>` : ''}</td>
         <td>${escapeHtml(fmtDate(v.createdAt))}</td>
         <td>${escapeHtml(v.data || '')}</td>
-        <td>${score || ''}${v.scoreNote ? `${score ? '<br/>' : ''}<span class="muted">${escapeHtml(v.scoreNote)}${v.scoreAt ? ` lúc ${escapeHtml(fmtDate(v.scoreAt))}` : ''}</span>` : ''}</td>
+        <td>${score || ''}${v.scoreNote ? `${score ? '<br/>' : ''}<span class="muted">${escapeHtml(v.scoreNote)}${v.scoreAt ? ` ${__('at {time}', { time: escapeHtml(fmtDate(v.scoreAt)) })}` : ''}</span>` : ''}</td>
         <td>${fmtSize(v.sizeBytes)}</td>
         <td>${v.readOnly ? '' : `<div class="actions">
-          <button class="btn secondary small" data-activate="${escapeHtml(v.id)}" data-family="${f.id}" ${v.active ? 'disabled' : ''} title="${v.active ? 'Đang được dùng' : 'Dùng phiên bản này'}"><i class="fa-solid fa-circle-check" aria-hidden="true"></i> Kích hoạt</button>
-          <button class="btn danger small" data-delete="${escapeHtml(v.id)}" data-family="${f.id}" ${v.deletable ? '' : 'disabled'} title="${escapeHtml(v.deletable ? 'Xoá phiên bản này' : `Không xoá được: ${v.keepReason}`)}"><i class="fa-solid fa-trash" aria-hidden="true"></i> Xoá</button>
+          <button class="btn secondary small" data-activate="${escapeHtml(v.id)}" data-family="${f.id}" ${v.active ? 'disabled' : ''} title="${v.active ? __('In use') : __('Use this version')}"><i class="fa-solid fa-circle-check" aria-hidden="true"></i> ${__('Activate')}</button>
+          <button class="btn danger small" data-delete="${escapeHtml(v.id)}" data-family="${f.id}" ${v.deletable ? '' : 'disabled'} title="${escapeHtml(v.deletable ? __('Delete this version') : __('Cannot delete: {reason}', { reason: v.keepReason }))}"><i class="fa-solid fa-trash" aria-hidden="true"></i> ${__('Delete')}</button>
         </div>`}</td>
       </tr>`;
     }
@@ -111,18 +113,18 @@
       return `<section class="card family" id="family-${f.id}">
         <div class="family-head">
           <h2><i class="fa-solid ${f.icon}" aria-hidden="true"></i> ${escapeHtml(f.name)}</h2>
-          ${active ? `<span class="active-name"><i class="fa-solid fa-circle-check" aria-hidden="true"></i> Đang kích hoạt: ${escapeHtml(active.title || active.id)}</span>` : ''}
+          ${active ? `<span class="active-name"><i class="fa-solid fa-circle-check" aria-hidden="true"></i> ${__('Active: {name}', { name: escapeHtml(active.title || active.id) })}</span>` : ''}
           <p class="desc">${escapeHtml(f.description)}</p>
         </div>
         <div class="train-box">
-          ${f.trainable ? `<button class="btn" data-train="${f.id}" ${t.running ? 'disabled' : ''}><i class="fa-solid fa-graduation-cap" aria-hidden="true"></i> ${t.running ? 'Đang train…' : 'Train phiên bản mới'}</button>` : ''}
+          ${f.trainable ? `<button class="btn" data-train="${f.id}" ${t.running ? 'disabled' : ''}><i class="fa-solid fa-graduation-cap" aria-hidden="true"></i> ${t.running ? __('Training…') : __('Train a new version')}</button>` : ''}
           <span class="note" id="train-status-${f.id}">${escapeHtml(f.trainNote)}</span>
         </div>
         ${f.applyNote ? `<div class="apply-note"><i class="fa-solid fa-circle-info" aria-hidden="true"></i> ${escapeHtml(f.applyNote)}</div>` : ''}
         <div class="train-log" id="train-log-${f.id}"></div>
         <div class="table-wrap"><table>
-          <thead><tr><th>Phiên bản</th><th>Tạo lúc</th><th>Dữ liệu train</th><th>Độ chính xác</th><th>Dung lượng</th><th></th></tr></thead>
-          <tbody>${f.versions.map(v => versionRow(f, v)).join('') || '<tr><td colspan="6" class="muted">Chưa có phiên bản nào.</td></tr>'}</tbody>
+          <thead><tr><th>${__('Version')}</th><th>${__('Created')}</th><th>${__('Training data')}</th><th>${__('Accuracy')}</th><th>${__('Size')}</th><th></th></tr></thead>
+          <tbody>${f.versions.map(v => versionRow(f, v)).join('') || `<tr><td colspan="6" class="muted">${__('No versions yet.')}</td></tr>`}</tbody>
         </table></div>
       </section>`;
     }
@@ -142,7 +144,7 @@
         families = data.families;
         render();
       } catch (e) {
-        showMsg('Không tải được danh sách model: ' + e.message, 'error');
+        showMsg(__('Could not load the models: {error}', { error: e.message }), 'error');
       }
     }
 
@@ -157,15 +159,15 @@
         const res = await fetch(`/api/models/${family}/${encodeURIComponent(id)}/activate`, { method: 'POST' });
         if (!res.ok) return showMsg(await fail(res), 'error');
         const f = families.find(x => x.id === family);
-        showMsg(`Đã kích hoạt ${f.name}: ${id}. ${f.applyNote}`);
+        showMsg(`${__('Activated {name}: {id}.', { name: f.name, id })} ${f.applyNote}`);
         load();
       } else if (del && !del.disabled) {
         const { family, delete: id } = del.dataset;
         const f = families.find(x => x.id === family);
-        if (!confirm(`Xoá phiên bản ${id} của "${f.name}"? Không hoàn tác được.`)) return;
+        if (!confirm(__('Delete version {id} of "{name}"? This cannot be undone.', { id, name: f.name }))) return;
         const res = await fetch(`/api/models/${family}/${encodeURIComponent(id)}`, { method: 'DELETE' });
         if (!res.ok) return showMsg(await fail(res), 'error');
-        showMsg(`Đã xoá ${id}.`);
+        showMsg(__('Deleted {id}.', { id }));
         load();
       } else if (train && !train.disabled) {
         const family = train.dataset.train;
@@ -187,7 +189,7 @@
         if (t && log) {
           log.textContent = (t.log || []).join('\n');
           log.scrollTop = log.scrollHeight;
-          status.textContent = t.running ? `Đang train (từ ${fmtDate(t.startedAt)})…` : t.ok ? 'Train xong.' : 'Train dừng hoặc lỗi: xem log.';
+          status.textContent = t.running ? __('Training (since {time})…', { time: fmtDate(t.startedAt) }) : t.ok ? __('Training finished.') : __('Training stopped or failed: see the log.');
         }
         if (!t || !t.running) break;
         await new Promise(r => setTimeout(r, 3000));

@@ -21,7 +21,7 @@ export function jobState(family, lines = 60) {
 }
 
 export function startJob(family, args, { env = process.env } = {}) {
-  if (jobs.get(family)?.running) throw Object.assign(new Error('Đang train model này, chờ xong đã.'), { status: 409 });
+  if (jobs.get(family)?.running) throw Object.assign(new Error('This model is already training; wait until it finishes.'), { status: 409 });
   const job = { running: true, log: [], startedAt: new Date().toISOString(), finishedAt: null, ok: null };
   jobs.set(family, job);
   const child = spawn(process.execPath, args, { cwd: ROOT, windowsHide: true, env });

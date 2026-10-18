@@ -5,9 +5,13 @@ import viewsRouter from './routes/views.js';
 import apiRouter from './routes/api.js';
 import pdfApiRouter from './routes/pdf-api.js';
 import modelsApiRouter from './routes/models-api.js';
+import airportsApiRouter from './routes/airports-api.js';
+import toolsApiRouter from './routes/tools-api.js';
+import i18n from './utils/i18n.js';
 
 const app = express();
 app.use(express.json({ limit: '2mb' }));
+app.use(i18n); // UI language from the 'lang' cookie: req.__(), JSON errors translated
 
 // Views (HTML) — /, /upload, /label, /benchmark
 app.use('/', viewsRouter);
@@ -15,6 +19,8 @@ app.use('/', viewsRouter);
 // API (JSON) — /api/ocr/upload, /api/files, /api/raw, /api/labels, /api/predict, /api/benchmark
 app.use('/api/pdf', pdfApiRouter); // NetLine duty-plan PDFs (before /api)
 app.use('/api/models', modelsApiRouter); // every model of the pipeline: versions, activate, delete, train (/models)
+app.use('/api/airports', airportsApiRouter); // airport search + details + 7-day weather (/airport)
+app.use('/api', toolsApiRouter); // public tools: /api/night-time, /api/calendar/ics
 app.use('/api', apiRouter);
 
 const port = Number(process.env.PORT) || 3000;

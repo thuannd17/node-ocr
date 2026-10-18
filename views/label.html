@@ -1,9 +1,11 @@
 <!DOCTYPE html>
-<html lang="vi">
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Roster Label Tool</title>
+  <script src="/assets/i18n/vi.js"></script>
+  <script src="/assets/i18n.js"></script>
   <link rel="stylesheet" href="/assets/app.css">
   <link rel="stylesheet" href="/assets/fontawesome/css/all.min.css">
   <script>
@@ -100,7 +102,7 @@
     td[contenteditable="true"]:focus { background: #fff9c4 !important; box-shadow: inset 0 0 0 2px #ffc107; }
     td[contenteditable="true"]:not([data-field="info"]):not([data-field="crew"]) { white-space: nowrap; }
     td[data-field="info"], td[data-field="crew"] { font-size: 11px; color: #555; min-width: 160px; }
-    /* optional PDF columns with no value in this file (shown again with "Hiện mọi cột") */
+    /* optional PDF columns with no value in this file (shown again with "Show all columns") */
     table.hide-dc [data-field="dc"],
     table.hide-registration [data-field="registration"], table.hide-ac [data-field="ac"], table.hide-crew [data-field="crew"] { display: none; }
     td.actions { white-space: nowrap; width: 1%; }
@@ -133,17 +135,17 @@
   <div class="page-header">
     <h1><i class="fa-solid fa-tags" aria-hidden="true"></i> Label Tool</h1>
     <span class="todo" id="todoCount"></span>
-    <p class="subtitle">Nhãn chuẩn (ground truth) để đo độ chính xác và train model. File ở <code>fake-data/&lt;đuôi&gt;/</code>, nhãn ở <code>labels/&lt;đuôi&gt;/&lt;file&gt;.json</code>.</p>
+    <p class="subtitle" data-i18n>Ground truth labels, used to measure accuracy and to train the models. Files are in <code>fake-data/&lt;ext&gt;/</code>, labels in <code>labels/&lt;ext&gt;/&lt;file&gt;.json</code>.</p>
   </div>
 
   <!-- File tree: click a file to open it in the viewer -->
   <div class="panel">
     <div class="tree-tools">
-      <input type="search" id="treeSearch" placeholder="Tìm theo tên file…" aria-label="Tìm theo tên file" />
-      <label><input type="checkbox" id="onlyTodo" /> Chỉ file chưa có nhãn</label>
-      <label><input type="checkbox" id="showDups" /> Hiện ảnh trùng nội dung</label>
+      <input type="search" id="treeSearch" placeholder="Search by file name…" aria-label="Search by file name" />
+      <label><input type="checkbox" id="onlyTodo" /> Only files without a label</label>
+      <label><input type="checkbox" id="showDups" /> Show duplicate images</label>
     </div>
-    <ul class="tree" id="tree"><li class="empty">Đang tải…</li></ul>
+    <ul class="tree" id="tree"><li class="empty">Loading…</li></ul>
   </div>
   </main>
 
@@ -152,59 +154,61 @@
     <div class="viewer-box">
       <div class="viewer-head">
         <div class="title">
-          <b id="fileKind">Ảnh roster</b>
+          <b id="fileKind">Roster image</b>
           <span class="labeled-badge no" id="labeledBadge"></span>
           <span class="file-path" id="filePath"></span>
         </div>
         <span class="pos" id="viewerPos"></span>
-        <button class="secondary small" id="prev" title="File trước (Alt+↑)"><i class="fa-solid fa-arrow-up" aria-hidden="true"></i> Trước</button>
-        <button class="secondary small" id="next" title="File sau (Alt+↓)"><i class="fa-solid fa-arrow-down" aria-hidden="true"></i> Sau</button>
-        <button class="close" id="closeViewer" title="Đóng (Esc)" aria-label="Đóng"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
+        <button class="secondary small" id="prev" title="Previous file (Alt+↑)"><i class="fa-solid fa-arrow-up" aria-hidden="true"></i> Previous</button>
+        <button class="secondary small" id="next" title="Next file (Alt+↓)"><i class="fa-solid fa-arrow-down" aria-hidden="true"></i> Next</button>
+        <button class="close" id="closeViewer" title="Close (Esc)" aria-label="Close"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
       </div>
       <div class="viewer-body" id="viewerBody">
         <div class="panel preview-panel">
-          <img id="rosterImg" alt="roster" title="Bấm để phóng to / thu nhỏ" style="display:none" />
+          <img id="rosterImg" alt="roster" title="Click to zoom in / out" style="display:none" />
           <iframe id="rosterPdf" title="PDF" style="display:none"></iframe>
         </div>
-        <div class="splitter" id="splitter" title="Kéo để đổi độ rộng"></div>
+        <div class="splitter" id="splitter" title="Drag to resize"></div>
         <div class="panel table-panel">
           <div class="toolbar">
-            <select id="engineSel" title="Cách đọc file để đề xuất nhãn" style="padding:3px 6px; border:1px solid #ddd; border-radius:4px; font-size:12px">
+            <select id="engineSel" title="How to read the file to suggest a label" style="padding:3px 6px; border:1px solid #ddd; border-radius:4px; font-size:12px">
               <option value="parser">Parser</option>
               <option value="model">AI model</option>
             </select>
-            <button class="small" id="autoFill" title="Đọc file bằng cách đã chọn để đề xuất nhãn (thay bảng hiện tại)"><i class="fa-solid fa-bolt" aria-hidden="true"></i> Auto-fill</button>
+            <button class="small" id="autoFill" title="Read the file the chosen way to suggest a label (replaces the current table)"><i class="fa-solid fa-bolt" aria-hidden="true"></i> Auto-fill</button>
             <span class="spacer"></span>
+            <button class="secondary small" id="icsBtn" title="Download the rows in the table (unsaved ones too) as an .ics calendar"><i class="fa-solid fa-file-export" aria-hidden="true"></i> Export .ics</button>
+            <button class="secondary small" id="calendarBtn" title="Open the rows in the table (unsaved ones too) on the Calendar page"><i class="fa-solid fa-calendar-days" aria-hidden="true"></i> View calendar</button>
             <button class="secondary small" id="jsonBtn"><i class="fa-solid fa-code" aria-hidden="true"></i> JSON</button>
-            <button class="secondary small" id="reloadBtn" title="Bỏ thay đổi, tải lại nhãn đã lưu"><i class="fa-solid fa-rotate-left" aria-hidden="true"></i> Reload</button>
-            <button class="small" id="saveBtn" title="Ctrl+S"><i class="fa-solid fa-floppy-disk" aria-hidden="true"></i> Lưu label</button>
+            <button class="secondary small" id="reloadBtn" title="Drop the changes and load the saved label again"><i class="fa-solid fa-rotate-left" aria-hidden="true"></i> Reload</button>
+            <button class="small" id="saveBtn" title="Ctrl+S"><i class="fa-solid fa-floppy-disk" aria-hidden="true"></i> Save label</button>
           </div>
           <div class="toolbar pdf-only" style="display:none">
             <label style="font-size:13px">Period <input id="periodInput" placeholder="01Jul24 - 31Jul24" /></label>
-            <label style="font-size:12px; color:var(--muted)"><input type="checkbox" id="allCols" /> Hiện mọi cột</label>
+            <label style="font-size:12px; color:var(--muted)"><input type="checkbox" id="allCols" /> Show all columns</label>
           </div>
           <span class="status" id="status"></span>
           <div class="review-note" id="reviewNote" hidden></div>
 
           <div id="editor">
             <div class="section-header">Published <span class="n" id="publishedN"></span>
-              <button class="small" data-add="published"><i class="fa-solid fa-plus" aria-hidden="true"></i> Thêm dòng</button></div>
+              <button class="small" data-add="published"><i class="fa-solid fa-plus" aria-hidden="true"></i> Add row</button></div>
             <div class="table-container">
               <table id="publishedTable"><thead><tr class="head-row"></tr></thead><tbody id="publishedBody"></tbody></table>
-              <div class="empty-section" id="publishedEmpty">Không có dòng nào</div>
+              <div class="empty-section" id="publishedEmpty">No rows</div>
             </div>
 
             <div class="section-header planned">Planned <span class="n" id="plannedN"></span>
-              <button class="small" data-add="planned"><i class="fa-solid fa-plus" aria-hidden="true"></i> Thêm dòng</button></div>
+              <button class="small" data-add="planned"><i class="fa-solid fa-plus" aria-hidden="true"></i> Add row</button></div>
             <div class="table-container">
               <table id="plannedTable"><thead><tr class="head-row"></tr></thead><tbody id="plannedBody"></tbody></table>
-              <div class="empty-section" id="plannedEmpty">Không có dòng nào</div>
+              <div class="empty-section" id="plannedEmpty">No rows</div>
             </div>
 
             <div class="json-view" id="jsonView">
-              <div class="section-header">JSON sẽ lưu <span class="n">(chỉ đọc — sửa trong bảng)</span>
+              <div class="section-header"><span>JSON to save</span> <span class="n">(read only — edit in the table)</span>
                 <button class="secondary small" id="copyBtn"><i class="fa-solid fa-copy" aria-hidden="true"></i> Copy</button></div>
-              <textarea id="jsonArea" readonly spellcheck="false" aria-label="JSON sẽ lưu"></textarea>
+              <textarea id="jsonArea" readonly spellcheck="false" aria-label="JSON to save"></textarea>
             </div>
           </div>
         </div>
@@ -212,6 +216,7 @@
     </div>
   </div>
 
+  <script src="/assets/ics.js"></script>
   <script>
     const $ = (id) => document.getElementById(id);
     const FIELDS = {
@@ -222,8 +227,8 @@
     const SECTIONS = ['published', 'planned'];
     const extOf = (name) => (name.match(/\.([^.]+)$/)?.[1] || '').toLowerCase();
     // File tree marks: labeled / not labeled yet
-    const LABELED_ICON = '<i class="fa-solid fa-circle-check" style="color:#2e7d32" title="Đã có nhãn" aria-hidden="true"></i>';
-    const NEW_ICON = '<i class="fa-regular fa-circle" style="color:#9e9e9e" title="Chưa có nhãn" aria-hidden="true"></i>';
+    const LABELED_ICON = `<i class="fa-solid fa-circle-check" style="color:#2e7d32" title="${__('Labeled')}" aria-hidden="true"></i>`;
+    const NEW_ICON = `<i class="fa-regular fa-circle" style="color:#9e9e9e" title="${__('Not labeled')}" aria-hidden="true"></i>`;
     const PARAMS = new URLSearchParams(location.search);
     const EMBED = PARAMS.has('embed');   // inside the benchmark's popup
     const REVIEW = PARAMS.has('review'); // mark where the AI model's reading differs from the label
@@ -244,7 +249,7 @@
     function setStatus(kind, msg) { const s = $('status'); s.className = 'status ' + kind; s.textContent = msg || ''; }
     function setDirty(v) {
       dirty = v;
-      $('saveBtn').innerHTML = '<i class="fa-solid fa-floppy-disk" aria-hidden="true"></i> Lưu label' + (v ? ' *' : '');
+      $('saveBtn').innerHTML = `<i class="fa-solid fa-floppy-disk" aria-hidden="true"></i> ${__('Save label')}` + (v ? ' *' : '');
       document.querySelectorAll('.tree .file.active .dirty-dot').forEach(el => { el.textContent = v ? '●' : ''; });
       if ($('jsonView').classList.contains('open')) refreshJson();
     }
@@ -276,7 +281,7 @@
         d.open = searching || openFolders.has(ext) || (current && current.ext === ext);
         const done = list.filter(f => f.done).length;
         const icon = { pdf: 'fa-file-pdf', csv: 'fa-file-csv', xls: 'fa-file-excel', xlsx: 'fa-file-excel', txt: 'fa-file-lines' }[ext] || 'fa-image';
-        d.innerHTML = `<summary><i class="fa-solid ${icon}" aria-hidden="true"></i> ${ext}<span class="count">${done}/${list.length} có nhãn</span></summary>`;
+        d.innerHTML = `<summary><i class="fa-solid ${icon}" aria-hidden="true"></i> ${ext}<span class="count">${__('{done}/{total} labeled', { done, total: list.length })}</span></summary>`;
         d.addEventListener('toggle', () => {
           if (d.open) openFolders.add(ext); else openFolders.delete(ext);
           safeSet('label.openFolders', JSON.stringify([...openFolders]));
@@ -286,9 +291,9 @@
         for (const f of list) {
           const item = document.createElement('li');
           item.className = 'file' + (current && current.name === f.name ? ' active' : '') + (f.duplicateOf ? ' dup' : '');
-          item.title = f.name + (f.duplicateOf ? `\nTrùng nội dung với ${f.duplicateOf}` : '');
+          item.title = f.name + (f.duplicateOf ? `\n${__('Same content as {name}', { name: f.duplicateOf })}` : '');
           item.innerHTML = `<span>${f.done ? LABELED_ICON : NEW_ICON}</span><span class="fname"></span><span class="dirty-dot"></span>`
-            + '<button class="del-file" title="Xóa file này khỏi dữ liệu (cùng nhãn của nó)" aria-label="Xóa file"><i class="fa-solid fa-trash-can" aria-hidden="true"></i></button>';
+            + `<button class="del-file" title="${__('Remove this file from the data (with its label)')}" aria-label="${__('Remove file')}"><i class="fa-solid fa-trash-can" aria-hidden="true"></i></button>`;
           item.querySelector('.fname').textContent = f.name;
           item.querySelector('.del-file').addEventListener('click', (e) => { e.stopPropagation(); deleteFile(f); });
           if (current && current.name === f.name && dirty) item.querySelector('.dirty-dot').textContent = '●';
@@ -303,13 +308,13 @@
       det.appendChild(ul);
       root.appendChild(det);
       tree.appendChild(root);
-      if (!vis.length) tree.innerHTML = '<li class="empty">Không có file nào khớp bộ lọc.</li>';
+      if (!vis.length) tree.innerHTML = `<li class="empty">${__('No files match the filter.')}</li>`;
     }
 
     function updateTodo() {
       const todo = files.filter(f => !f.duplicateOf && !f.done);
       const pdf = todo.filter(f => f.kind === 'pdf').length;
-      $('todoCount').textContent = todo.length ? `— ${todo.length - pdf} ảnh và ${pdf} PDF chưa có nhãn` : '— tất cả đã có nhãn';
+      $('todoCount').textContent = todo.length ? `— ${__('{images} images and {pdfs} PDFs without a label', { images: todo.length - pdf, pdfs: pdf })}` : `— ${__('all labeled')}`;
     }
 
     // ---------- Table editor ----------
@@ -334,7 +339,7 @@
       }
       const act = document.createElement('td');
       act.className = 'actions';
-      act.innerHTML = '<button class="secondary" data-act="insert" title="Chèn dòng dưới" aria-label="Chèn dòng dưới"><i class="fa-solid fa-plus" aria-hidden="true"></i></button><button class="del" data-act="delete" title="Xóa dòng" aria-label="Xóa dòng"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>';
+      act.innerHTML = `<button class="secondary" data-act="insert" title="${__('Insert a row below')}" aria-label="${__('Insert a row below')}"><i class="fa-solid fa-plus" aria-hidden="true"></i></button><button class="del" data-act="delete" title="${__('Delete row')}" aria-label="${__('Delete row')}"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>`;
       tr.appendChild(act);
       return tr;
     }
@@ -366,7 +371,7 @@
       for (const sec of SECTIONS) {
         const rows = labelRows(sec);
         rows.forEach((tr, i) => { tr.cells[0].textContent = i + 1; });
-        $(sec + 'N').textContent = `${rows.length} dòng`;
+        $(sec + 'N').textContent = __('{n} rows', { n: rows.length });
         $(sec + 'Empty').style.display = rows.length ? 'none' : '';
         $(sec + 'Table').style.display = rows.length ? '' : 'none';
       }
@@ -386,15 +391,15 @@
         const td = document.createElement('td');
         td.dataset.field = f;
         if (fields.includes(f)) {
-          td.textContent = row[f] || (extra ? '' : '(trống)');
+          td.textContent = row[f] || (extra ? '' : __('(empty)'));
           td.dataset.value = row[f] || '';
-          if (!extra) { td.className = 'use'; td.title = 'Bấm để dùng giá trị AI model đọc này cho nhãn'; }
+          if (!extra) { td.className = 'use'; td.title = __('Click to use this AI model value in the label'); }
         }
         tr.appendChild(td);
       }
       const act = document.createElement('td');
       act.className = 'actions';
-      if (extra) act.innerHTML = '<button class="secondary" data-act="adopt" title="Thêm dòng này vào nhãn"><i class="fa-solid fa-plus" aria-hidden="true"></i> nhãn</button>';
+      if (extra) act.innerHTML = `<button class="secondary" data-act="adopt" title="${__('Add this row to the label')}"><i class="fa-solid fa-plus" aria-hidden="true"></i> ${__('label')}</button>`;
       tr.appendChild(act);
       tr._ocr = row;
       return tr;
@@ -420,7 +425,7 @@
       const f = current;
       const note = $('reviewNote');
       note.hidden = false;
-      note.textContent = 'Đang cho AI model đọc file để so với nhãn…';
+      note.textContent = __('The AI model is reading the file to compare it with the label…');
       try {
         const res = await fetch(`/api/review?name=${encodeURIComponent(f.name)}`);
         const data = await res.json();
@@ -429,7 +434,7 @@
         for (const sec of SECTIONS) {
           const items = data.sections[sec] || [];
           const rows = labelRows(sec);
-          if (items.filter(it => it.label).length !== rows.length) throw new Error('bảng khác nhãn đã lưu, bấm Reload');
+          if (items.filter(it => it.label).length !== rows.length) throw new Error(__('the table differs from the saved label, click Reload'));
         }
         for (const sec of SECTIONS) {
           const rows = labelRows(sec);
@@ -443,7 +448,7 @@
             }
             const tr = rows[i++];
             last = tr;
-            if (it.kind === 'missing') { tr.classList.add('ocr-missing'); tr.title = 'AI model bỏ sót dòng này'; }
+            if (it.kind === 'missing') { tr.classList.add('ocr-missing'); tr.title = __('The AI model missed this row'); }
             if (it.kind !== 'diff') continue;
             for (const fld of it.diff) tr.querySelector(`td[data-field="${fld}"]`)?.classList.add('ocr-diff');
             const hint = hintRow(it.row, it.diff, false);
@@ -452,11 +457,9 @@
             tr.after(hint);
           }
         }
-        note.textContent = `So với AI model: ${data.diffCells} ô khác (vàng; giá trị model đọc ở dòng nhỏ bên dưới, bấm để lấy nếu nhãn sai), `
-          + `${data.missingRows} dòng model bỏ sót (xanh), ${data.extraRows} dòng model thừa (gạch đỏ; "+ nhãn" nếu nhãn thiếu dòng đó). `
-          + 'Bảng là nhãn: chỉ đổi khi bạn sửa và Lưu.';
+        note.textContent = __('Against the AI model: {cells} cells differ (yellow; the model\'s value is in the small line below, click it if the label is wrong), {missing} rows the model missed (green), {extra} extra rows from the model (struck out in red; "+ label" if the label lacks that row). The table is the label: it only changes when you edit and Save.', { cells: data.diffCells, missing: data.missingRows, extra: data.extraRows });
       } catch (e) {
-        note.textContent = 'Không so được với AI model: ' + e.message;
+        note.textContent = __('Could not compare with the AI model: {error}', { error: e.message });
       }
     }
 
@@ -474,6 +477,41 @@
     }
 
     function refreshJson() { $('jsonArea').value = JSON.stringify(collect(), null, 2); }
+
+    // ---------- Calendar (.ics) of the rows in the table: views/assets/ics.js ----------
+    function tableIcs() {
+      if (!current) return null;
+      const data = collect();
+      const name = `${current.name.replace(/\.[^.]+$/, '')}${data.period ? ` (${data.period})` : ''}`;
+      const out = RosterIcs.rowsToIcs(data, { name });
+      if (!out.events) { setStatus('err', __('No row in the table has a date that can go in a calendar')); return null; }
+      return { name, ...out };
+    }
+    $('icsBtn').addEventListener('click', () => {
+      const c = tableIcs();
+      if (!c) return;
+      const a = Object.assign(document.createElement('a'), {
+        href: URL.createObjectURL(new Blob([c.ics], { type: 'text/calendar;charset=utf-8' })),
+        download: `${c.name.replace(/[\\/:*?"<>|]+/g, '_')}.ics`,
+      });
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      setStatus('ok', __('Exported {n} events', { n: c.events }) + (c.skipped.length ? ` ${__('({n} rows without a readable date left out)', { n: c.skipped.length })}` : '') + (dirty ? `, ${__('unsaved changes included')}` : '') + '.');
+    });
+    // /calendar reads it from this browser's storage once (roster-calendar:handoff)
+    $('calendarBtn').addEventListener('click', () => {
+      const c = tableIcs();
+      if (!c) return;
+      try {
+        localStorage.setItem('roster-calendar:handoff', JSON.stringify({ name: `${c.name}.ics`, text: c.ics }));
+      } catch {
+        setStatus('err', __('The browser does not allow keeping the calendar: click "Export .ics" and open that file on the Calendar page.'));
+        return;
+      }
+      window.open('/calendar', '_blank');
+    });
 
     function addRow(sec, afterTr) {
       const empty = Object.fromEntries(FIELDS[current.kind].map(f => [f, '']));
@@ -520,7 +558,7 @@
 
     // ---------- Selecting / loading / saving ----------
     function confirmLeave() {
-      return !dirty || confirm('Nhãn của file này có thay đổi chưa lưu. Bỏ thay đổi?');
+      return !dirty || confirm(__('The label of this file has unsaved changes. Drop them?'));
     }
 
     const viewerOpen = () => !$('viewer').hidden;
@@ -541,8 +579,8 @@
       document.querySelector('.preview-panel').classList.toggle('pdf', f.kind === 'pdf');
       if (!EMBED) history.replaceState(null, '', `/label?name=${encodeURIComponent(f.name)}`);
       const pdf = f.kind === 'pdf';
-      $('fileKind').textContent = !pdf ? 'Ảnh roster' : f.ext === 'pdf' ? 'PDF duty plan' : `Roster ${f.ext.toUpperCase()} (đọc như PDF)`;
-      $('filePath').textContent = `fake-data/${f.ext}/${f.name}` + (f.duplicateOf ? `  (trùng nội dung với ${f.duplicateOf})` : '');
+      $('fileKind').textContent = !pdf ? __('Roster image') : f.ext === 'pdf' ? 'PDF duty plan' : __('{ext} roster (read like a PDF)', { ext: f.ext.toUpperCase() });
+      $('filePath').textContent = `fake-data/${f.ext}/${f.name}` + (f.duplicateOf ? `  (${__('same content as {name}', { name: f.duplicateOf })})` : '');
       $('filePath').title = $('filePath').textContent;
       $('rosterImg').style.display = pdf ? 'none' : '';
       $('rosterPdf').style.display = pdf ? 'block' : 'none';
@@ -572,38 +610,38 @@
       const b = $('labeledBadge');
       b.style.display = '';
       b.className = 'labeled-badge ' + (has ? 'yes' : 'no');
-      b.textContent = has ? 'đã có nhãn' : 'chưa có nhãn';
+      b.textContent = has ? __('labeled') : __('not labeled');
     }
 
     async function loadLabel() {
       const f = current;
-      setStatus('busy', 'Đang tải nhãn…');
+      setStatus('busy', __('Loading the label…'));
       try {
         const res = await fetch(labelUrl(f));
         if (f !== current) return; // another file was picked meanwhile
         if (res.status === 404) {
           renderTables({ published: [], planned: [] });
           showBadge(false);
-          setStatus('err', `Chưa có nhãn. Bấm Auto-fill để ${f.kind === 'pdf' ? 'parser PDF' : 'OCR'} đề xuất, hoặc thêm dòng tay.`);
+          setStatus('err', __('No label yet. Click Auto-fill to get a suggestion from {by}, or add rows by hand.', { by: f.kind === 'pdf' ? __('the PDF parser') : 'OCR' }));
           return;
         }
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const data = await res.json();
         renderTables(data);
         showBadge(true);
-        if (data._autoLabel) setStatus('err', `labels/${f.ext}/${f.name}.json — nhãn TỰ ĐỘNG từ parser, chưa ai duyệt: kiểm tra từng dòng rồi bấm Save`);
-        else setStatus('ok', `labels/${f.ext}/${f.name}.json` + (data._reviewedAt ? ` — lưu lúc ${new Date(data._reviewedAt).toLocaleString()}` : ''));
+        if (data._autoLabel) setStatus('err', `labels/${f.ext}/${f.name}.json — ${__('an AUTOMATIC label from the parser, not reviewed yet: check every row, then click Save')}`);
+        else setStatus('ok', `labels/${f.ext}/${f.name}.json` + (data._reviewedAt ? ` — ${__('saved {time}', { time: new Date(data._reviewedAt).toLocaleString() })}` : ''));
         if (REVIEW && f.kind === 'image') await loadReview();
       } catch (e) {
-        setStatus('err', 'Lỗi tải nhãn: ' + e.message);
+        setStatus('err', __('Could not load the label: {error}', { error: e.message }));
       }
     }
 
     async function saveLabel() {
       if (!current) return;
       const f = current, body = collect();
-      if (!body.published.length && !body.planned.length && !confirm('Cả hai bảng đều trống. Vẫn lưu nhãn rỗng?')) return;
-      setStatus('busy', 'Đang lưu…');
+      if (!body.published.length && !body.planned.length && !confirm(__('Both tables are empty. Save an empty label anyway?'))) return;
+      setStatus('busy', __('Saving…'));
       try {
         const res = await fetch(labelUrl(f), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
         const data = await res.json().catch(() => ({}));
@@ -616,20 +654,20 @@
           if (f._el) f._el.firstElementChild.innerHTML = LABELED_ICON;
           updateTodo();
         }
-        setStatus('ok', `Đã lưu ${data.file || `labels/${f.ext}/${f.name}.json`} (${body.published.length} published, ${body.planned.length} planned)`);
+        setStatus('ok', `${__('Saved {file}', { file: data.file || `labels/${f.ext}/${f.name}.json` })} (${body.published.length} published, ${body.planned.length} planned)`);
       } catch (e) {
-        setStatus('err', 'Lỗi lưu: ' + e.message);
+        setStatus('err', __('Could not save: {error}', { error: e.message }));
       }
     }
 
     // Auto-fill: the parser or the AI model proposes the rows; a person checks them and saves.
     async function autoFill() {
       if (!current) return;
-      if (dirty && !confirm('Auto-fill sẽ thay toàn bộ bảng hiện tại. Tiếp tục?')) return;
+      if (dirty && !confirm(__('Auto-fill replaces the whole current table. Go on?'))) return;
       const f = current, engine = $('engineSel').value;
       const byName = engine === 'model' ? 'AI model' : (f.kind === 'pdf' ? 'Parser PDF' : 'OCR + parser');
       try {
-        setStatus('busy', `${byName} đang đọc file để đề xuất nhãn…`);
+        setStatus('busy', __('{by} is reading the file to suggest a label…', { by: byName }));
         const url = f.kind === 'pdf'
           ? `/api/pdf/parse?name=${encodeURIComponent(f.name)}&engine=${engine}`
           : `/api/predict?name=${encodeURIComponent(f.name)}&engine=${engine}`;
@@ -639,14 +677,14 @@
         if (f !== current) return;
         renderTables({ period: data.period, published: data.published, planned: data.planned });
         $('reviewNote').hidden = true; // the OCR marks were for the replaced rows
-        const notes = [data.readMode === 'ocr-image' ? 'PDF không có lớp text: đã OCR các trang và đọc như một ảnh roster.' : data.readMode === 'ocr' ? 'PDF không có lớp text, đã đọc bằng OCR.' : '', ...(data.notices || [])].filter(Boolean);
+        const notes = [data.readMode === 'ocr-image' ? __('The PDF has no text layer: its pages were OCRed and read like a roster image.') : data.readMode === 'ocr' ? __('The PDF has no text layer; it was read by OCR.') : '', ...(data.notices || [])].filter(Boolean);
         const v = data.vsLabel;
-        const score = v && v.rowTotal ? ` Đúng ${v.rowMatches}/${v.rowTotal} dòng so với nhãn đang lưu.` : '';
+        const score = v && v.rowTotal ? ` ${__('{ok}/{total} rows match the saved label.', { ok: v.rowMatches, total: v.rowTotal })}` : '';
         const by = data.source === 'model' ? 'AI model' : byName;
-        setStatus('ok', `${by} đã đề xuất — đối chiếu với file, sửa rồi Lưu.${score}` + (notes.length ? ' Lưu ý: ' + notes.join(' | ') : ''));
+        setStatus('ok', __('{by} made a suggestion — check it against the file, fix it, then Save.', { by }) + score + (notes.length ? ` ${__('Note:')} ` + notes.join(' | ') : ''));
         setDirty(true);
       } catch (e) {
-        setStatus('err', 'Lỗi Auto-fill: ' + e.message);
+        setStatus('err', __('Auto-fill failed: {error}', { error: e.message }));
       }
     }
 
@@ -681,9 +719,8 @@
     // file, its label and its cached OCR result to tmp/trash/<date>/ (not erased).
     async function deleteFile(f) {
       const open = current && current.name === f.name && viewerOpen();
-      const what = f.labeled ? 'file này và nhãn của nó' : 'file này';
-      if (!confirm(`Xóa ${what} khỏi dữ liệu?\n\n${f.name}\n\nFile sẽ không còn được dùng để train và benchmark. `
-        + 'Nó được chuyển vào tmp/trash/<ngày>/ (khôi phục bằng cách chuyển lại chỗ cũ).')) return;
+      const question = f.labeled ? __('Remove this file and its label from the data?') : __('Remove this file from the data?');
+      if (!confirm(`${question}\n\n${f.name}\n\n${__('The file will no longer be used for training and benchmarks. It is moved to tmp/trash/<date>/ (move it back to restore it).')}`)) return;
       try {
         const res = await fetch(`/api/files?name=${encodeURIComponent(f.name)}`, { method: 'DELETE' });
         const data = await res.json().catch(() => ({}));
@@ -693,7 +730,7 @@
         await loadFiles(); // duplicates of this file are recomputed
         renderTree();
       } catch (e) {
-        alert('Không xóa được: ' + e.message);
+        alert(__('Could not remove it: {error}', { error: e.message }));
       }
     }
 
@@ -720,7 +757,7 @@
     $('engineSel').onchange = () => safeSet('label.engine', $('engineSel').value);
     $('reloadBtn').onclick = () => { if (current && confirmLeave()) loadLabel(); };
     $('jsonBtn').onclick = () => { $('jsonView').classList.toggle('open'); if ($('jsonView').classList.contains('open')) refreshJson(); };
-    $('copyBtn').onclick = () => navigator.clipboard.writeText($('jsonArea').value).then(() => setStatus('ok', 'Đã copy JSON.'));
+    $('copyBtn').onclick = () => navigator.clipboard.writeText($('jsonArea').value).then(() => setStatus('ok', __('JSON copied.')));
 
     $('closeViewer').onclick = closeViewer;
     $('viewer').addEventListener('mousedown', (e) => { if (e.target === $('viewer')) closeViewer(); }); // click outside the box

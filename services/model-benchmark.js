@@ -139,7 +139,7 @@ function summarize(files, info) {
 
 export async function runModelBenchmark({ types = FILE_TYPES, onEvent, shouldStop } = {}) {
   const info = modelInfo();
-  if (!info.ready) throw new Error('Chưa có AI model: label vài file rồi bấm "Train" ở /models.');
+  if (!info.ready) throw new Error('No AI model yet: label a few files, then click "Train" on /models.');
   const trainedAt = info.trainedAt ? Date.parse(info.trainedAt) : null;
   const todo = ['image', 'pdf'].flatMap(kind => labeledFiles(kind).filter(n => types.includes(typeOf(n))).map(name => ({ kind, name })));
   // a kind's score is saved to the model version (/models) only when all of its types were run

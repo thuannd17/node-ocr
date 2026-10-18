@@ -71,13 +71,13 @@ export function listModels() {
 }
 
 export function activateModel(id) {
-  if (!isVersion(id)) throw Object.assign(new Error(`Không có model ${id}`), { status: 404 });
+  if (!isVersion(id)) throw Object.assign(new Error(`No model ${id}`), { status: 404 });
   fs.writeFileSync(ACTIVE_FILE, JSON.stringify({ id }, null, 2));
 }
 
 export function deleteModel(id) {
-  if (!isVersion(id)) throw Object.assign(new Error(`Không có model ${id}`), { status: 404 });
-  if (id === activeId()) throw Object.assign(new Error('Không xoá được model đang kích hoạt: hãy kích hoạt model khác trước.'), { status: 409 });
+  if (!isVersion(id)) throw Object.assign(new Error(`No model ${id}`), { status: 404 });
+  if (id === activeId()) throw Object.assign(new Error('Cannot delete the active model: activate another one first.'), { status: 409 });
   fs.rmSync(path.join(AI_DIR, id), { recursive: true, force: true });
 }
 

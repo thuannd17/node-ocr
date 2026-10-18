@@ -4,6 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Upload Roster</title>
+  <script src="/assets/i18n/vi.js"></script>
+  <script src="/assets/i18n.js"></script>
   <link rel="stylesheet" href="/assets/app.css">
   <link rel="stylesheet" href="/assets/fontawesome/css/all.min.css">
   <style>
@@ -232,19 +234,21 @@
   <main class="page">
   <div class="page-header">
     <h1><i class="fa-solid fa-upload" aria-hidden="true"></i> Upload Roster</h1>
-    <p class="subtitle">Upload roster, xem kết quả Published / Planned, để kiểm tra AI model đọc file ra sao (chỉ xem; làm nhãn ở /label).</p>
+    <p class="subtitle">Upload rosters and see the Published / Planned results, to check how the AI model reads a file (view only; label in /label).</p>
   </div>
 
 
   <div class="card upload-toolbar" id="uploadArea">
-    <button class="btn" id="uploadBtn"><i class="fa-solid fa-upload" aria-hidden="true"></i> Tải lên</button>
+    <button class="btn" id="uploadBtn"><i class="fa-solid fa-upload" aria-hidden="true"></i> Upload</button>
     <input type="file" id="fileInput" multiple accept="image/jpeg,image/png,image/bmp,image/jfif,application/pdf,.pdf,.csv,.xls,.xlsx,.txt">
-    <span class="drop-hint">hoặc kéo-thả một hay nhiều file vào trang · JPG, PNG, BMP, JFIF, PDF, CSV, XLS, XLSX, TXT</span>
+    <span class="drop-hint">or drop one or more files on the page · JPG, PNG, BMP, JFIF, PDF, CSV, XLS, XLSX, TXT</span>
     <span class="spacer" style="flex:1"></span>
     <!-- result actions, shown once a file is loaded -->
     <span class="result-actions">
       <span id="saveStatus" style="font-size:13px; color:#666;"></span>
-      <button class="btn btn-secondary" id="reparseBtn" onclick="reparseImage()" title="Cho AI model đọc lại file này"><i class="fa-solid fa-rotate-right" aria-hidden="true"></i> Đọc lại</button>
+      <button class="btn btn-secondary" id="reparseBtn" onclick="reparseImage()" title="Let the AI model read this file again"><i class="fa-solid fa-rotate-right" aria-hidden="true"></i> Re-read</button>
+      <button class="btn btn-secondary" id="icsBtn" onclick="exportIcs()" title="Download the Published + Planned rows of this file as an .ics calendar (Google Calendar, Outlook, Apple Calendar…)"><i class="fa-solid fa-file-export" aria-hidden="true"></i> Export .ics</button>
+      <button class="btn btn-secondary" id="calendarBtn" onclick="viewCalendar()" title="Open the rows of this file on the Calendar page"><i class="fa-solid fa-calendar-days" aria-hidden="true"></i> View calendar</button>
     </span>
     <div id="error" class="error"></div>
     <div id="successMsg" class="success"></div>
@@ -253,17 +257,17 @@
   <!-- The files of this session: pick one to see what the AI model read from it -->
   <div class="card file-queue" id="fileQueue">
     <label for="fileSelect" class="queue-label">File</label>
-    <button class="queue-nav" id="prevFile" type="button" title="File trước"><i class="fa-solid fa-chevron-left" aria-hidden="true"></i></button>
+    <button class="queue-nav" id="prevFile" type="button" title="Previous file"><i class="fa-solid fa-chevron-left" aria-hidden="true"></i></button>
     <select id="fileSelect"></select>
-    <button class="queue-nav" id="nextFile" type="button" title="File sau"><i class="fa-solid fa-chevron-right" aria-hidden="true"></i></button>
+    <button class="queue-nav" id="nextFile" type="button" title="Next file"><i class="fa-solid fa-chevron-right" aria-hidden="true"></i></button>
     <span id="queueSummary" class="queue-summary"></span>
-    <a id="labelLink" class="queue-link" href="#" target="_blank" rel="noopener"><i class="fa-solid fa-tag" aria-hidden="true"></i> Label file này</a>
+    <a id="labelLink" class="queue-link" href="#" target="_blank" rel="noopener"><i class="fa-solid fa-tag" aria-hidden="true"></i> Label this file</a>
     <div id="jobStatus" class="job-status"></div>
   </div>
 
   <div id="resultSection" class="result-section">
     <div class="card">
-      <h2>Kết quả</h2>
+      <h2>Result</h2>
       <div class="file-info" id="fileInfo"></div>
       <div class="stats">
         <div class="stats-grid">
@@ -300,7 +304,7 @@
                 <thead><tr class="head-row"></tr></thead>
                 <tbody id="publishedBody"></tbody>
               </table>
-              <div id="publishedEmpty" class="empty-section" style="display: none;">Không có dòng nào</div>
+              <div id="publishedEmpty" class="empty-section" style="display: none;">No rows</div>
             </div>
           </div>
 
@@ -313,7 +317,7 @@
                 <thead><tr class="head-row"></tr></thead>
                 <tbody id="plannedBody"></tbody>
               </table>
-              <div id="plannedEmpty" class="empty-section" style="display: none;">Không có dòng nào</div>
+              <div id="plannedEmpty" class="empty-section" style="display: none;">No rows</div>
             </div>
           </div>
 
@@ -324,6 +328,7 @@
 
   </main>
 
+  <script src="/assets/ics.js"></script>
   <script>
     const uploadArea = document.getElementById('uploadArea');
     const fileInput = document.getElementById('fileInput');
@@ -332,7 +337,7 @@
     const resultSection = document.getElementById('resultSection');
     const previewImg = document.getElementById('preview');
 
-    let currentFileName = ''; // the file shown, for "Đọc lại"
+    let currentFileName = ''; // the file shown, for "Re-read"
 
     // 'image': a roster image read by OCR (/api/ocr/upload, labels/).
     // 'pdf':   a duty-plan PDF read by services/pdf-roster-parser.js (/api/pdf/*, labels/pdf/).
@@ -352,7 +357,7 @@
       document.body.classList.toggle('pdf-mode', mode === 'pdf');
       for (const el of document.querySelectorAll('.pdf-only')) el.style.display = mode === 'pdf' ? '' : 'none';
       for (const tr of document.querySelectorAll('.head-row')) {
-        tr.innerHTML = '<th class="col-crop" title="Bấm nút mũi tên để xem crop ảnh gốc của dòng này">Ảnh crop?</th>'
+        tr.innerHTML = `<th class="col-crop" title="${__('Click the arrow to see the crop of this row in the original image')}">${__('Crop?')}</th>`
           + FIELDS[mode].map(f => `<th data-field="${f}">${TITLES[f]}</th>`).join('');
       }
       if (mode !== 'pdf') hideEmptyColumns([]);
@@ -373,11 +378,11 @@
     // /upload always shows what the AI model read: say so, and when the file already
     // has a verified label, how many of its rows the model got exactly right.
     function modelInfoHtml(result) {
-      if (result.source !== 'model') return result.source === 'parser' ? ' | Đọc bằng parser' : '';
+      if (result.source !== 'model') return result.source === 'parser' ? ` | ${__('Read by the parser')}` : '';
       const v = result.vsLabel;
       const score = v && v.rowTotal
-        ? ` — so với nhãn đã lưu: đúng <strong>${v.rowMatches}/${v.rowTotal}</strong> dòng (${Math.round(100 * v.rowMatches / v.rowTotal)}%)`
-        : ' — file chưa có nhãn';
+        ? ` — ${__('against the saved label: <strong>{ok}/{total}</strong> rows right ({pct}%)', { ok: v.rowMatches, total: v.rowTotal, pct: Math.round(100 * v.rowMatches / v.rowTotal) })}`
+        : ` — ${__('the file has no label yet')}`;
       return ` | <span style="color:#7b1fa2"><i class="fa-solid fa-brain" aria-hidden="true"></i> AI model${score}</span>`;
     }
 
@@ -388,12 +393,12 @@
       document.getElementById('pdfPreview').src = `/api/pdf/raw?name=${encodeURIComponent(result.fileName)}`;
       displayResult({
         ...result,
-        strategy: result.readMode === 'ocr-image' ? 'PDF (OCR, roster dạng ảnh)' : result.readMode === 'ocr' ? 'PDF (OCR)' : 'PDF',
+        strategy: result.readMode === 'ocr-image' ? __('PDF (OCR, roster as an image)') : result.readMode === 'ocr' ? 'PDF (OCR)' : 'PDF',
         totalLines: (result.published?.length || 0) + (result.planned?.length || 0),
         totalMs: result.ms,
       });
       hideEmptyColumns([...(result.published || []), ...(result.planned || [])]);
-      document.getElementById('fileInfo').innerHTML += (result.period ? ` | Kỳ: <strong>${escapeHtml(result.period)}</strong>` : '')
+      document.getElementById('fileInfo').innerHTML += (result.period ? ` | ${__('Period')}: <strong>${escapeHtml(result.period)}</strong>` : '')
         + modelInfoHtml(result);
     }
 
@@ -416,9 +421,9 @@
 
     function jobLabel(job) {
       const r = job.result;
-      const what = job.status === 'done' ? `${(r.published?.length || 0) + (r.planned?.length || 0)} dòng`
-        : job.status === 'error' ? 'lỗi' : job.status === 'reading' ? 'đang đọc…' : 'đang chờ';
-      return `${STATUS_ICON[job.status]} ${job.title} — ${what}${job.isNew ? ` · ${NEW_GLYPH} mới` : ''}`;
+      const what = job.status === 'done' ? __('{n} rows', { n: (r.published?.length || 0) + (r.planned?.length || 0) })
+        : job.status === 'error' ? __('error') : job.status === 'reading' ? __('reading…') : __('waiting');
+      return `${STATUS_ICON[job.status]} ${job.title} — ${what}${job.isNew ? ` · ${NEW_GLYPH} ${__('new')}` : ''}`;
     }
 
     function renderQueue() {
@@ -430,8 +435,8 @@
       document.getElementById('nextFile').disabled = k < 0 || k >= jobs.length - 1;
       const n = (s) => jobs.filter(j => j.status === s).length;
       const busy = n('waiting') + n('reading');
-      document.getElementById('queueSummary').textContent = `${n('done')}/${jobs.length} xong`
-        + (n('error') ? ` · ${n('error')} lỗi` : '') + (busy ? ` · còn ${busy} file` : '');
+      document.getElementById('queueSummary').textContent = __('{done}/{total} done', { done: n('done'), total: jobs.length })
+        + (n('error') ? ` · ${__('{n} failed', { n: n('error') })}` : '') + (busy ? ` · ${__('{n} to go', { n: busy })}` : '');
       const link = document.getElementById('labelLink');
       link.classList.toggle('hidden', !selected?.storedAs);
       if (selected?.storedAs) link.href = `/label?name=${encodeURIComponent(selected.storedAs)}`;
@@ -450,8 +455,8 @@
         if (job.status === 'error') showError(`${job.title}: ${job.error}`);
         else {
           status.innerHTML = job.status === 'reading'
-            ? `<i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i> AI model đang đọc ${escapeHtml(job.title)}…`
-            : `<i class="fa-regular fa-clock" aria-hidden="true"></i> ${escapeHtml(job.title)} đang chờ đến lượt…`;
+            ? `<i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i> ${__('The AI model is reading {name}…', { name: escapeHtml(job.title) })}`
+            : `<i class="fa-regular fa-clock" aria-hidden="true"></i> ${__('{name} is waiting its turn…', { name: escapeHtml(job.title) })}`;
           status.classList.add('visible');
         }
         return;
@@ -468,8 +473,8 @@
       }
       const folder = `fake-data/${(result.fileName.split('.').pop() || '').toLowerCase()}/${result.fileName}`;
       document.getElementById('fileInfo').innerHTML += job.isNew
-        ? ` | <span style="color:#2e7d32"><i class="fa-solid fa-star" aria-hidden="true"></i> Roster mới, đã lưu vào ${escapeHtml(folder)}</span>`
-        : ` | Đã có trong dữ liệu (${escapeHtml(folder)})`;
+        ? ` | <span style="color:#2e7d32"><i class="fa-solid fa-star" aria-hidden="true"></i> ${__('New roster, saved to {path}', { path: escapeHtml(folder) })}</span>`
+        : ` | ${__('Already in the data ({path})', { path: escapeHtml(folder) })}`;
     }
 
     // Add files to the queue; the first of them is shown unless a file still being read is.
@@ -478,7 +483,7 @@
       for (const file of fileList) {
         const kind = isPdfFile(file) ? 'pdf' : file.type.startsWith('image/') ? 'image' : null;
         const job = { id: nextId++, file, title: file.name, kind, status: 'waiting' };
-        if (!kind) Object.assign(job, { status: 'error', error: 'không phải ảnh (JPG, PNG, BMP), PDF, CSV, Excel hay TXT' });
+        if (!kind) Object.assign(job, { status: 'error', error: __('not an image (JPG, PNG, BMP), PDF, CSV, Excel or TXT file') });
         jobs.push(job);
         added.push(job);
       }
@@ -497,7 +502,7 @@
         let job;
         // a file that fails (or a slip while showing it) must not stop the files after it
         while ((job = jobs.find(j => j.status === 'waiting'))) {
-          try { await readJob(job); } catch (err) { Object.assign(job, { status: 'error', error: err.message || 'Đã có lỗi xảy ra' }); }
+          try { await readJob(job); } catch (err) { Object.assign(job, { status: 'error', error: err.message || __('Something went wrong') }); }
         }
       } finally {
         reading = false;
@@ -509,7 +514,7 @@
     // A request that never answers (OCR server stuck, ...) becomes an error instead of holding the queue.
     const READ_TIMEOUT_MS = 6 * 60 * 1000;
     const fetchRead = (url, opts = {}) => fetch(url, { ...opts, signal: AbortSignal.timeout(READ_TIMEOUT_MS) })
-      .catch((e) => { throw new Error(e.name === 'TimeoutError' ? `quá ${READ_TIMEOUT_MS / 60000} phút không có phản hồi từ server` : `không kết nối được server (${e.message})`); });
+      .catch((e) => { throw new Error(e.name === 'TimeoutError' ? __('no answer from the server for {n} minutes', { n: READ_TIMEOUT_MS / 60000 }) : __('could not reach the server ({error})', { error: e.message })); });
 
     // Upload one job's file (or ask for a stored file again) and keep what the AI model read.
     async function readJob(job, again = false) {
@@ -522,24 +527,24 @@
             ? await fetchRead(`/api/pdf/parse?name=${encodeURIComponent(job.storedAs)}&engine=model`)
             : await fetchRead('/api/pdf/upload', { method: 'POST', body: formDataOf('file', job.file) });
           result = await res.json().catch(() => ({}));
-          if (!res.ok) throw new Error(result.error || 'Lỗi khi đọc PDF');
+          if (!res.ok) throw new Error(result.error || __('Error reading the PDF'));
           if (!again && job.file) job.isNew = !!result.newFile;
         } else {
           if (!job.previewUrl) job.previewUrl = URL.createObjectURL(job.file);
           const res = await fetchRead('/api/ocr/upload', { method: 'POST', body: formDataOf('image', job.file) });
           result = await res.json().catch(() => ({}));
-          if (!res.ok) throw new Error(result.error || 'Lỗi khi upload');
+          if (!res.ok) throw new Error(result.error || __('Upload failed'));
           if (!again) job.isNew = !!result.newRoster;
         }
         Object.assign(job, { status: 'done', result, storedAs: result.fileName, error: null });
       } catch (err) {
-        Object.assign(job, { status: 'error', error: err.message || 'Đã có lỗi xảy ra' });
+        Object.assign(job, { status: 'error', error: err.message || __('Something went wrong') });
       }
       try {
         if (selected === job) selectJob(job); else renderQueue();
       } catch (err) {
         console.error('[upload] showing', job.title, err);
-        showError(`${job.title}: đọc xong nhưng không hiển thị được kết quả (${err.message})`);
+        showError(__('{name}: read, but the result could not be shown ({error})', { name: job.title, error: err.message }));
       }
     }
 
@@ -583,8 +588,43 @@
     // Read the selected file again with the AI model (e.g. after retraining it)
     async function reparseImage() {
       if (!selected || selected.status === 'reading' || selected.status === 'waiting') return;
-      if (!selected.file && !selected.storedAs) return showError('Không có file để đọc lại');
+      if (!selected.file && !selected.storedAs) return showError(__('No file to read again'));
       await readJob(selected, true);
+    }
+
+    // ---- calendar (.ics) of the file shown: views/assets/ics.js ----
+    function currentIcs() {
+      const r = selected?.status === 'done' ? selected.result : null;
+      if (!r) { showError(__('No result to export yet')); return null; }
+      const name = `${(selected.title || r.fileName || 'roster').replace(/\.[^.]+$/, '')}${r.period ? ` (${r.period})` : ''}`;
+      const out = RosterIcs.rowsToIcs({ published: r.published, planned: r.planned }, { name });
+      if (!out.events) { showError(__('No row of this file has a date that can go in a calendar')); return null; }
+      return { name, ...out };
+    }
+
+    function exportIcs() {
+      const c = currentIcs();
+      if (!c) return;
+      const a = Object.assign(document.createElement('a'), {
+        href: URL.createObjectURL(new Blob([c.ics], { type: 'text/calendar;charset=utf-8' })),
+        download: `${c.name.replace(/[\\/:*?"<>|]+/g, '_')}.ics`,
+      });
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      showSuccess(__('Exported {n} events', { n: c.events }) + (c.skipped.length ? ` ${__('({n} rows without a readable date left out)', { n: c.skipped.length })}` : '') + '.');
+    }
+
+    // /calendar reads the file from this browser's storage once (roster-calendar:handoff)
+    function viewCalendar() {
+      const c = currentIcs();
+      if (!c) return;
+      try {
+        localStorage.setItem('roster-calendar:handoff', JSON.stringify({ name: `${c.name}.ics`, text: c.ics }));
+      } catch {
+        showError(__('The browser does not allow keeping the calendar: click "Export .ics" and open that file on the Calendar page.'));
+        return;
+      }
+      window.open('/calendar', '_blank');
     }
 
     function showError(msg) {
@@ -607,7 +647,7 @@
       // Per-step times when this request ran OCR, so a slow upload shows where the time went.
       const fmtMs = (ms) => (ms >= 1000 ? `${(ms / 1000).toFixed(1)} s` : `${ms} ms`);
       const t = result.timings;
-      const steps = t ? [['OCR', t.ocrMs], ['parse', t.parseMs], ['AI model', t.modelMs], ['tổng', t.totalMs]]
+      const steps = t ? [['OCR', t.ocrMs], ['parse', t.parseMs], ['AI model', t.modelMs], [__('total'), t.totalMs]]
         .filter(([, ms]) => Number.isFinite(ms)).map(([k, ms]) => `${k} ${fmtMs(ms)}`).join(' · ') : '';
       const timeInfo = steps ? ` | <span style="color:#666">${steps}</span>`
         : (result.totalMs ? ` | <span style="color:#666">${fmtMs(result.totalMs)}</span>` : '');
@@ -650,7 +690,7 @@
       updateCropColumns();
 
       resultSection.classList.add('visible');
-      document.body.classList.add('has-result'); // shows "Đọc lại" in the toolbar
+      document.body.classList.add('has-result'); // shows "Re-read" in the toolbar
     }
 
     // Add a read-only row to a table body
@@ -665,7 +705,7 @@
       const cropBtn = document.createElement('button');
       cropBtn.className = 'crop-toggle' + (tr._box ? '' : ' disabled');
       cropBtn.innerHTML = '<i class="fa-solid fa-caret-right" aria-hidden="true"></i>';
-      cropBtn.title = tr._box ? 'Xem ảnh gốc của dòng này' : 'Không có tọa độ crop cho dòng này';
+      cropBtn.title = tr._box ? __('See this row in the original image') : __('No crop coordinates for this row');
       cropBtn.type = 'button';
       cropBtn.disabled = !tr._box;
       cropBtn.addEventListener('click', () => toggleRowCrop(tr, cropBtn));
@@ -707,7 +747,7 @@
 
       const img = document.getElementById('preview');
       if (!img || !img.naturalWidth) {
-        td.innerHTML = '<span class="crop-missing">Chưa tải được ảnh gốc để crop.</span>';
+        td.innerHTML = `<span class="crop-missing">${__('The original image is not loaded yet.')}</span>`;
       } else {
         const pad = 4;
         const sx = Math.max(0, box.left - pad);
@@ -715,7 +755,7 @@
         const sw = Math.min(img.naturalWidth - sx, (box.right - box.left) + pad * 2);
         const sh = Math.min(img.naturalHeight - sy, (box.bottom - box.top) + pad * 2);
         if (sw <= 0 || sh <= 0) {
-          td.innerHTML = '<span class="crop-missing">Tọa độ crop không hợp lệ.</span>';
+          td.innerHTML = `<span class="crop-missing">${__('Invalid crop coordinates.')}</span>`;
         } else {
           // Upscale short rows so text is actually legible.
           const scale = Math.min(4, Math.max(1, 70 / sh));

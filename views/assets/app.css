@@ -90,3 +90,26 @@ body {
   .topnav .brand { font-size: 14px; }
   .page { padding: 16px 12px 32px; }
 }
+
+/* ---- Language switch (topnav, right) ---- */
+.topnav .lang { display: inline-flex; border: 1px solid rgba(255, 255, 255, 0.35); border-radius: 6px; overflow: hidden; flex: none; }
+.topnav .lang button { background: none; border: none; color: var(--nav-fg); font-size: 12px; font-weight: 600; padding: 5px 9px; cursor: pointer; opacity: 0.8; }
+.topnav .lang button + button { border-left: 1px solid rgba(255, 255, 255, 0.35); }
+.topnav .lang button:hover { opacity: 1; background: rgba(255, 255, 255, 0.1); }
+.topnav .lang button.on { background: rgba(255, 255, 255, 0.9); color: var(--nav-bg); opacity: 1; }
+
+/* ---- Right side of the topnav: Admin menu + language ---- */
+.topnav .nav-right { margin-left: auto; display: flex; align-items: center; gap: 12px; flex: none; }
+.topnav .admin-menu { position: relative; }
+.topnav .admin-menu summary { list-style: none; cursor: pointer; color: var(--nav-fg); font-size: 14px; padding: 7px 12px; border-radius: 6px; white-space: nowrap; opacity: 0.85; border: 1px dashed rgba(255, 255, 255, 0.35); display: flex; gap: 6px; align-items: center; }
+.topnav .admin-menu summary::-webkit-details-marker { display: none; }
+.topnav .admin-menu summary:hover, .topnav .admin-menu[open] summary { background: rgba(255, 255, 255, 0.1); opacity: 1; }
+.topnav .admin-menu.active summary { background: rgba(255, 255, 255, 0.18); opacity: 1; font-weight: 600; border-style: solid; }
+.topnav .admin-menu .caret { font-size: 10px; transition: transform 0.15s; }
+.topnav .admin-menu[open] .caret { transform: rotate(180deg); }
+.topnav .admin-list { position: absolute; right: 0; top: calc(100% + 6px); min-width: 190px; background: #fff; border-radius: 8px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2); padding: 6px; display: flex; flex-direction: column; z-index: 200; }
+.topnav .admin-list a { color: var(--text); text-decoration: none; font-size: 14px; padding: 8px 10px; border-radius: 6px; display: flex; gap: 8px; align-items: center; }
+.topnav .admin-list a i { width: 16px; text-align: center; color: var(--muted); }
+.topnav .admin-list a:hover { background: #f0f4fa; }
+.topnav .admin-list a.active { background: #e8f0fb; font-weight: 600; }
+@media (max-width: 700px) { .topnav .admin-menu summary { padding: 6px 8px; } }

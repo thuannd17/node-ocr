@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Roster Calendar</title>
+  <script src="/assets/i18n/vi.js"></script>
+  <script src="/assets/i18n.js"></script>
+  <link rel="stylesheet" href="/assets/app.css">
+  <link rel="stylesheet" href="/assets/fontawesome/css/all.min.css">
+  <style>
+    .btn { background: var(--primary); color: #fff; border: none; padding: 8px 14px; border-radius: 6px; cursor: pointer; font-size: 14px; display: inline-flex; gap: 6px; align-items: center; }
+    .btn:hover { background: var(--primary-dark); }
+    .btn.secondary { background: #fff; color: var(--text); border: 1px solid var(--border); }
+    .btn.secondary:hover { background: #f0f2f5; }
+    .btn.icon { padding: 8px 10px; }
+    #fileInput { display: none; }
+    .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 12px 16px; }
+    .toolbar .hint { font-size: 13px; color: var(--muted); }
+    body.dragover .toolbar { outline: 2px dashed var(--primary); outline-offset: 2px; }
+    .cals { display: flex; gap: 8px; flex-wrap: wrap; flex-basis: 100%; }
+    .cals:empty { display: none; }
+    .cal-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; padding: 4px 6px 4px 10px; border-radius: 999px; background: #f0f2f5; border: 1px solid var(--border); }
+    .cal-chip .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+    .cal-chip.off { opacity: 0.5; }
+    .cal-chip.off .name { text-decoration: line-through; }
+    .cal-chip button { border: none; background: none; cursor: pointer; color: var(--muted); padding: 2px 4px; font-size: 12px; }
+    .cal-chip button:hover { color: var(--danger); }
+    .cal-chip .name { cursor: pointer; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .msg { font-size: 13px; padding: 8px 12px; border-radius: 6px; flex-basis: 100%; display: none; }
+    .msg.visible { display: block; }
+    .msg.error { background: #ffebee; color: #c62828; }
+    .msg.ok { background: #e8f5e9; color: #2e7d32; }
+
+    .nav-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+    .nav-bar h2 { margin: 0 8px; font-size: 20px; color: var(--nav-bg); min-width: 170px; }
+    .nav-bar .spacer { flex: 1; }
+    .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: #fff; }
+    .seg button { border: none; background: none; padding: 7px 12px; cursor: pointer; font-size: 13px; color: var(--text); }
+    .seg button + button { border-left: 1px solid var(--border); }
+    .seg button.on { background: var(--nav-bg); color: #fff; }
+    select { padding: 7px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px; background: #fff; }
+
+    .grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow); }
+    .grid .dow { background: var(--nav-bg); color: #fff; font-size: 12px; font-weight: 600; padding: 8px; text-align: center; }
+    .day { min-height: 118px; border-top: 1px solid var(--border); border-left: 1px solid var(--border); padding: 4px; display: flex; flex-direction: column; gap: 3px; min-width: 0; cursor: pointer; }
+    .day:nth-child(7n + 1) { border-left: none; }
+    .day.other { background: #fafbfc; }
+    .day.other .num { color: #b0b6c0; }
+    .day.today .num { background: var(--primary); color: #fff; border-radius: 50%; }
+    .day .num { font-size: 12px; font-weight: 600; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; color: var(--muted); }
+    .day:hover { background: #f7f9fc; }
+    .ev { font-size: 12px; line-height: 1.3; padding: 2px 5px; border-radius: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; border-left: 3px solid var(--c); background: color-mix(in srgb, var(--c) 12%, white); color: #1d2433; }
+    .ev.allday { background: var(--c); color: #fff; border-left-color: var(--c); }
+    .ev.tentative { background-image: repeating-linear-gradient(135deg, transparent 0 6px, rgba(255,255,255,0.45) 6px 10px); border-style: dashed; }
+    .ev.cont { opacity: 0.65; font-style: italic; }
+    .ev .t { font-variant-numeric: tabular-nums; font-weight: 600; margin-right: 4px; }
+    .ev:hover { filter: brightness(0.95); }
+    .more { font-size: 11px; color: var(--primary); padding: 0 4px; }
+    .ev i, .sub-ev i, .list i.fa-solid, .modal i.fa-solid { font-size: 0.85em; opacity: 0.8; }
+    /* a duty (check-in .. check-out) framing its flights, sims, hotel */
+    .duty-box { border: 1px solid color-mix(in srgb, var(--c) 45%, white); border-radius: 5px; background: color-mix(in srgb, var(--c) 5%, white); overflow: hidden; }
+    .duty-box > .ev { border-radius: 0; font-weight: 600; }
+    .sub-ev { font-size: 11px; line-height: 1.35; padding: 1px 5px 1px 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; color: #1d2433; }
+    .sub-ev:hover { background: color-mix(in srgb, var(--c) 14%, white); }
+    .sub-ev.end { color: var(--muted); cursor: default; }
+    .sub-ev.end:hover { background: none; }
+    .sub-ev .t { font-variant-numeric: tabular-nums; font-weight: 600; margin-right: 4px; }
+    .sub-ev.tentative { font-style: italic; }
+    .list .row.child { padding-left: 34px; font-size: 13px; background: color-mix(in srgb, var(--c) 4%, white); border-top-style: dashed; }
+    .modal .day-list .row.child { padding-left: 18px; font-size: 13px; }
+
+    .list { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); }
+    .list .dayhead { padding: 8px 14px; background: #f0f2f5; font-weight: 600; font-size: 13px; color: var(--nav-bg); border-top: 1px solid var(--border); }
+    .list .dayhead:first-child { border-top: none; }
+    .list .row { display: grid; grid-template-columns: 130px 14px 1fr; gap: 10px; align-items: center; padding: 8px 14px; border-top: 1px solid var(--border); cursor: pointer; font-size: 14px; }
+    .list .row:hover { background: #f7f9fc; }
+    .list .row .time { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13px; }
+    .list .row .dot { width: 10px; height: 10px; border-radius: 50%; }
+    .list .row .sub { color: var(--muted); font-size: 12px; }
+    .empty { color: var(--muted); padding: 40px 20px; text-align: center; background: var(--card); border-radius: var(--radius); border: 1px dashed var(--border); }
+    .empty i { font-size: 36px; color: #c3c9d4; display: block; margin-bottom: 12px; }
+
+    .modal-back { position: fixed; inset: 0; background: rgba(20, 28, 45, 0.45); display: none; align-items: center; justify-content: center; z-index: 1000; padding: 16px; }
+    .modal-back.visible { display: flex; }
+    .modal { background: #fff; border-radius: 10px; max-width: 560px; width: 100%; max-height: 85vh; overflow: auto; box-shadow: 0 10px 30px rgba(0,0,0,0.25); }
+    .modal header { display: flex; gap: 10px; align-items: flex-start; padding: 16px 18px 8px; border-left: 6px solid var(--c, var(--primary)); }
+    .modal header h3 { margin: 0; font-size: 18px; flex: 1; overflow-wrap: anywhere; }
+    .modal header button { border: none; background: none; font-size: 18px; cursor: pointer; color: var(--muted); }
+    .modal .body { padding: 6px 18px 18px; font-size: 14px; }
+    .modal .meta { display: grid; grid-template-columns: 24px 1fr; gap: 6px 8px; margin-bottom: 10px; color: #333; }
+    .modal .meta i { color: var(--muted); padding-top: 3px; }
+    .modal pre { white-space: pre-wrap; font-family: inherit; background: #f6f7f9; border-radius: 6px; padding: 10px; margin: 0; font-size: 13px; overflow-wrap: anywhere; }
+    .modal .day-list .row { display: grid; grid-template-columns: 110px 1fr; gap: 8px; padding: 6px 0; border-top: 1px solid var(--border); cursor: pointer; }
+    .modal .day-list .row:hover { background: #f7f9fc; }
+    .badge { font-size: 11px; padding: 1px 6px; border-radius: 4px; background: #fff3e0; color: #e65100; margin-left: 6px; vertical-align: middle; }
+
+    @media (max-width: 760px) {
+      .day { min-height: 74px; }
+      .ev .s { display: none; }
+      .ev { font-size: 11px; padding: 1px 3px; }
+      .list .row { grid-template-columns: 96px 10px 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <script src="/assets/nav.js"></script>
+  <main class="page">
+    <div class="page-header">
+      <h1><i class="fa-solid fa-calendar-days" aria-hidden="true"></i> Roster Calendar</h1>
+      <p class="subtitle" data-i18n>Open one or more <code>.ics</code> files (exported from /upload or from any calendar) to see them by month. Files are read in the browser only, nothing is sent to the server.</p>
+    </div>
+
+    <div class="card toolbar" id="toolbar">
+      <button class="btn" id="openBtn"><i class="fa-solid fa-folder-open" aria-hidden="true"></i> Open .ics file</button>
+      <input type="file" id="fileInput" accept=".ics,text/calendar" multiple>
+      <span class="hint">or drop .ics files on the page</span>
+      <span style="flex:1"></span>
+      <button class="btn secondary" id="clearBtn" style="display:none"><i class="fa-solid fa-trash" aria-hidden="true"></i> Remove all</button>
+      <div class="cals" id="cals"></div>
+      <div class="msg" id="msg"></div>
+    </div>
+
+    <div id="view" style="display:none">
+      <div class="nav-bar">
+        <button class="btn secondary icon" id="prevBtn" title="Previous month"><i class="fa-solid fa-chevron-left" aria-hidden="true"></i></button>
+        <button class="btn secondary icon" id="nextBtn" title="Next month"><i class="fa-solid fa-chevron-right" aria-hidden="true"></i></button>
+        <h2 id="monthTitle"></h2>
+        <select id="monthSelect" title="Months with events"></select>
+        <span class="spacer"></span>
+        <span class="seg" id="tzSeg" title="Show UTC (Z) times in"><button data-tz="utc" class="on">UTC</button><button data-tz="local">LOCAL</button></span>
+        <span class="seg" id="viewSeg"><button data-view="month" class="on"><i class="fa-solid fa-table-cells" aria-hidden="true"></i> Month</button><button data-view="list"><i class="fa-solid fa-list" aria-hidden="true"></i> List</button></span>
+      </div>
+      <div id="calendar"></div>
+      <p style="font-size:12px;color:var(--muted)" data-i18n><i class="fa-solid fa-briefcase" aria-hidden="true"></i> <b>Duty</b> (from C/I to C/O) is a frame; its flights <i class="fa-solid fa-plane" aria-hidden="true"></i>, sims <i class="fa-solid fa-desktop" aria-hidden="true"></i> and hotel <i class="fa-solid fa-bed" aria-hidden="true"></i> sit inside it.
+        A hotel lasts from the event just before it to the event just after it. Striped: a <b>Planned</b> row (STATUS:TENTATIVE). An event past midnight also shows on the next day (in italics). Times without a time zone (local "L" times in the roster) are always shown as written in the file.</p>
+    </div>
+
+    <div class="empty" id="empty">
+      <i class="fa-regular fa-calendar" aria-hidden="true"></i>
+      <span data-i18n>No calendars yet. Click <b>Open .ics file</b>, drop a file here, or on <a href="/upload">/upload</a> click <b>View calendar</b> after reading a roster.</span>
+    </div>
+  </main>
+
+  <div class="modal-back" id="modalBack" role="dialog" aria-modal="true">
+    <div class="modal" id="modal"></div>
+  </div>
+
+  <script src="/assets/ics.js"></script>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const escapeHtml = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[c]));
+    const pad = (n) => String(n).padStart(2, '0');
+    const COLORS = ['#4a90e2', '#e67e22', '#27ae60', '#8e44ad', '#c0392b', '#16a085', '#d35400', '#2c3e50'];
+    const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'].map(m => __(m));
+    const DOW = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(d => __(d));
+    const STORE_KEY = 'roster-calendar:cals';   // calendars kept for this browser (a convenience)
+    const HANDOFF_KEY = 'roster-calendar:handoff'; // one .ics passed from /upload "View calendar"
+    const MAX_EVENTS_IN_CELL = 4;
+
+    // { id, name, color, on, text, events }
+    let cals = [];
+    const state = { y: 0, mo: 0, tz: 'utc', view: 'month' };
+
+    const store = {
+      get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+      set(k, v) { try { localStorage.setItem(k, v); return true; } catch { return false; } },
+      del(k) { try { localStorage.removeItem(k); } catch { /* storage blocked */ } },
+    };
+    function save() {
+      const ok = store.set(STORE_KEY, JSON.stringify(cals.map(({ name, color, on, text }) => ({ name, color, on, text }))));
+      if (!ok && cals.length) showMsg(__('The calendars are too big to keep in this browser: after a reload, open the files again.'), 'error');
+    }
+
+    let msgTimer = null;
+    function showMsg(text, kind = 'ok') {
+      const el = $('msg');
+      el.textContent = text;
+      el.className = `msg visible ${kind}`;
+      clearTimeout(msgTimer);
+      if (kind === 'ok') msgTimer = setTimeout(() => el.classList.remove('visible'), 5000);
+    }
+
+    // ---- time: an event time { y, mo, d, h, mi, utc } as shown (UTC kept, or converted to this computer's zone) ----
+    function shown(t) {
+      if (!t.utc || state.tz === 'utc' || t.dateOnly) return { y: t.y, mo: t.mo, d: t.d, h: t.h, mi: t.mi };
+      const x = new Date(Date.UTC(t.y, t.mo - 1, t.d, t.h, t.mi));
+      return { y: x.getFullYear(), mo: x.getMonth() + 1, d: x.getDate(), h: x.getHours(), mi: x.getMinutes() };
+    }
+    const dayKey = (t) => `${t.y}-${pad(t.mo)}-${pad(t.d)}`;
+    const dayNum = (t) => Date.UTC(t.y, t.mo - 1, t.d) / 86400000;
+    const fromDayNum = (n) => { const x = new Date(n * 86400000); return { y: x.getUTCFullYear(), mo: x.getUTCMonth() + 1, d: x.getUTCDate() }; };
+    const hm = (t) => `${pad(t.h)}:${pad(t.mi)}`;
+    const zoneOf = (t) => (t.dateOnly ? '' : t.utc ? (state.tz === 'utc' ? ' Z' : '') : ` (${__('local time')})`);
+    const fmtDay = (t) => `${pad(t.d)}/${pad(t.mo)}/${t.y}`;
+
+    /** Days an event covers (as day numbers), for placing it in the grid. */
+    function daysOf(e) {
+      const s = shown(e.start);
+      if (e.allDay) {
+        const endExclusive = e.end ? dayNum(e.end) : dayNum(s) + 1;
+        const out = [];
+        for (let n = dayNum(s); n < Math.max(endExclusive, dayNum(s) + 1); n++) out.push(n);
+        return out;
+      }
+      if (!e.end) return [dayNum(s)];
+      const en = shown(e.end);
+      let last = dayNum(en);
+      if (en.h === 0 && en.mi === 0 && last > dayNum(s)) last -= 1; // ends at midnight: not on that day
+      const out = [];
+      for (let n = dayNum(s); n <= Math.min(last, dayNum(s) + 31); n++) out.push(n);
+      return out;
+    }
+
+    function timeText(e) {
+      if (e.allDay) {
+        const last = e.end ? fromDayNum(dayNum(e.end) - 1) : e.start;
+        return dayNum(last) > dayNum(e.start) ? `${__('All day')}, ${fmtDay(e.start)} → ${fmtDay(last)}` : `${__('All day')}, ${fmtDay(e.start)}`;
+      }
+      const s = shown(e.start);
+      if (!e.end) return `${fmtDay(s)} ${hm(s)}${zoneOf(e.start)}`;
+      const en = shown(e.end);
+      const sameDay = dayKey(s) === dayKey(en);
+      const mins = Math.round((Date.UTC(e.end.y, e.end.mo - 1, e.end.d, e.end.h, e.end.mi) - Date.UTC(e.start.y, e.start.mo - 1, e.start.d, e.start.h, e.start.mi)) / 60000);
+      const dur = mins > 0 ? ` · ${Math.floor(mins / 60)}h${pad(mins % 60)}` : '';
+      return `${fmtDay(s)} ${hm(s)} → ${sameDay ? '' : `${fmtDay(en)} `}${hm(en)}${zoneOf(e.start)}${dur}`;
+    }
+
+    // ---- loading calendars ----
+    function addCalendar(name, text, { color, on = true, quiet = false } = {}) {
+      let parsed;
+      try { parsed = RosterIcs.parseIcs(text); } catch (err) { showMsg(__('{name}: could not read it ({error})', { name, error: err.message }), 'error'); return null; }
+      if (!/BEGIN:VCALENDAR/i.test(text)) { showMsg(__('{name}: not an iCalendar (.ics) file', { name }), 'error'); return null; }
+      // the same calendar opened again replaces the old copy
+      const title = parsed.name || name.replace(/\.ics$/i, '');
+      cals = cals.filter(c => c.name !== title);
+      const used = new Set(cals.map(c => c.color));
+      const cal = { id: Math.random().toString(36).slice(2), name: title, color: color || COLORS.find(c => !used.has(c)) || COLORS[cals.length % COLORS.length], on, text, events: parsed.events };
+      // events inside another one (RELATED-TO its UID: a duty's flights, sims, hotel) are drawn inside it
+      const byUid = new Map(cal.events.filter(e => e.uid).map(e => [e.uid, e]));
+      for (const e of cal.events) {
+        e.cal = cal;
+        e.children = e.children || [];
+        const parent = e.parent && byUid.get(e.parent);
+        if (parent && parent !== e) { e.inside = parent; (parent.children = parent.children || []).push(e); }
+      }
+      cals.push(cal);
+      if (!quiet) showMsg(__('Opened {name}: {n} events.', { name: title, n: cal.events.length }));
+      return cal;
+    }
+
+    async function openFiles(files) {
+      let last = null;
+      for (const f of files) {
+        if (!/\.ics$/i.test(f.name) && f.type !== 'text/calendar') { showMsg(__('{name}: only .ics files can be opened', { name: f.name }), 'error'); continue; }
+        last = addCalendar(f.name, await f.text()) || last;
+      }
+      if (last) { jumpToFirst(last); save(); render(); }
+    }
+
+    function jumpToFirst(cal) {
+      const first = cal.events.map(e => shown(e.start)).sort((a, b) => dayNum(a) - dayNum(b))[0];
+      if (first) { state.y = first.y; state.mo = first.mo; }
+    }
+
+    // ---- rendering ----
+    // top-level events: those inside a duty are drawn in it
+    const visibleEvents = () => cals.filter(c => c.on).flatMap(c => c.events.filter(e => !e.inside));
+    const KIND_ICONS = { duty: 'fa-briefcase', flight: 'fa-plane', sim: 'fa-desktop', hotel: 'fa-bed' };
+    const kindIcon = (e) => (KIND_ICONS[e.kind] ? `<i class="fa-solid ${KIND_ICONS[e.kind]}" aria-hidden="true"></i> ` : '');
+    const childrenOn = (e, n) => (e.children || []).filter(c => dayNum(shown(c.start)) === n || (c.allDay && daysOf(c).includes(n)));
+    const sortByStart = (list) => list.slice().sort((a, b) => (a.allDay ? 1 : 0) - (b.allDay ? 1 : 0) || stampOf(a.start) - stampOf(b.start));
+    const stampOf = (t) => Date.UTC(t.y, t.mo - 1, t.d, t.h || 0, t.mi || 0);
+
+    function byDay() {
+      const map = new Map();
+      for (const e of visibleEvents()) {
+        const days = daysOf(e);
+        days.forEach((n, i) => {
+          if (!map.has(n)) map.set(n, []);
+          map.get(n).push({ e, cont: i > 0 && !e.allDay });
+        });
+      }
+      // all-day first, then what goes on from the day before, then by start time
+      const order = (x) => (x.e.allDay ? -1 : x.cont ? 0 : 1);
+      const minutes = (x) => (x.e.allDay || x.cont ? 0 : shown(x.e.start).h * 60 + shown(x.e.start).mi);
+      for (const list of map.values()) list.sort((a, b) => order(a) - order(b) || minutes(a) - minutes(b) || a.e.summary.localeCompare(b.e.summary));
+      return map;
+    }
+
+    const isTentative = (e) => e.status === 'TENTATIVE' || e.categories.includes('Planned');
+
+    const register = (e) => { evIndex.push(e); return evIndex.length - 1; };
+
+    function chip({ e, cont }, n) {
+      const s = shown(e.start);
+      const cls = ['ev', e.allDay ? 'allday' : '', isTentative(e) ? 'tentative' : '', cont ? 'cont' : ''].filter(Boolean).join(' ');
+      const t = e.allDay ? '' : cont ? '<span class="t">↳</span>' : `<span class="t">${hm(s)}</span>`;
+      const head = `<div class="${cls}" style="--c:${e.cal.color}" data-ev="${register(e)}" title="${escapeHtml(`${e.summary} · ${timeText(e)}`)}">${t}${kindIcon(e)}${escapeHtml(e.summary)}</div>`;
+      const kids = sortByStart(childrenOn(e, n));
+      if (!e.children?.length) return head;
+      // a duty: a frame from check-in to check-out, its events of this day inside
+      const lines = kids.map(c => `<div class="sub-ev${isTentative(c) ? ' tentative' : ''}" data-ev="${register(c)}" title="${escapeHtml(`${c.summary} · ${timeText(c)}`)}">${c.allDay ? '' : `<span class="t">${hm(shown(c.start))}</span>`}${kindIcon(c)}${escapeHtml(c.summary)}</div>`).join('');
+      const endHere = e.end && dayNum(shown(e.end)) === n ?`<div class="sub-ev end"><span class="t">${hm(shown(e.end))}</span>check-out</div>` : '';
+      return `<div class="duty-box" style="--c:${e.cal.color}">${head}${lines}${endHere}</div>`;
+    }
+
+    let evIndex = []; // events in the current render, for clicks
+    function renderMonth(map) {
+      const first = { y: state.y, mo: state.mo, d: 1 };
+      const startN = dayNum(first) - ((new Date(Date.UTC(state.y, state.mo - 1, 1)).getUTCDay() + 6) % 7); // back to Monday
+      const now = new Date();
+      const todayN = dayNum({ y: now.getFullYear(), mo: now.getMonth() + 1, d: now.getDate() });
+      const lastN = dayNum({ y: state.mo === 12 ? state.y + 1 : state.y, mo: state.mo === 12 ? 1 : state.mo + 1, d: 1 }) - 1;
+      const weeks = Math.ceil((lastN - startN + 1) / 7);
+      let html = DOW.map(d => `<div class="dow">${d}</div>`).join('');
+      for (let n = startN; n < startN + weeks * 7; n++) {
+        const t = fromDayNum(n);
+        const items = map.get(n) || [];
+        const shownItems = items.slice(0, MAX_EVENTS_IN_CELL).map(x => chip(x, n)).join('');
+        const more = items.length > MAX_EVENTS_IN_CELL ? `<div class="more">${__('+{n} more', { n: items.length - MAX_EVENTS_IN_CELL })}</div>` : '';
+        html += `<div class="day${t.mo !== state.mo ? ' other' : ''}${n === todayN ? ' today' : ''}" data-day="${n}"><div class="num">${t.d}</div>${shownItems}${more}</div>`;
+      }
+      $('calendar').innerHTML = `<div class="grid">${html}</div>`;
+    }
+
+    function renderList(map) {
+      const fromN = dayNum({ y: state.y, mo: state.mo, d: 1 });
+      const toN = dayNum({ y: state.mo === 12 ? state.y + 1 : state.y, mo: state.mo === 12 ? 1 : state.mo + 1, d: 1 });
+      let html = '';
+      for (let n = fromN; n < toN; n++) {
+        const items = (map.get(n) || []).filter(x => !x.cont);
+        if (!items.length) continue;
+        const t = fromDayNum(n);
+        const dow = DOW[(new Date(Date.UTC(t.y, t.mo - 1, t.d)).getUTCDay() + 6) % 7];
+        html += `<div class="dayhead">${dow}, ${fmtDay(t)}</div>`;
+        const line = (e, child) => {
+          const s = shown(e.start);
+          const en = e.end && shown(e.end);
+          const time = e.allDay ? __('All day') : `${hm(s)}${en ? ` → ${dayKey(en) !== dayKey(s) ? `${pad(en.d)}/${pad(en.mo)} ` : ''}${hm(en)}` : ''}`;
+          return `<div class="row${child ? ' child' : ''}" data-ev="${register(e)}" style="--c:${e.cal.color}"><span class="time">${time}</span><span class="dot" style="background:${e.cal.color}"></span>
+            <span>${kindIcon(e)}<b>${escapeHtml(e.summary)}</b>${isTentative(e) && !child ? '<span class="badge">Planned</span>' : ''}${e.location && !child ? ` <span class="sub">· ${escapeHtml(e.location)}</span>` : ''}</span></div>`;
+        };
+        for (const { e } of items) html += line(e, false) + sortByStart(e.children || []).map(c => line(c, true)).join('');
+      }
+      $('calendar').innerHTML = `<div class="list">${html || `<div class="dayhead" style="font-weight:normal;color:var(--muted)">${__('No events this month.')}</div>`}</div>`;
+    }
+
+    function renderMonthSelect() {
+      const counts = new Map();
+      for (const e of visibleEvents()) { const s = shown(e.start); const k = `${s.y}-${pad(s.mo)}`; counts.set(k, (counts.get(k) || 0) + 1); }
+      const cur = `${state.y}-${pad(state.mo)}`;
+      const keys = [...new Set([...counts.keys(), cur])].sort();
+      $('monthSelect').innerHTML = keys.map(k => { const [y, m] = k.split('-'); return `<option value="${k}" ${k === cur ? 'selected' : ''}>${MONTH_NAMES[+m - 1]} ${y} (${counts.get(k) || 0})</option>`; }).join('');
+    }
+
+    function renderCals() {
+      $('cals').innerHTML = cals.map(c => `<span class="cal-chip${c.on ? '' : ' off'}" data-cal="${c.id}">
+        <span class="dot" style="background:${c.color}"></span><span class="name" data-toggle="${c.id}" title="${__('Click to hide / show')}">${escapeHtml(c.name)}</span>
+        <small style="color:var(--muted)">${c.events.length}</small>
+        <button data-download="${c.id}" title="${__('Download the .ics file')}"><i class="fa-solid fa-download" aria-hidden="true"></i></button>
+        <button data-remove="${c.id}" title="${__('Remove this calendar')}"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button></span>`).join('');
+      $('clearBtn').style.display = cals.length > 1 ? '' : 'none';
+    }
+
+    function render() {
+      renderCals();
+      const has = cals.length > 0;
+      $('view').style.display = has ? '' : 'none';
+      $('empty').style.display = has ? 'none' : '';
+      if (!has) return;
+      if (!state.y) { const n = new Date(); state.y = n.getFullYear(); state.mo = n.getMonth() + 1; }
+      $('monthTitle').textContent = `${MONTH_NAMES[state.mo - 1]} ${state.y}`;
+      for (const b of $('tzSeg').children) b.classList.toggle('on', b.dataset.tz === state.tz);
+      for (const b of $('viewSeg').children) b.classList.toggle('on', b.dataset.view === state.view);
+      renderMonthSelect();
+      evIndex = [];
+      const map = byDay();
+      if (state.view === 'list') renderList(map); else renderMonth(map);
+      const q = new URLSearchParams({ m: `${state.y}-${pad(state.mo)}` });
+      if (state.view !== 'month') q.set('view', state.view);
+      if (state.tz !== 'utc') q.set('tz', state.tz);
+      history.replaceState(null, '', `/calendar?${q}`);
+    }
+
+    // ---- details ----
+    function openModal(html, color) {
+      $('modal').innerHTML = html;
+      $('modal').style.setProperty('--c', color || 'var(--primary)');
+      $('modalBack').classList.add('visible');
+      $('modal').querySelector('[data-close]')?.focus();
+    }
+    const closeModal = () => $('modalBack').classList.remove('visible');
+
+    function showEvent(e) {
+      const meta = [
+        ['fa-regular fa-clock', escapeHtml(timeText(e))],
+        ['fa-solid fa-calendar', `${escapeHtml(e.cal.name)}${isTentative(e) ? '<span class="badge">Planned</span>' : ''}`],
+      ].map(([i, v]) => `<i class="${i}" aria-hidden="true"></i><span>${v}</span>`);
+      // Where: the LOCATION, replaced by airport links (+ Night time) once the codes are looked up
+      meta.splice(1, 0, `<i class="fa-solid fa-location-dot" aria-hidden="true"${e.location ? '' : ' style="display:none"'}></i><span id="evPlace"${e.location ? '' : ' style="display:none"'}>${escapeHtml(e.location || '')}</span>`);
+      dayEvents = [];
+      const nested = (list) => list.map((c) => {
+        dayEvents.push(c);
+        const s = shown(c.start);
+        const time = c.allDay ? __('All day') : `${hm(s)}${c.end ? ` → ${hm(shown(c.end))}` : ''}`;
+        return `<div class="row" data-day-ev="${dayEvents.length - 1}"><span style="color:var(--muted);font-variant-numeric:tabular-nums">${time}</span><span>${kindIcon(c)}<b>${escapeHtml(c.summary)}</b></span></div>`;
+      }).join('');
+      const inside = e.children?.length ? `<div class="day-list" style="margin-bottom:10px"><b style="font-size:13px">Events</b>${nested(sortByStart(e.children))}</div>` : '';
+      const outer = e.inside ? `<div class="day-list" style="margin-bottom:10px"><b style="font-size:13px">Duty</b>${nested([e.inside])}</div>` : '';
+      openModal(`<header><h3>${kindIcon(e)}${escapeHtml(e.summary)}</h3><button data-close title="${__('Close')}"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button></header>
+        <div class="body"><div class="meta">${meta.join('')}</div>${inside}${outer}${e.description ? `<pre>${escapeHtml(e.description)}</pre>` : ''}</div>`, e.cal.color);
+      showAirports(e);
+    }
+
+    // Airport codes of an event (its location, the "A → B → C" routes in the title and description), each a link to /airport
+    // in a new tab. They take the place of the plain location line; a location that is not an airport stays in front.
+    const airportCache = new Map();
+    async function showAirports(e) {
+      const codes = new Set();
+      const add = (c) => { if (/^[A-Z]{3,4}$/.test(c)) codes.add(c); };
+      add((e.location || '').trim().toUpperCase());
+      for (const text of [e.summary, e.description]) {
+        for (const m of String(text || '').matchAll(/[A-Z0-9?]{3,4}(?:\s*→\s*[A-Z0-9?]{3,4})+/g)) m[0].split('→').forEach(c => add(c.trim()));
+      }
+      for (const c of e.children || []) add((c.location || '').trim().toUpperCase());
+      const todo = [...codes].filter(c => !airportCache.has(c));
+      if (todo.length) {
+        try {
+          const found = await (await fetch(`/api/airports?codes=${todo.join(',')}`)).json();
+          for (const c of todo) airportCache.set(c, found[c] || null);
+        } catch { return; }
+      }
+      const known = [...codes].map(c => [c, airportCache.get(c)]).filter(([, a]) => a);
+      const box = $('evPlace');
+      if (!box || !known.length) return;
+      const loc = (e.location || '').trim();
+      const plain = loc && !airportCache.get(loc.toUpperCase()) ? `${escapeHtml(loc)} · ` : '';
+      box.innerHTML = plain + known.map(([c, a]) => `<a href="/airport?code=${encodeURIComponent(c)}" target="_blank" rel="noopener" title="${escapeHtml(`${a.name}, ${a.city || ''} ${a.countryName || ''}`)}"><b>${escapeHtml(c)}</b> ${escapeHtml(a.city || a.name)}</a>`).join(' · ');
+      box.style.display = '';
+      box.previousElementSibling.style.display = '';
+      // A flight with UTC times: its night time on /night-time
+      const route = /([A-Z]{3,4})\s*→\s*([A-Z]{3,4})/.exec(e.summary || '');
+      if (e.kind === 'flight' && route && e.start?.utc && e.end?.utc && airportCache.get(route[1]) && airportCache.get(route[2])) {
+        const iso = (t) => `${t.y}-${pad(t.mo)}-${pad(t.d)}T${pad(t.h)}:${pad(t.mi)}Z`;
+        const q = new URLSearchParams({ dep: route[1], arr: route[2], off: iso(e.start), on: iso(e.end) });
+        box.insertAdjacentHTML('beforeend', ` · <a href="/night-time?${q}" target="_blank" rel="noopener"><i class="fa-solid fa-moon" aria-hidden="true"></i> Night time</a>`);
+      }
+    }
+
+    function showDay(n) {
+      const items = (byDay().get(n) || []);
+      if (!items.length) return;
+      const t = fromDayNum(n);
+      dayEvents = [];
+      const row = (e, cont, child) => {
+        dayEvents.push(e);
+        const s = shown(e.start);
+        const time = e.allDay ? __('All day') : cont ? __('↳ continued') : `${hm(s)}${e.end ? ` → ${hm(shown(e.end))}` : ''}`;
+        return `<div class="row${child ? ' child' : ''}" data-day-ev="${dayEvents.length - 1}"><span style="color:var(--muted);font-variant-numeric:tabular-nums">${time}</span>
+          <span><span class="dot" style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${e.cal.color};margin-right:6px"></span>${kindIcon(e)}<b>${escapeHtml(e.summary)}</b>${isTentative(e) && !child ? '<span class="badge">Planned</span>' : ''}</span></div>`;
+      };
+      const rows = items.map(({ e, cont }) => row(e, cont, false) + sortByStart(childrenOn(e, n)).map(c => row(c, false, true)).join('')).join('');
+      openModal(`<header><h3>${fmtDay(t)} · ${__('{n} events', { n: items.length })}</h3><button data-close title="${__('Close')}"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button></header>
+        <div class="body day-list">${rows}</div>`);
+    }
+    let dayEvents = [];
+
+    // ---- events ----
+    $('openBtn').addEventListener('click', () => $('fileInput').click());
+    $('fileInput').addEventListener('change', (e) => { openFiles([...e.target.files]); e.target.value = ''; });
+    const isFileDrag = (e) => [...(e.dataTransfer?.types || [])].includes('Files');
+    document.addEventListener('dragover', (e) => { if (!isFileDrag(e)) return; e.preventDefault(); document.body.classList.add('dragover'); });
+    document.addEventListener('dragleave', (e) => { if (!e.relatedTarget) document.body.classList.remove('dragover'); });
+    document.addEventListener('drop', (e) => { document.body.classList.remove('dragover'); if (!isFileDrag(e)) return; e.preventDefault(); openFiles([...e.dataTransfer.files]); });
+
+    const step = (k) => { const m = state.mo - 1 + k; state.y += Math.floor(m / 12); state.mo = ((m % 12) + 12) % 12 + 1; render(); };
+    $('prevBtn').addEventListener('click', () => step(-1));
+    $('nextBtn').addEventListener('click', () => step(1));
+    $('monthSelect').addEventListener('change', (e) => { const [y, m] = e.target.value.split('-'); state.y = +y; state.mo = +m; render(); });
+    $('tzSeg').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) { state.tz = b.dataset.tz; render(); } });
+    $('viewSeg').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) { state.view = b.dataset.view; render(); } });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') return closeModal();
+      if ($('modalBack').classList.contains('visible') || !cals.length || e.target.closest('select, input')) return;
+      if (e.key === 'ArrowLeft') step(-1);
+      if (e.key === 'ArrowRight') step(1);
+    });
+
+    $('calendar').addEventListener('click', (e) => {
+      const ev = e.target.closest('[data-ev]');
+      if (ev) return showEvent(evIndex[+ev.dataset.ev]);
+      const day = e.target.closest('[data-day]');
+      if (day) showDay(+day.dataset.day);
+    });
+    $('modalBack').addEventListener('click', (e) => {
+      if (e.target === $('modalBack') || e.target.closest('[data-close]')) return closeModal();
+      const r = e.target.closest('[data-day-ev]');
+      if (r) showEvent(dayEvents[+r.dataset.dayEv]);
+    });
+
+    $('cals').addEventListener('click', (e) => {
+      const t = e.target.closest('[data-toggle]'), rm = e.target.closest('[data-remove]'), dl = e.target.closest('[data-download]');
+      if (t) { const c = cals.find(x => x.id === t.dataset.toggle); c.on = !c.on; }
+      else if (rm) cals = cals.filter(x => x.id !== rm.dataset.remove);
+      else if (dl) {
+        const c = cals.find(x => x.id === dl.dataset.download);
+        const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([c.text], { type: 'text/calendar' })), download: `${c.name.replace(/[\\/:*?"<>|]+/g, '_')}.ics` });
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+        return;
+      } else return;
+      save();
+      render();
+    });
+    $('clearBtn').addEventListener('click', () => { cals = []; save(); render(); });
+
+    // ---- start: calendars kept in this browser, one passed from /upload, the URL's month ----
+    {
+      try {
+        for (const c of JSON.parse(store.get(STORE_KEY) || '[]')) addCalendar(c.name, c.text, { color: c.color, on: c.on, quiet: true });
+      } catch { /* nothing kept */ }
+      const handoff = store.get(HANDOFF_KEY);
+      let opened = null;
+      if (handoff) {
+        store.del(HANDOFF_KEY);
+        try { const h = JSON.parse(handoff); opened = addCalendar(h.name, h.text); } catch { /* broken handoff */ }
+      }
+      const q = new URLSearchParams(location.search);
+      if (q.get('tz') === 'local') state.tz = 'local';
+      if (q.get('view') === 'list') state.view = 'list';
+      const m = /^(\d{4})-(\d{2})$/.exec(q.get('m') || '');
+      if (opened) jumpToFirst(opened);
+      else if (m) { state.y = +m[1]; state.mo = +m[2]; }
+      else if (cals.length) jumpToFirst(cals[cals.length - 1]);
+      if (opened) save();
+      render();
+    }
+  </script>
+</body>
+</html>
