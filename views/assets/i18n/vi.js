@@ -141,7 +141,7 @@
   "VIE or 48.11, 16.57": "VIE hoặc 48.11, 16.57",
   "PRN or 42.57, 21.04": "PRN hoặc 42.57, 21.04",
   "UTC (Z)": "Giờ UTC (Z)",
-  "Night means": "Định nghĩa night",
+  "Night mode": "Chế độ ban đêm",
   "Civil twilight (sun below −6°): ICAO / EASA / FAA": "Civil twilight (mặt trời dưới −6°): ICAO / EASA / FAA",
   "Sunset → sunrise (−0.833°)": "Hoàng hôn → bình minh (−0.833°)",
   "Civil twilight (−6°): ICAO / EASA / FAA": "Civil twilight (−6°): ICAO / EASA / FAA",
