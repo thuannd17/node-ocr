@@ -9,29 +9,28 @@
   <link rel="stylesheet" href="/assets/app.css">
   <link rel="stylesheet" href="/assets/fontawesome/css/all.min.css">
   <style>
-    .btn { background: var(--primary); color: #fff; border: none; padding: 8px 14px; border-radius: 6px; cursor: pointer; font-size: 14px; white-space: nowrap; display: inline-flex; gap: 6px; align-items: center; }
+    .btn { background: var(--primary); color: #fff; border: none; padding: 7px 12px; border-radius: 6px; cursor: pointer; font-size: 13px; white-space: nowrap; display: inline-flex; gap: 6px; align-items: center; }
     .btn:hover:not(:disabled) { background: var(--primary-dark); }
     .btn:disabled { background: #ccc; cursor: not-allowed; }
     .btn.secondary { background: #fff; color: var(--primary); border: 1px solid var(--primary); }
     .btn.secondary:hover:not(:disabled) { background: #eef4ff; }
-    .btn.secondary:disabled { background: #fff; color: #bbb; border-color: #ddd; }
-    .btn.small { padding: 4px 9px; font-size: 12px; }
+    .btn.danger { background: #fff; color: #c62828; border: 1px solid #e5a3a3; }
+    .btn.danger:hover:not(:disabled) { background: #fdecea; }
+    .btn.danger.confirm, .btn.danger.confirm:hover:not(:disabled) { background: #c62828; color: #fff; border-color: #c62828; }
+    .btn.danger:disabled { background: #fff; color: #bbb; border-color: #ddd; }
 
-    .status { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; padding: 14px 16px; }
-    .status .conn { display: flex; gap: 8px; align-items: center; font-size: 14px; }
-    .status .dot { width: 10px; height: 10px; border-radius: 50%; background: #bbb; flex: none; }
-    .status .dot.ok { background: #2e7d32; }
-    .status .dot.bad { background: #c62828; }
-    .status code { font-size: 13px; }
-    .status .actions { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
-    .status .note { flex-basis: 100%; font-size: 12px; color: var(--muted); margin: 0; }
-    .counts { display: flex; gap: 8px; flex-wrap: wrap; }
+    .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 12px 14px; }
+    .conn { display: flex; gap: 8px; align-items: center; font-size: 13px; }
+    .conn code { font-size: 12px; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; background: #bbb; flex: none; }
+    .dot.ok { background: #2e7d32; }
+    .dot.bad { background: #c62828; }
+    .toolbar .right { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
+    .chips { display: flex; gap: 6px; flex-wrap: wrap; }
     .chip { font-size: 12px; border-radius: 12px; padding: 3px 10px; background: #eef1f5; color: #444; border: 1px solid transparent; cursor: pointer; }
     .chip.on { border-color: var(--primary); background: #e8f0fb; }
-    .state-synced { color: #2e7d32; }
-    .state-changed { color: #b26a00; }
-    .state-local-only { color: #6b7a90; }
-    .state-remote-only { color: #1565c0; }
+    .is-labeled { color: #2e7d32; }
+    .is-unlabeled { color: #b26a00; }
 
     .msg { display: none; margin: 12px 0; padding: 10px 14px; border-radius: 6px; font-size: 14px; }
     .msg.visible { display: block; }
@@ -39,42 +38,29 @@
     .msg.err { background: #fdecea; color: #b71c1c; }
     .msg.busy { background: #e3f2fd; color: #0d47a1; }
 
-    .layout { display: grid; grid-template-columns: minmax(280px, 380px) 1fr; gap: 16px; margin-top: 16px; align-items: start; }
+    .layout { display: grid; grid-template-columns: minmax(260px, 360px) 1fr; gap: 16px; margin-top: 16px; align-items: start; }
     @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
     .list-card { padding: 0; overflow: hidden; }
     .list-tools { display: flex; gap: 8px; padding: 10px; border-bottom: 1px solid var(--border); }
     .list-tools input, .list-tools select { padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px; min-width: 0; }
     .list-tools input { flex: 1; }
-    .items { max-height: calc(100vh - 300px); min-height: 200px; overflow-y: auto; }
+    .items { max-height: calc(100vh - 280px); min-height: 200px; overflow-y: auto; }
     .item { display: flex; gap: 8px; align-items: center; padding: 8px 12px; border-bottom: 1px solid #f0f1f4; cursor: pointer; font-size: 13px; }
     .item:hover { background: #f5f8fc; }
     .item.sel { background: #e8f0fb; }
     .item .ico { width: 18px; text-align: center; color: var(--muted); flex: none; }
     .item .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: Consolas, monospace; font-size: 12px; }
-    .item .st { font-size: 11px; white-space: nowrap; }
+    .item .st { flex: none; }
     .empty { padding: 24px; text-align: center; color: var(--muted); font-size: 14px; }
 
     .viewer { padding: 16px; min-height: 300px; }
     .viewer-head { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
-    .viewer-head h2 { margin: 0; font-size: 16px; font-family: Consolas, monospace; word-break: break-all; }
-    .viewer-head .meta { font-size: 12px; color: var(--muted); flex-basis: 100%; }
-    .viewer-head .acts { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; }
-    .viewer-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: 16px; }
-    @media (max-width: 1300px) { .viewer-body { grid-template-columns: 1fr; } }
-    .preview { border: 1px solid var(--border); border-radius: 6px; background: #fafbfc; overflow: auto; max-height: 75vh; }
-    .preview img { display: block; max-width: 100%; height: auto; }
-    .preview iframe { display: block; width: 100%; height: 70vh; border: 0; background: #fff; }
-    .label-box h3 { font-size: 14px; margin: 0 0 6px; color: var(--nav-bg); }
-    .label-box h3 + .tbl-wrap { margin-bottom: 14px; }
-    .label-box .period { font-size: 13px; margin-bottom: 10px; color: #444; }
-    .tbl-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 6px; }
-    table.rows { border-collapse: collapse; width: 100%; font-size: 12px; }
-    table.rows th, table.rows td { padding: 4px 8px; border-bottom: 1px solid #eef0f3; text-align: left; white-space: nowrap; }
-    table.rows th { background: #f5f7fa; position: sticky; top: 0; font-weight: 600; }
-    table.rows td.info { white-space: normal; min-width: 180px; color: #555; }
-    .raw { margin-top: 8px; }
-    .raw summary { cursor: pointer; font-size: 13px; color: var(--primary); }
-    .raw pre { max-height: 300px; overflow: auto; font-size: 11px; background: #f7f8fa; padding: 8px; border-radius: 6px; }
+    .viewer-head h2 { margin: 0; font-size: 15px; font-family: Consolas, monospace; word-break: break-all; }
+    .viewer-head .meta { font-size: 12px; color: var(--muted); }
+    .viewer-head .acts { margin-left: auto; }
+    .preview { border: 1px solid var(--border); border-radius: 6px; background: #fafbfc; overflow: auto; max-height: calc(100vh - 260px); }
+    .preview img { display: block; max-width: 100%; height: auto; margin: 0 auto; }
+    .preview iframe { display: block; width: 100%; height: calc(100vh - 280px); border: 0; background: #fff; }
   </style>
 </head>
 <body>
@@ -82,17 +68,16 @@
   <main class="page">
     <div class="page-header">
       <h1><i class="fa-solid fa-photo-film" aria-hidden="true"></i> Media</h1>
-      <p class="subtitle" data-i18n>The roster files (images, PDFs, CSV, Excel, TXT) and their ground-truth labels, kept in MinIO. Files and labels shown here are read from there; this app only keeps a local mirror for OCR, training and benchmarks.</p>
+      <p class="subtitle" data-i18n>The roster files kept in MinIO. A deleted file goes to the trash in MinIO, so a wrong delete can be undone there.</p>
     </div>
 
-    <div class="card status" id="status">
+    <div class="card toolbar">
       <div class="conn"><span class="dot" id="dot"></span> <span id="connText">Checking MinIO…</span></div>
-      <div class="counts" id="counts"></div>
-      <div class="actions">
-        <button class="btn secondary" id="syncBtn" title="Download what changed in MinIO into the local mirror now (it also happens by itself before listing files, training and benchmarks)"><i class="fa-solid fa-arrows-rotate" aria-hidden="true"></i> <span>Sync the mirror</span></button>
+      <div class="chips" id="chips"></div>
+      <div class="right">
+        <button class="btn danger" id="delUnlabeledBtn" disabled><i class="fa-solid fa-trash-can" aria-hidden="true"></i> <span id="delUnlabeledText">Delete all unlabeled</span></button>
         <button class="btn secondary" id="refreshBtn" title="Refresh"><i class="fa-solid fa-rotate" aria-hidden="true"></i></button>
       </div>
-      <p class="note" id="statusNote"></p>
     </div>
     <div id="msg" class="msg"></div>
 
@@ -109,7 +94,7 @@
         <div class="items" id="items"><div class="empty">Loading…</div></div>
       </div>
       <div class="card viewer" id="viewer">
-        <div class="empty">Choose a file on the left to see it and its label, as MinIO keeps them.</div>
+        <div class="empty">Choose a file on the left to preview it.</div>
       </div>
     </div>
   </main>
@@ -118,13 +103,10 @@
     const $ = (id) => document.getElementById(id);
     const escapeHtml = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[c]));
     const fmtSize = (b) => (b == null ? '' : b >= 1048576 ? `${(b / 1048576).toFixed(1)} MB` : `${Math.round(b / 1024)} KB`);
-    const STATE = {
-      labeled: { icon: 'fa-circle-check', text: 'Labeled' },
-      unlabeled: { icon: 'fa-circle', text: 'Not labeled' },
-    };
-    const stateOf = (i) => (i.labeled ? 'labeled' : 'unlabeled');
-    const FIELD_ORDER = ['date', 'day', 'dc', 'duty', 'registration', 'dep', 'begin', 'end', 'arr', 'ac', 'crew', 'info'];
-    let items = [], status = null, selected = null, stateFilter = '', working = false;
+    const badge = (i) => i.labeled
+      ? `<span class="is-labeled"><i class="fa-solid fa-circle-check" aria-hidden="true"></i> ${__('Labeled')}</span>`
+      : `<span class="is-unlabeled"><i class="fa-regular fa-circle" aria-hidden="true"></i> ${__('Not labeled')}</span>`;
+    let items = [], ok = false, selected = null, stateFilter = '', working = false;
 
     function showMsg(text, kind = 'ok') {
       const m = $('msg');
@@ -141,136 +123,144 @@
       return data;
     }
 
+    // A delete button asks once more on the button itself (no browser dialog): the second click within 5 s deletes.
+    function armed(btn, confirmText, run) {
+      btn.addEventListener('click', async () => {
+        if (working || btn.disabled) return;
+        if (!btn.classList.contains('confirm')) {
+          btn.dataset.text = btn.querySelector('span').textContent;
+          btn.classList.add('confirm');
+          btn.querySelector('span').textContent = typeof confirmText === 'function' ? confirmText() : confirmText;
+          clearTimeout(btn._t);
+          btn._t = setTimeout(() => disarm(btn), 5000);
+          return;
+        }
+        disarm(btn);
+        await run();
+      });
+    }
+    function disarm(btn) {
+      clearTimeout(btn._t);
+      if (!btn.classList.contains('confirm')) return;
+      btn.classList.remove('confirm');
+      btn.querySelector('span').textContent = btn.dataset.text;
+    }
+
     async function loadStatus() {
-      status = await getJson('/api/media/status');
+      const status = await getJson('/api/media/status');
       const svc = status.service || {};
-      $('dot').className = 'dot ' + (svc.ok ? 'ok' : 'bad');
+      ok = !!svc.ok;
+      $('dot').className = 'dot ' + (ok ? 'ok' : 'bad');
       const store = svc.backend === 'minio'
         ? `MinIO <code>${escapeHtml(svc.endpoint)}</code> · ${__('bucket')} <code>${escapeHtml(svc.bucket)}</code>`
         : svc.backend === 'fs' ? `${__('folder')} <code>${escapeHtml(svc.dir)}</code>` : '';
-      $('connText').innerHTML = svc.ok
-        ? store
-        : `${store}: ${escapeHtml(__(svc.error || 'not reachable'))}`;
-      const m = status.mirror || {};
-      $('statusNote').innerHTML = `${__('Local mirror')}: <code>${escapeHtml(m.dir)}</code>`
-        + (m.lastSyncAt ? ` · ${__('last sync {when}', { when: new Date(m.lastSyncAt).toLocaleString() })}` : ` · ${__('not synced yet')}`)
-        + (m.error ? ` · <span style="color:#c62828">${escapeHtml(__(m.error))}</span>` : '');
-      $('syncBtn').disabled = !svc.ok || working;
+      $('connText').innerHTML = ok ? store : `${store}: ${escapeHtml(__(svc.error || 'not reachable'))}`;
     }
 
     async function loadItems() {
-      if (!status?.service?.ok) { items = []; renderCounts(); renderItems(); return; }
-      const data = await getJson('/api/media/items');
-      items = data.items;
-      renderCounts();
-      renderItems();
-      if (selected) {
-        const again = items.find(i => i.name === selected.name);
-        if (again) { selected = again; renderViewerHead(); }
-      }
+      items = ok ? (await getJson('/api/media/items')).items : [];
+      if (selected && !items.some(i => i.name === selected.name)) selected = null;
+      render();
     }
 
-    function renderCounts() {
-      const c = status?.counts;
-      if (!status?.service?.ok || !c) { $('counts').innerHTML = ''; return; }
+    const kindOk = (i) => !$('kind').value || i.kind === $('kind').value;
+    const stateOk = (i) => !stateFilter || (stateFilter === 'labeled') === i.labeled;
+
+    function render() {
+      const pool = items.filter(kindOk);
       const chip = (key, label, n) => `<span class="chip${stateFilter === key ? ' on' : ''}" data-state="${key}">${label} <b>${n}</b></span>`;
-      $('counts').innerHTML = chip('', __('All'), items.length)
-        + Object.entries(STATE).map(([k, v]) => chip(k, `<i class="fa-solid ${v.icon} state-${k}" aria-hidden="true"></i> ${__(v.text)}`, items.filter(i => stateOf(i) === k).length)).join('')
-        + `<span class="chip" style="cursor:default">${fmtSize(c.bytes)}</span>`;
+      $('chips').innerHTML = ok ? chip('', __('All'), pool.length)
+        + chip('labeled', `<i class="fa-solid fa-circle-check is-labeled" aria-hidden="true"></i> ${__('Labeled')}`, pool.filter(i => i.labeled).length)
+        + chip('unlabeled', `<i class="fa-regular fa-circle is-unlabeled" aria-hidden="true"></i> ${__('Not labeled')}`, pool.filter(i => !i.labeled).length) : '';
+
+      const unlabeled = pool.filter(i => !i.labeled).length;
+      disarm($('delUnlabeledBtn'));
+      $('delUnlabeledBtn').disabled = !ok || !unlabeled || working;
+      $('delUnlabeledText').textContent = __('Delete all unlabeled ({n})', { n: unlabeled });
+
+      const q = $('search').value.trim().toLowerCase();
+      const shown = pool.filter(i => stateOk(i) && (!q || i.name.toLowerCase().includes(q)));
+      if (!ok) $('items').innerHTML = `<div class="empty">${__('The data store is not available.')}</div>`;
+      else if (!shown.length) $('items').innerHTML = `<div class="empty">${items.length ? __('No file matches.') : __('No roster file yet.')}</div>`;
+      else $('items').innerHTML = shown.map(i => `<div class="item${selected?.name === i.name ? ' sel' : ''}" data-name="${escapeHtml(i.name)}" title="${escapeHtml(i.name)}">
+          <i class="ico fa-regular ${i.kind === 'image' ? 'fa-image' : i.ext === 'pdf' ? 'fa-file-pdf' : 'fa-file-lines'}" aria-hidden="true"></i>
+          <span class="nm">${escapeHtml(i.name)}</span>
+          <span class="st" title="${i.labeled ? __('Labeled') : __('Not labeled')}">${i.labeled
+            ? '<i class="fa-solid fa-circle-check is-labeled" aria-hidden="true"></i>'
+            : '<i class="fa-regular fa-circle is-unlabeled" aria-hidden="true"></i>'}</span>
+        </div>`).join('');
+      if (!selected) $('viewer').innerHTML = `<div class="empty">${__('Choose a file on the left to preview it.')}</div>`;
     }
-    $('counts').addEventListener('click', (e) => {
+
+    $('chips').addEventListener('click', (e) => {
       const c = e.target.closest('.chip[data-state]');
       if (!c) return;
       stateFilter = c.dataset.state;
-      $('counts').querySelectorAll('.chip').forEach(x => x.classList.toggle('on', x === c));
-      renderItems();
+      render();
     });
-
-    function renderItems() {
-      const q = $('search').value.trim().toLowerCase(), kind = $('kind').value;
-      const shown = items.filter(i => (!q || i.name.toLowerCase().includes(q)) && (!kind || i.kind === kind) && (!stateFilter || stateOf(i) === stateFilter));
-      if (!status?.service?.ok) { $('items').innerHTML = `<div class="empty">${__('The data store is not available.')}</div>`; return; }
-      if (!shown.length) { $('items').innerHTML = `<div class="empty">${items.length ? __('No file matches.') : __('No roster file yet.')}</div>`; return; }
-      $('items').innerHTML = shown.map(i => `<div class="item${selected?.name === i.name ? ' sel' : ''}" data-name="${escapeHtml(i.name)}" title="${escapeHtml(i.name)}">
-          <i class="ico fa-regular ${i.kind === 'image' ? 'fa-image' : i.ext === 'pdf' ? 'fa-file-pdf' : 'fa-file-lines'}" aria-hidden="true"></i>
-          <span class="nm">${escapeHtml(i.name)}</span>
-          <span class="st state-${stateOf(i)}"><i class="fa-solid ${STATE[stateOf(i)].icon}" aria-hidden="true"></i> ${__(STATE[stateOf(i)].text)}</span>
-        </div>`).join('');
-    }
-    $('search').addEventListener('input', renderItems);
-    $('kind').addEventListener('change', renderItems);
+    $('search').addEventListener('input', render);
+    $('kind').addEventListener('change', render);
     $('items').addEventListener('click', (e) => {
       const row = e.target.closest('.item');
       if (row) openItem(items.find(i => i.name === row.dataset.name));
     });
 
-    function renderViewerHead() {
-      const i = selected, head = document.querySelector('.viewer-head');
-      if (!i || !head) return;
-      head.innerHTML = `<h2>${escapeHtml(i.name)}</h2>
-        <div class="acts">
-          <a class="btn small secondary" href="/label?name=${encodeURIComponent(i.name)}" target="_blank" rel="noopener"><i class="fa-solid fa-tags" aria-hidden="true"></i> ${__('Open in Label')}</a>
-        </div>
-        <div class="meta"><span class="state-${stateOf(i)}"><i class="fa-solid ${STATE[stateOf(i)].icon}" aria-hidden="true"></i> ${__(STATE[stateOf(i)].text)}</span>
-          · ${fmtSize(i.size)}${i.lastModified ? ' · ' + __('changed {when}', { when: new Date(i.lastModified).toLocaleString() }) : ''}
-          · ${i.cached ? __('in the local mirror') : __('not in the local mirror yet')}</div>`;
-    }
-
-    async function openItem(i) {
+    function openItem(i) {
       if (!i) return;
       selected = i;
-      renderItems();
-      const v = $('viewer');
-      v.innerHTML = `<div class="viewer-head"></div><div class="viewer-body"><div class="preview" id="preview"></div><div class="label-box" id="labelBox"></div></div>`;
-      renderViewerHead();
+      document.querySelectorAll('.item').forEach(el => el.classList.toggle('sel', el.dataset.name === i.name));
       const src = `/api/media/file?name=${encodeURIComponent(i.name)}`;
-      $('preview').innerHTML = i.kind === 'image' ? `<img src="${src}" alt="${escapeHtml(i.name)}">` : `<iframe src="${src}" title="${escapeHtml(i.name)}"></iframe>`;
-      const box = $('labelBox');
-      if (!i.labeled) { box.innerHTML = `<div class="empty">${__('No label yet: label it on /label.')}</div>`; return; }
-      box.innerHTML = `<div class="empty">${__('Loading the label…')}</div>`;
-      try {
-        const label = await getJson(`/api/media/label?name=${encodeURIComponent(i.name)}`);
-        if (selected !== i) return;
-        box.innerHTML = renderLabel(label);
-      } catch (err) {
-        box.innerHTML = `<div class="msg visible err">${escapeHtml(err.message)}</div>`;
-      }
+      $('viewer').innerHTML = `<div class="viewer-head">
+          <h2>${escapeHtml(i.name)}</h2>
+          <span class="meta">${badge(i)} · ${fmtSize(i.size)}${i.lastModified ? ' · ' + __('changed {when}', { when: new Date(i.lastModified).toLocaleString() }) : ''}</span>
+          <div class="acts"><button class="btn danger" id="delBtn"><i class="fa-solid fa-trash-can" aria-hidden="true"></i> <span>${__('Delete')}</span></button></div>
+        </div>
+        <div class="preview">${i.kind === 'image' ? `<img src="${src}" alt="${escapeHtml(i.name)}">` : `<iframe src="${src}" title="${escapeHtml(i.name)}"></iframe>`}</div>`;
+      armed($('delBtn'), i.labeled ? __('Its label goes too. Click again') : __('Click again to delete'), () => deleteOne(i));
     }
 
-    function rowsTable(rows) {
-      if (!rows?.length) return `<div class="empty">${__('No rows')}</div>`;
-      const present = new Set(rows.flatMap(r => Object.keys(r)));
-      const cols = [...FIELD_ORDER.filter(f => present.has(f)), ...[...present].filter(f => !FIELD_ORDER.includes(f) && !f.startsWith('_'))];
-      return `<div class="tbl-wrap"><table class="rows"><thead><tr><th>#</th>${cols.map(c => `<th>${escapeHtml(c)}</th>`).join('')}</tr></thead><tbody>${
-        rows.map((r, n) => `<tr><td>${n + 1}</td>${cols.map(c => `<td${c === 'info' ? ' class="info"' : ''}>${escapeHtml(r[c])}</td>`).join('')}</tr>`).join('')
-      }</tbody></table></div>`;
-    }
-
-    function renderLabel(label) {
-      const reviewed = label._reviewedAt ? ` · ${__('reviewed {when}', { when: new Date(label._reviewedAt).toLocaleString() })}` : '';
-      return `${label.period ? `<div class="period">${__('Period')}: <b>${escapeHtml(label.period)}</b>${reviewed}</div>` : reviewed ? `<div class="period">${reviewed.slice(3)}</div>` : ''}
-        <h3>${__('Published roster')} (${label.published?.length || 0})</h3>${rowsTable(label.published)}
-        <h3>${__('Rest of this roster is planned')} (${label.planned?.length || 0})</h3>${rowsTable(label.planned)}
-        <details class="raw"><summary>${__('Label JSON')}</summary><pre>${escapeHtml(JSON.stringify(label, null, 2))}</pre></details>`;
-    }
-
-    $('syncBtn').addEventListener('click', async () => {
-      if (working) return;
+    async function deleteOne(i) {
       working = true;
-      $('syncBtn').disabled = true;
-      showMsg(__('Syncing the local mirror…'), 'busy');
       try {
-        const r = await getJson('/api/media/sync', { method: 'POST' });
-        showMsg(__('Mirror up to date: {n} downloaded, {removed} removed ({files} files, {labels} labels).', { n: r.downloaded, removed: r.removed, files: r.files, labels: r.labels }));
+        await getJson(`/api/media/file?name=${encodeURIComponent(i.name)}`, { method: 'DELETE' });
+        const at = items.indexOf(i);
+        items.splice(at, 1);
+        selected = null;
+        working = false;
+        render();
+        showMsg(__('Deleted {name} (moved to the trash in MinIO).', { name: i.name }));
+        // keep going down the list: open the next file the list shows
+        const next = [...document.querySelectorAll('.item')].map(el => items.find(x => x.name === el.dataset.name))
+          .find(x => items.indexOf(x) >= at);
+        if (next) openItem(next);
       } catch (err) {
         showMsg(err.message, 'err');
       } finally {
         working = false;
-        await refresh();
+      }
+    }
+
+    armed($('delUnlabeledBtn'), () => __('Click again to delete {n} files', { n: items.filter(i => kindOk(i) && !i.labeled).length }), async () => {
+      working = true;
+      $('delUnlabeledBtn').disabled = true;
+      showMsg(__('Deleting the unlabeled files…'), 'busy');
+      try {
+        const r = await getJson('/api/media/delete-unlabeled', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: $('kind').value }),
+        });
+        if (r.failed.length) showMsg(__('{n} failed: {list}', { n: r.failed.length, list: r.failed.map(f => f.name).join(', ') }), 'err');
+        else showMsg(__('Deleted {n} unlabeled files (moved to the trash in MinIO).', { n: r.deleted }));
+      } catch (err) {
+        showMsg(err.message, 'err');
+      } finally {
+        working = false;
+        if (selected && !selected.labeled) selected = null;
+        await refresh(false);
       }
     });
 
-    async function refresh() {
+    async function refresh(clear = true) {
+      if (clear) hideMsg();
       try {
         await loadStatus();
         await loadItems();
@@ -278,7 +268,7 @@
         showMsg(err.message, 'err');
       }
     }
-    $('refreshBtn').addEventListener('click', () => { hideMsg(); refresh(); });
+    $('refreshBtn').addEventListener('click', () => refresh());
     refresh().then(() => {
       const name = new URLSearchParams(location.search).get('name');
       if (name) openItem(items.find(i => i.name === name));
