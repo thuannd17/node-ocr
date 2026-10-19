@@ -13,6 +13,9 @@
  *   duty-report    Staff Number | ... | Duty_CD | Flight Number | Dep Arp | Arr Arp | Fleet | Tail Number | Act Start Date | Act Start Time ...
  *   ac-logbook     "Air Canada Logbook": Date | Type | Reg | FIN | Flt# | ... | Station | Time(L) | Station | Time(L) ...
  *   block-log      Departure | Arrival | Off Block | On Block | Block | ... | Aircraft | Model ...  (ICAO airports, "27.07.2025 11:41")
+ *   crew-legs      one row per leg: Flt_Nbr | Dprt_Arpt_Cd | Arr_Arpt_Cd | Actl_Crew_Schlg_Ac_Typ_Cd | schld_/actl_ ..._lcl_dttm |
+ *                  Actl_Duty_Rpt_Lcl_Dttm | Actl_Duty_Rls_Lcl_Dttm (all local: "A08:55 L" actual, else "E09:00 L" scheduled; C/I, C/O)
+ *                  info "[Pairing: 0178] [Block: 01:24]" on a flight, "[Pairing: 0178] [Layover: 20:51]" on a C/O (minutes columns)
  *   raido          Raido "Performed Activities": Date | Des. | Code | ... | Dep | Arr | CI | STD | ATD | STA | ATA | CO
  * Rows follow the labels' conventions (services/pdf-roster-parser.js): date "1 Aug 24",
  * day "Thu", times "HH:MM Z" (or L when the file says local), "+1" only where the
@@ -252,6 +255,85 @@ const LAYOUTS = [
           _marks: [['date', off.dateCell], ['begin', off.timeCell], ['dep', c('dep')], ['arr', c('arr')], ['end', on.timeCell], ['ac', c('ac')], ['registration', c('registration')], ['info', c('block')]],
         });
       }
+      return out;
+    },
+  },
+  {
+    name: 'crew-legs',
+    // one row per leg, US airline export: Flt_Nbr | Dprt_Arpt_Cd | Arr_Arpt_Cd | Actl_Crew_Schlg_Ac_Typ_Cd |
+    // schld_/actl_ dprt_/arr_ lcl_/gmt_ dttm ("2026-07-16 09:00:00") | Actl_Duty_Rpt_Lcl_Dttm | Actl_Duty_Rls_Lcl_Dttm ...
+    find(h) {
+      const lower = h.map(t => t.toLowerCase());
+      const at = (n) => (lower.includes(n) ? lower.indexOf(n) : null);
+      if (!['flt_nbr', 'dprt_arpt_cd', 'arr_arpt_cd', 'schld_dprt_lcl_dttm', 'schld_arr_lcl_dttm'].every(n => lower.includes(n))) return null;
+      return {
+        date: at('flt_orig_dt'), flight: at('flt_nbr'), dep: at('dprt_arpt_cd'), arr: at('arr_arpt_cd'), ac: at('actl_crew_schlg_ac_typ_cd'),
+        rotation: at('rotn_beg_dt'), pairing: at('rotn_prng_nbr'), dutyPeriod: at('duty_perd_id'),
+        std: at('schld_dprt_lcl_dttm'), sta: at('schld_arr_lcl_dttm'), atd: at('actl_dprt_lcl_dttm'), ata: at('actl_arr_lcl_dttm'),
+        report: at('actl_duty_rpt_lcl_dttm'), release: at('actl_duty_rls_lcl_dttm'),
+        block: at('actl_leg_blk_tm_mnt_cnt'), schedBlock: at('schld_leg_blk_tm_mnt_cnt'), layover: at('duty_layovr_tm_mnt_cnt'),
+      };
+    },
+    // Every time in local (the file has GMT too): begin/end are the actual times ("A08:55 L"), or the
+    // scheduled ones ("E09:00 L") when a leg has no actual time yet. A duty period (the same
+    // rotation + duty period id on its legs) gets a C/I row from its report time before its first leg
+    // and a C/O row from its release time after its last one. "+1" when a time falls on a later day.
+    // Info: "[Pairing: 0178]" (Rotn_Prng_Nbr) on every flight and C/O; "[Block: 01:24]" on a flight
+    // (actual block minutes, else scheduled); "[Layover: 20:51]" on the C/O when the duty period has one.
+    rows(data, cols) {
+      const out = [];
+      // "2026-07-16 09:00:00": the date and the time are one cell; each part is marked on its own
+      const stamp = (cell) => {
+        const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/.exec(cell.text);
+        if (!m) return null;
+        const it = cell.items[0], off = cell.text.indexOf(' ') + 1;
+        return {
+          day: dayOf(+m[3], +m[2] - 1, +m[1]), hhmm: `${m[4]}${m[5]}`,
+          timeCell: { items: it ? [{ ...it, text: cell.text.slice(off, off + 5), _src: it, _off: off }] : [] },
+        };
+      };
+      const isoDay = (cell) => {
+        const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(cell.text);
+        return m ? dayOf(+m[3], +m[2] - 1, +m[1]) : null;
+      };
+      const time = (s, prefix, from) => (s ? formatTime(`${prefix}${s.hhmm}`, 'L') + (from && s.day.ymd > from.ymd ? ' +1' : '') : '');
+      // minutes ("84", "1251") -> "01:24", "20:51"; 0 or blank -> ''
+      const hhmm = (text) => (/^\d+$/.test(text) && +text > 0 ? `${String(Math.floor(+text / 60)).padStart(2, '0')}:${String(+text % 60).padStart(2, '0')}` : '');
+      const tags = (...parts) => parts.filter(([, v]) => v).map(([k, v]) => `[${k}: ${v}]`).join(' ');
+      let open = null; // the duty period now running: { key, release, date, pairing, layover }
+      const close = () => {
+        if (open?.release) {
+          out.push({
+            ...open.date, duty: 'C/O', end: time(open.release, '', open.date),
+            info: tags(['Pairing', open.pairing.text], ['Layover', hhmm(open.layover.text)]),
+            _marks: [['co', open.release.timeCell], ['info', open.pairing], ['info', hhmm(open.layover.text) ? open.layover : null]],
+          });
+        }
+        open = null;
+      };
+      for (const row of data) {
+        const c = (k) => cellOf(row, cols[k]);
+        const sched = [stamp(c('std')), stamp(c('sta'))], actual = [stamp(c('atd')), stamp(c('ata'))];
+        const d = isoDay(c('date')) || sched[0]?.day;
+        if (!d || !c('flight').text || !AIRPORT_RE.test(c('dep').text)) continue;
+        const key = [c('rotation').text, c('pairing').text, c('dutyPeriod').text].join('|');
+        if (!open || open.key !== key) {
+          close();
+          const report = stamp(c('report'));
+          open = { key, release: stamp(c('release')), date: report?.day || d, pairing: c('pairing'), layover: c('layover') };
+          if (report) out.push({ ...open.date, duty: 'C/I', begin: time(report, ''), _marks: [['date', c('date')], ['ci', report.timeCell]] });
+        }
+        const [b, e] = [actual[0] ? [actual[0], 'A'] : [sched[0], 'E'], actual[1] ? [actual[1], 'A'] : [sched[1], 'E']];
+        const block = hhmm(c('block').text) ? c('block') : c('schedBlock');
+        out.push({
+          ...d, duty: c('flight').text, dep: c('dep').text, arr: c('arr').text,
+          begin: time(b[0], b[1], d), end: time(e[0], e[1], d), ac: c('ac').text,
+          info: tags(['Pairing', c('pairing').text], ['Block', hhmm(block.text)]),
+          _marks: [['date', c('date')], ['duty', c('flight')], ['dep', c('dep')], ['arr', c('arr')],
+            ['begin', b[0]?.timeCell], ['end', e[0]?.timeCell], ['ac', c('ac')], ['info', c('pairing')], ['info', hhmm(block.text) ? block : null]],
+        });
+      }
+      close();
       return out;
     },
   },
