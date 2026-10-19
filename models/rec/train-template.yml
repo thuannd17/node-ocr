@@ -13,7 +13,7 @@ Global:
   save_epoch_step: 10
   eval_batch_step: [0, 100]
   cal_metric_during_train: true
-  pretrained_model: ./models/pretrained/en_PP-OCRv3_rec_train/best_accuracy
+  pretrained_model: __PRETRAINED__/en_PP-OCRv3_rec_train/best_accuracy
   checkpoints:
   save_inference_dir:
   use_visualdl: false

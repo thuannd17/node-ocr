@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import '../views/assets/ics.js';
+import '../src/views/assets/ics.js';
 
 const { rowsToIcs, parseIcs, timesOf } = globalThis.RosterIcs;
 const at = (t) => `${t.y}-${t.mo}-${t.d} ${t.h}:${t.mi}${t.utc ? 'Z' : ''}`;

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 globalThis.SunCalc = createRequire(import.meta.url)('suncalc');
-await import('../views/assets/night.js');
+await import('../src/views/assets/night.js');
 
 const { compute, pointAt, distanceKm, hmm } = globalThis.NightTime;
 const VIE = { lat: 48.1103, lon: 16.5697 }, PRN = { lat: 42.5728, lon: 21.0358 };

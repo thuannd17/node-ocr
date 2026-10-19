@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
-import airportsApi from '../routes/airports-api.js';
+import airportsApi from '../src/routes/airports-api.js';
 
 const app = express().use('/api/airports', airportsApi);
 const server = app.listen(0);

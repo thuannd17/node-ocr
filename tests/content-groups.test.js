@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { dataFile, labelFile } from '../utils/data-files.js';
-import { groupByContent, pickCanonicalLabels, splitByGroup, rosterClusters, assignFolds } from '../utils/content-groups.js';
+import { dataFile, labelFile } from '../src/utils/data-files.js';
+import { groupByContent, pickCanonicalLabels, splitByGroup, rosterClusters, assignFolds } from '../src/utils/content-groups.js';
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'node-ocr-groups-'));
 const imgDir = path.join(root, 'img');

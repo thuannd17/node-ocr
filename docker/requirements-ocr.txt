@@ -1,0 +1,9 @@
+# Python packages of the OCR server image (docker/ocr.Dockerfile), besides Paddle itself, which the
+# Dockerfile installs from its PADDLE build arg: paddlepaddle==3.0.0 (CPU) or paddlepaddle-gpu==3.0.0 (CUDA 11.8).
+# Same PaddleOCR as scripts/requirements.txt (the Windows GPU stack).
+paddleocr==2.9.1
+numpy==1.26.4
+pypdfium2==5.13.0
+Pillow==11.3.0
+python-dotenv>=1.0.0
+minio==7.2.20                # the recognition model is downloaded from MinIO (scripts/rec_model.py)

@@ -1,0 +1,44 @@
+# Keep the build context small and free of personal data and secrets.
+.git
+.gitignore
+.dockerignore
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+google_vision.json
+**/node_modules
+.venv
+__pycache__
+**/__pycache__
+*.pyc
+.idea
+.vscode
+.claude
+
+# Roster data (real crew rosters): the old local folders, now in MinIO; never in an image
+fake-data
+labels
+suggestions
+media-data
+
+# Generated
+tmp
+cache
+exports
+*.log
+
+# Models: only what the apps need is copied (see the Dockerfiles)
+models/ai
+models/pdf-tagger
+models/pdf-tagger-next
+models/pdf-tagger-prev
+models/pretrained
+models/kfold
+models/rec/_pending
+models/rec/*/checkpoint
+models/rec/*/split.json
+models/rec/v5
+models/rec/v6
+models/rec/v7

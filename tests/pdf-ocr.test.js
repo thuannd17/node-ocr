@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ocrDataToPage } from '../services/pdf-ocr.js';
-import { parseNetlinePdf } from '../services/pdf-roster-parser.js';
+import { ocrDataToPage } from '../src/services/pdf-ocr.js';
+import { parseNetlinePdf } from '../src/services/pdf-roster-parser.js';
 
 // OCR answer in pixels at scale 2 (px per pt), with the slips seen on a real
 // image-only plan: header words missing/merged, "Sa227", "Peri0d:", "8325",

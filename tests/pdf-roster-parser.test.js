@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseNetlinePdf, formatTime } from '../services/pdf-roster-parser.js';
+import { parseNetlinePdf, formatTime } from '../src/services/pdf-roster-parser.js';
 
 // Synthetic page with the NetLine/Crew coordinates (block 1 only); the real
 // sample PDFs are personal data and stay out of git.

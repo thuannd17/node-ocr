@@ -1,0 +1,26 @@
+# OCR on the NVIDIA GPU (on top of docker-compose.yml):
+#
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
+#
+# Needs an NVIDIA driver with WSL 2 / Linux container support (Docker Desktop on Windows, or the
+# NVIDIA container toolkit on Linux). Check with:
+#   docker run --rm --gpus all nvidia/cuda:11.8.0-base-ubuntu22.04 nvidia-smi
+# Stop the OCR server running outside Docker first if it uses the same GPU (6 GB on a GTX 1660 Ti).
+
+services:
+  ocr:
+    build:
+      args:
+        PADDLE: paddlepaddle-gpu==3.0.0
+        PADDLE_INDEX: https://www.paddlepaddle.org.cn/packages/stable/cu118/
+        OCR_DEVICE: gpu
+    image: roster-ocr-ocr-gpu:latest
+    environment:
+      OCR_DEVICE: gpu
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]

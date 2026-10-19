@@ -1,0 +1,61 @@
+# Roster OCR: the web app and the PaddleOCR server.
+#
+#   docker compose up -d --build                                  CPU OCR, http://localhost:3000
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build    OCR on the NVIDIA GPU
+#   APP_PORT=3004 docker compose up -d                            when port 3000 is taken
+#
+# Settings come from .env (the same file as `npm start`); the lines under
+# `environment:` win over it because inside the containers the hosts differ. MinIO runs in its own
+# container on the host (port 9000), reached through host.docker.internal.
+#
+# The roster data and the trained AI models live only in MinIO. The app keeps its mirror of them and
+# its caches in the work volume (/work), which the OCR server reads too (the app sends it file paths).
+
+services:
+  app:
+    build: .
+    image: roster-ocr-app:latest
+    env_file: .env
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3000
+      OCR_SERVER_URL: http://ocr:8501
+      MINIO_ENDPOINT: host.docker.internal
+      ROSTER_WORK_DIR: /work
+    ports:
+      - "${APP_PORT:-3000}:3000"
+    volumes:
+      - work:/work
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - ocr
+    restart: unless-stopped
+
+  ocr:
+    build:
+      context: .
+      dockerfile: docker/ocr.Dockerfile
+    image: roster-ocr-ocr:latest
+    environment:
+      OCR_MAX_QUEUE: 4
+      # the recognition model in use is downloaded from MinIO at start (src/scripts/rec_model.py)
+      MINIO_ENDPOINT: host.docker.internal
+      MINIO_PORT: ${MINIO_PORT:-9000}
+      MINIO_USE_SSL: ${MINIO_USE_SSL:-false}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-}
+      MINIO_BUCKET: ${MINIO_BUCKET:-roster-ocr}
+      OCR_REC_VERSION: ${OCR_REC_VERSION:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      # The app sends file paths to /ocr (uploads, the media mirror): the same /work as in the app container.
+      # Written to as well: the OCR model is downloaded into /work/models/rec.
+      - work:/work
+      - paddle-models:/home/ocr/.paddleocr
+    restart: unless-stopped
+
+volumes:
+  work:
+  paddle-models:

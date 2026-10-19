@@ -22,6 +22,7 @@ Thumbs.db
 nul
 
 # ---- Generated data (rebuilt by the scripts) ----
+# Since 2026-10-19 the app writes these outside the project (ROSTER_WORK_DIR, utils/paths.js); kept as a guard
 tmp/
 cache/
 exports/
@@ -31,28 +32,19 @@ exports/
 # Images/PDFs (fake-data/<ext>/<guid>.<ext>) and their labels (labels/<ext>/) stay local.
 fake-data/
 labels/
+# Correction suggestions sent from /upload (suggestions/<id>/: the roster file + meta.json)
+suggestions/
+# Since 2026-10-19 the folders above are only the old local data (npm run media:import moved it to MinIO).
+# MEDIA_BACKEND=fs (no MinIO) keeps its objects here
+media-data/
 
 # ---- Models ----
-# Keep only what the app needs to run + small metadata:
-#   models/parser-patterns.json, models/dict/, models/rec/train-template.yml,
-#   models/rec/*/model.json, and the inference weights of
-#   models/rec/stock (baseline for ocr:train) and models/rec/v4 (deployed, see .env).
+# Only configuration is kept here: models/parser-patterns.json, models/dict/, models/rec/train-template.yml.
+# Since 2026-10-19 every trained model lives in MinIO (models/rec/<ver>/, models/ai/<id>/, checkpoints)
+# and is mirrored into ROSTER_WORK_DIR; pretrained/kfold are there too. Guard against old copies:
 models/pretrained/
 models/kfold/
-models/rec/_pending/
-models/rec/*/checkpoint/
-# Training splits list roster image names (personal data)
-models/rec/*/split.json
-# Rejected versions (see their local model.json); their metadata lists image names
-models/rec/v5/
-models/rec/v6/
-models/rec/v7/
-models/rec/*/infer/
-!models/rec/stock/infer/
-!models/rec/v4/infer/
-# Learned PDF extractor: trained on personal crew rosters (labels/pdf/), rebuilt by `npm run model:train`.
-models/pdf-tagger/
-models/pdf-tagger-next/
-models/pdf-tagger-prev/
+models/rec/*/
+models/pdf-tagger*/
 models/ai/
-scripts/__pycache__/
+__pycache__/

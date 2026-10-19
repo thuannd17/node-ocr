@@ -1,0 +1,5 @@
+# Python packages of the app image (Dockerfile): the learned roster model
+# (scripts/pdf_tagger*.py, scripts/train_pdf_tagger.py). Same versions as the .venv that trained models/ai/.
+scikit-learn==1.9.0
+joblib==1.5.3
+numpy==1.26.4

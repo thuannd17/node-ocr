@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import i18n from '../utils/i18n.js';
+import i18n from '../src/utils/i18n.js';
 
 const dict = globalThis.I18N_VI;
 const reqWith = (cookie) => { const req = { headers: { cookie } }; i18n(req, { json() {} }, () => {}); return req; };
@@ -24,7 +24,7 @@ test('English by default; Vietnamese from the lang cookie, also for finished mes
 
 test('no Vietnamese left in the page code outside the dictionary', () => {
   const VN = /[ăâđêôơưạảấầẩẫậắằẳẵặẹẻẽếềểễệỉịọỏốồổỗộớờởỡợụủứừửữựỳỵỷỹĐ]/;
-  const files = [...fs.readdirSync('views').filter(f => f.endsWith('.html')).map(f => `views/${f}`), 'views/assets/nav.js', 'views/assets/ics.js', 'views/assets/night.js'];
+  const files = [...fs.readdirSync('src/views').filter(f => f.endsWith('.html')).map(f => `src/views/${f}`), 'src/views/assets/nav.js', 'src/views/assets/ics.js', 'src/views/assets/night.js'];
   for (const f of files) {
     const bad = fs.readFileSync(f, 'utf8').split('\n')
       .filter(l => VN.test(l) && !/^\s*(\/\/|\*|<!--)/.test(l) && !l.includes('Tiếng Việt'));

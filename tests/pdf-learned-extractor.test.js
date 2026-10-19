@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { alignLabel } from '../services/pdf-label-align.js';
-import { assembleRows, learnConventions, mergeConventions } from '../services/pdf-row-assembler.js';
+import { alignLabel } from '../src/services/pdf-label-align.js';
+import { assembleRows, learnConventions, mergeConventions } from '../src/services/pdf-row-assembler.js';
 
 // A small made-up roster in a layout the parser has no code for:
 //   Date     Duty   From  STD   To   STA   Blk Hrs

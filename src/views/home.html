@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Roster OCR — Home</title>
+  <script src="/assets/i18n/vi.js"></script>
+  <script src="/assets/i18n.js"></script>
+  <link rel="stylesheet" href="/assets/app.css">
+  <link rel="stylesheet" href="/assets/fontawesome/css/all.min.css">
+  <style>
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 20px;
+    }
+    a.card {
+      padding: 24px;
+      margin-bottom: 0;
+      text-decoration: none;
+      color: inherit;
+      transition: transform 0.15s, box-shadow 0.15s;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    a.card:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+    }
+    .card .icon { font-size: 36px; }
+    .card h2 { margin: 0; font-size: 18px; color: #2b3a55; }
+    .card p { margin: 0; font-size: 14px; color: #666; line-height: 1.5; }
+    .card .url {
+      font-family: Consolas, Menlo, monospace;
+      font-size: 12px;
+      color: #4a90e2;
+      background: #f0f6ff;
+      padding: 4px 8px;
+      border-radius: 4px;
+      align-self: flex-start;
+    }
+    .badge {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 10px;
+      align-self: flex-start;
+    }
+    .badge.green { background: #d3f3d3; color: #2a7d2a; }
+    .badge.orange { background: #ffe8cc; color: #b26a00; }
+    .badge.blue { background: #e3eefc; color: #2a5ea8; }
+    .group { margin-bottom: 32px; }
+    .group-title { font-size: 17px; color: #2b3a55; margin: 0 0 4px; display: flex; gap: 8px; align-items: center; }
+    .group-note { margin: 0 0 14px; font-size: 13px; color: #666; }
+    .group.admin { padding: 18px; border: 1px dashed #c5ccd8; border-radius: 10px; background: #fafbfd; }
+    .group.admin .card .icon { color: #8a6d3b; }
+    footer { margin-top: 40px; font-size: 13px; color: #999; }
+    footer a { color: #4a90e2; }
+  </style>
+</head>
+<body>
+  <script src="/assets/nav.js"></script>
+  <main class="page">
+  <div class="page-header">
+    <h1>Roster OCR</h1>
+    <p class="subtitle">Reads crew rosters (eCrew screenshots, duty-plan PDFs, CSV / Excel exports) into Published / Planned rows with a self-learning AI model, and turns them into calendars, airport details and night time.</p>
+  </div>
+
+  <section class="group">
+    <h2 class="group-title"><i class="fa-solid fa-globe" aria-hidden="true"></i> Tools</h2>
+    <p class="group-note">Open to everyone, also as a public API for other apps.</p>
+    <div class="grid">
+    <a class="card" href="/upload">
+      <div class="icon"><i class="fa-solid fa-upload" aria-hidden="true"></i></div>
+      <h2>Upload Roster</h2>
+      <p>Upload roster images, PDFs, CSV or Excel files (drop or pick) and see the Published / Planned rows the AI model reads, then export them to a calendar.</p>
+      <span class="url">/upload</span>
+      <span class="badge green">AI Model</span>
+    </a>
+    <a class="card" href="/calendar">
+      <div class="icon"><i class="fa-solid fa-calendar-days" aria-hidden="true"></i></div>
+      <h2>Calendar</h2>
+      <p>Open .ics files as a month or list calendar: duties from check-in to check-out with their flights, sims and hotels.</p>
+      <span class="url">/calendar</span>
+    </a>
+    <a class="card" href="/airport">
+      <div class="icon"><i class="fa-solid fa-plane-departure" aria-hidden="true"></i></div>
+      <h2>Airport</h2>
+      <p>Find an airport by IATA, ICAO, FAA or WMO code or by name: codes, coordinates, map and 7-day weather.</p>
+      <span class="url">/airport</span>
+    </a>
+    <a class="card" href="/night-time">
+      <div class="icon"><i class="fa-solid fa-moon" aria-hidden="true"></i></div>
+      <h2>Night Time</h2>
+      <p>Night time of a flight along the great circle, from the sun's altitude at the aircraft, with the route on a map.</p>
+      <span class="url">/night-time</span>
+    </a>
+    <a class="card" href="/api-docs">
+      <div class="icon"><i class="fa-solid fa-book" aria-hidden="true"></i></div>
+      <h2>API Docs</h2>
+      <p>The public API for other apps: read rosters, export .ics, airports and weather, night time (OpenAPI).</p>
+      <span class="url">/api-docs</span>
+      <span class="badge blue">OpenAPI</span>
+    </a>
+    </div>
+  </section>
+
+  <section class="group admin">
+    <h2 class="group-title"><i class="fa-solid fa-user-gear" aria-hidden="true"></i> Administration</h2>
+    <p class="group-note">Managing the data and the models. These pages will need an account with the right permissions; for now they are only kept apart.</p>
+    <div class="grid">
+    <a class="card" href="/label">
+      <div class="icon"><i class="fa-solid fa-tags" aria-hidden="true"></i></div>
+      <h2>Label Tool</h2>
+      <p>Label (ground truth) every roster file, with Auto-fill from OCR to fix by hand.</p>
+      <span class="url">/label</span>
+      <span class="badge orange">Data</span>
+    </a>
+    <a class="card" href="/benchmark">
+      <div class="icon"><i class="fa-solid fa-chart-column" aria-hidden="true"></i></div>
+      <h2>Benchmark</h2>
+      <p>Accuracy of every cell (date, duty, dep, begin, end, arr…) against the labels.</p>
+      <span class="url">/benchmark</span>
+      <span class="badge orange">Measure</span>
+    </a>
+    <a class="card" href="/models">
+      <div class="icon"><i class="fa-solid fa-brain" aria-hidden="true"></i></div>
+      <h2>AI Models</h2>
+      <p>The model versions that read rosters: train new ones, compare their scores, activate or delete them.</p>
+      <span class="url">/models</span>
+      <span class="badge orange">Models</span>
+    </a>
+    <a class="card" href="/media">
+      <div class="icon"><i class="fa-solid fa-photo-film" aria-hidden="true"></i></div>
+      <h2>Media</h2>
+      <p>The roster files and their ground-truth labels, kept in MinIO.</p>
+      <span class="url">/media</span>
+      <span class="badge orange">Data</span>
+    </a>
+    </div>
+  </section>
+
+  <footer><span data-i18n>Building on Roster OCR? See the <a href="/api-docs">API documentation</a> (<a href="/api/openapi.json">OpenAPI JSON</a>).</span></footer>
+  </main>
+</body>
+</html>

@@ -7,7 +7,7 @@ import path from 'node:path';
 const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'node-ocr-times-'));
 process.env.PARSER_PATTERNS_FILE = path.join(tmpRoot, 'models', 'parser-patterns.json');
 
-const { canonicalizeTimes, normalizeRowText } = await import('../services/roster-parser.js');
+const { canonicalizeTimes, normalizeRowText } = await import('../src/services/roster-parser.js');
 
 // Spellings of the same merged begin+end box seen from different recognizer
 // models/training runs (75-image benchmark, 2026-09-25).
@@ -75,7 +75,7 @@ test('a 0 read as a bracket inside a time is repaired; bracketed duty codes are 
 
 // ── parseRoster on a synthetic published table (column x positions as in the
 // 700px-wide eCrew print layout; 2026-10-01 regressions) ─────────────────────
-const { parseRoster } = await import('../services/roster-parser.js');
+const { parseRoster } = await import('../src/services/roster-parser.js');
 const box = (x0, y, x1, h = 12) => [[x0, y], [x1, y], [x1, y + h], [x0, y + h]];
 const ln = (text, x0, y, x1) => ({ text, confidence: 0.99, box: box(x0, y, x1) });
 function table(rows) {
