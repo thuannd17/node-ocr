@@ -11,7 +11,7 @@
  *     TXT: one page; a line with tabs is split into cells like a CSV, any other
  *       line keeps its character columns (fixed-width reports) and is split
  *       into items at runs of 2+ spaces, as a PDF splits its text.
- *   previewHtml(file) -> HTML page showing the file (for the /label and /upload preview)
+ *   previewHtml(file) -> HTML page showing the file (for the /label and /roster preview)
  */
 import fs from 'node:fs';
 import path from 'node:path';

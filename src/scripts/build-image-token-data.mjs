@@ -14,7 +14,7 @@
  *
  * A labeled image-only PDF that is not a duty plan (a roster screen printed to
  * PDF, e.g. Ryanair eCrew) is a roster picture too: its pages are read by OCR and
- * stacked into one tall picture (services/pdf-ocr.js ocrPdfAsImage), as /upload reads it.
+ * stacked into one tall picture (services/pdf-ocr.js ocrPdfAsImage), as /roster reads it.
  */
 import fs from 'node:fs';
 import path from 'node:path';

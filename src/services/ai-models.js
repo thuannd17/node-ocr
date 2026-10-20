@@ -1,5 +1,5 @@
 /**
- * Trained versions of the AI model (the learned word tagger /upload uses).
+ * Trained versions of the AI model (the learned word tagger /roster uses).
  * They live in MinIO (services/media-client.js): models/ai/<id>/ (tagger.joblib, meta.json,
  * conventions.json, and benchmark.json once it has been benchmarked); models/ai/active.json names
  * the one the app reads files with. Python loads a model from disk, so they are mirrored into

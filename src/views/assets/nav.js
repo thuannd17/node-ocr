@@ -9,7 +9,7 @@
   const t = window.t || ((s) => s);
   const PUBLIC = [
     { href: '/', icon: 'fa-house', label: 'Home' },
-    { href: '/upload', icon: 'fa-upload', label: 'Upload Roster' },
+    { href: '/roster', icon: 'fa-file-lines', label: 'Roster' },
     { href: '/acars', icon: 'fa-satellite-dish', label: 'ACARS' },
     { href: '/calendar', icon: 'fa-calendar-days', label: 'Calendar' },
     { href: '/airport', icon: 'fa-plane-departure', label: 'Airport' },
@@ -21,6 +21,7 @@
     { href: '/benchmark', icon: 'fa-chart-column', label: 'Benchmark' },
     { href: '/models', icon: 'fa-brain', label: 'AI Models' },
     { href: '/media', icon: 'fa-photo-film', label: 'Media' },
+    { href: '/helpdesk', icon: 'fa-headset', label: 'Helpdesk' },
   ];
   const here = location.pathname.replace(/\/+$/, '') || '/';
   const link = (i) => `<a href="${i.href}"${i.href === here ? ' class="active" aria-current="page"' : ''}><i class="fa-solid ${i.icon}" aria-hidden="true"></i> ${t(i.label)}</a>`;
@@ -36,7 +37,7 @@
   document.currentScript.insertAdjacentHTML(
     'beforebegin',
     `<nav class="topnav" data-no-i18n><button type="button" class="nav-toggle" aria-expanded="false" aria-controls="navMenu" title="${t('Menu')}" aria-label="${t('Menu')}"><i class="fa-solid fa-bars" aria-hidden="true"></i></button>`
-    + `<a class="brand" href="/">Roster OCR</a><div class="menu" id="navMenu">${PUBLIC.map(link).join('')}</div>`
+    + `<a class="brand" href="/">RosterParser</a><div class="menu" id="navMenu">${PUBLIC.map(link).join('')}</div>`
     + `<div class="nav-right">${admin}${langs}</div></nav>`
   );
   const nav = document.querySelector('.topnav');

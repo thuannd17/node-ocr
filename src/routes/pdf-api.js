@@ -28,7 +28,7 @@ const fail = (res, e, where) => {
 
 /**
  * Rows of a stored PDF.
- *   engine 'model'  (/upload, always): the learned model, to try out a newly trained one.
+ *   engine 'model'  (/roster, always): the learned model, to try out a newly trained one.
  *                   An image-only PDF has no words for it: the parser (on OCR text) reads it, with a notice.
  *   engine 'parser' (/label Auto-fill): services/pdf-roster-parser.js.
  *   useLabel: return the verified label instead, when there is one (?label=true, /label).
@@ -96,7 +96,7 @@ const uploadFile = (req, res, next) => upload.single('file')(req, res, (err) => 
 
 /**
  * Read an uploaded PDF / CSV / XLS / XLSX / TXT roster (a multer file) with the AI model, as for
- * /upload: never from a saved label. The file is NOT kept (since 2026-10-18 a roster only joins
+ * /roster: never from a saved label. The file is NOT kept (since 2026-10-18 a roster only joins
  * the data when an admin accepts a correction suggestion, routes/suggestions-api.js).
  * Used by POST /api/roster/upload (routes/roster-api.js) and the deprecated POST /api/pdf/upload.
  * { preview: true } adds previewHtml for CSV / Excel / TXT (the page cannot show those itself).

@@ -1,4 +1,4 @@
-// Roster rows <-> iCalendar (.ics), shared by /upload (export) and /calendar (view).
+// Roster rows <-> iCalendar (.ics), shared by /roster (export) and /calendar (view).
 //   <script src="/assets/ics.js"></script>  ->  window.RosterIcs
 //
 // RosterIcs.rosterEvents({ published, planned }, { name }) -> { events, skipped }
@@ -277,7 +277,7 @@
 
   function rowsToIcs(result, { name = 'Roster', now = new Date() } = {}) {
     const dtstamp = `${now.getUTCFullYear()}${pad(now.getUTCMonth() + 1)}${pad(now.getUTCDate())}T${pad(now.getUTCHours())}${pad(now.getUTCMinutes())}${pad(now.getUTCSeconds())}Z`;
-    const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Roster OCR//Roster export//EN', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH',
+    const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//RosterParser//Roster export//EN', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH',
       `X-WR-CALNAME:${escapeText(name)}`];
     const { events, skipped } = rosterEvents(result, { name });
     for (const e of events) {

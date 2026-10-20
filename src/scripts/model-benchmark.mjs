@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * The AI model over every labeled file, images and PDFs together, as /upload reads
+ * The AI model over every labeled file, images and PDFs together, as /roster reads
  * them (services/model-benchmark.js). Images need the OCR server.
  *
  *   node --env-file=.env scripts/model-benchmark.mjs [--image | --pdf | --types=image,csv,...] [--json] [--files]
@@ -38,7 +38,7 @@ for (const [t, s] of Object.entries(result.byType)) console.log(line(`  ${t}`, s
 console.log(`Per field (images + PDFs): ${Object.entries(result.overall.perField).map(([k, v]) => `${k} ${v.pct}%`).join(', ')}`);
 console.log(`PDF-only fields: ${Object.entries(result.pdf.perField).filter(([k]) => !(k in result.overall.perField)).map(([k, v]) => `${k} ${v.pct}%`).join(', ')}`);
 const byParser = result.files.filter(f => f.source === 'parser').length;
-if (byParser) console.log(`${byParser} picture-only PDF(s) read by the parser on OCR text (the model cannot read them), as on /upload`);
+if (byParser) console.log(`${byParser} picture-only PDF(s) read by the parser on OCR text (the model cannot read them), as on /roster`);
 if (result.errors) console.log(`${result.errors} file(s) failed: ${result.files.filter(f => f.error).map(f => `${f.file}: ${f.error}`).join('; ')}`);
 console.log(`Note: the model learned from these labels; ${result.labelsAfterTraining} label(s) were made or changed after it was trained.`);
 if (args.includes('--files')) {

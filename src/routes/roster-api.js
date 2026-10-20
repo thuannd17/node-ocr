@@ -1,6 +1,6 @@
 // /routes/roster-api.js
 // POST /api/roster/upload: the public way to read a roster, whatever its file type
-// (documented in docs/openapi.json, /api-docs; used by /upload).
+// (documented in docs/openapi.json, /api-docs; used by /roster).
 // One multipart field "file"; the server picks the reader from the file type:
 //   image (JPG, PNG, BMP, JFIF)          -> OCR + AI model          (routes/api.js readRosterImage)
 //   PDF, CSV, XLS, XLSX, TXT             -> text / OCR + AI model   (routes/pdf-api.js readRosterFile)
@@ -15,7 +15,7 @@ import { readRosterImage } from './api.js';
 import { readRosterFile } from './pdf-api.js';
 import { modelInfo } from '../services/pdf-ai-extract.js';
 import { IMAGE_EXTS, PDF_EXTS, extOf, kindOf } from '../utils/data-files.js';
-import { createSuggestion } from './suggestions-api.js';
+import { createSuggestion, cleanEmail } from './suggestions-api.js';
 import { UPLOADS_DIR } from '../utils/paths.js';
 
 const router = Router();
@@ -64,7 +64,7 @@ router.post('/roster/upload', uploadFile, async (req, res) => {
 });
 
 /**
- * POST /api/roster/suggestions  multipart: file (the roster), note? (what is wrong), rows? (JSON
+ * POST /api/roster/suggestions  multipart: file (the roster), note? (what is wrong), email? (to get an answer), rows? (JSON
  * { published, planned } as read by POST /api/roster/upload). Sends the roster to the admins, who
  * label it (it then joins the training data) or dismiss it on /label. -> 201 { id, status: 'pending' }
  */
@@ -77,7 +77,9 @@ router.post('/roster/suggestions', uploadFile, async (req, res) => {
     }
     const note = String(req.body?.note || '').trim();
     if (note.length > 2000) return res.status(400).json({ error: 'The note is longer than 2000 characters' });
-    const s = await createSuggestion(req.file, { note, rows, lang: req.lang });
+    const email = cleanEmail(req.body?.email);
+    if (email === null) return res.status(400).json({ error: 'The email address is not valid' });
+    const s = await createSuggestion(req.file, { note, rows, lang: req.lang, email });
     res.status(201).json({ id: s.id, status: s.status, createdAt: s.createdAt });
   } catch (e) {
     if (e.code !== 'MEDIA_DOWN') console.error('[roster suggestion]', e);

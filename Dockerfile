@@ -1,4 +1,4 @@
-# Roster OCR web app (Node + the small Python runtime of the learned roster model).
+# RosterParser web app (Node + the small Python runtime of the learned roster model).
 # The PaddleOCR server is a separate image (docker/ocr.Dockerfile): see docker-compose.yml.
 #
 #   docker build -t roster-ocr-app .

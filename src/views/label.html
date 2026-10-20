@@ -26,25 +26,6 @@
     .panel h2 { margin: 0; font-size: 14px; color: #555; font-weight: 600; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 
     /* File tree: the whole page; a file opens in the viewer popup */
-    /* Correction suggestions sent from /upload */
-    .suggest-panel { margin-bottom: 14px; border-left: 4px solid #f0ad4e; }
-    .suggest-panel .head { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-    .suggest-panel .head h2 { font-size: 15px; color: var(--text); }
-    .suggest-panel .head .n { background: #f0ad4e; color: #fff; border-radius: 10px; padding: 0 8px; font-size: 12px; }
-    .suggest-panel .head label { font-size: 13px; color: var(--muted); margin-left: auto; }
-    .suggest-panel .hint { margin: 0; font-size: 13px; color: var(--muted); }
-    .suggest-list { width: 100%; border-collapse: collapse; font-size: 13px; }
-    .suggest-list th { text-align: left; color: var(--muted); font-weight: 600; padding: 4px 8px; border-bottom: 1px solid var(--border); }
-    .suggest-list td { padding: 6px 8px; border-bottom: 1px solid #f0f0f0; vertical-align: top; }
-    .suggest-list td.note { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 420px; }
-    .suggest-list td.note.none { color: var(--muted); font-style: italic; }
-    .suggest-list td.acts { white-space: nowrap; text-align: right; }
-    .suggest-list td.acts button, .suggest-list td.acts a { margin-left: 4px; }
-    .suggest-list td.acts a.icon { color: var(--primary); padding: 4px 6px; font-size: 14px; }
-    .suggest-list .st { font-size: 12px; border-radius: 4px; padding: 1px 6px; background: #eee; }
-    .suggest-list .st.accepted { background: #e8f5e9; color: #2e7d32; }
-    .suggest-list .st.dismissed { background: #f5f5f5; color: #888; }
-    @media (max-width: 760px) { .suggest-list td.note { max-width: none; } .suggest-list th.hide-sm, .suggest-list td.hide-sm { display: none; } }
     .tree-tools { display: flex; gap: 8px 16px; align-items: center; flex-wrap: wrap; }
     .tree-tools input[type=search] { padding: 6px 8px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px; width: 260px; max-width: 100%; }
     .tree-tools label { font-size: 12px; color: var(--muted); display: flex; gap: 6px; align-items: center; }
@@ -106,7 +87,7 @@
     .labeled-badge.yes { background: #d3f3d3; color: #2a7d2a; }
     .labeled-badge.no  { background: #ffe0e0; color: #c33; }
 
-    /* Table editor (same look as /upload) */
+    /* Table editor (same look as /roster) */
     .toolbar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
     .toolbar .spacer { flex: 1; }
     .toolbar input { padding: 4px 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; }
@@ -170,19 +151,6 @@
     <h1><i class="fa-solid fa-tags" aria-hidden="true"></i> Label Tool</h1>
     <span class="todo" id="todoCount"></span>
     <p class="subtitle" data-i18n>Ground truth labels, used to measure accuracy and to train the models. Files and labels are kept in MinIO (see <a href="/media">Media</a>).</p>
-  </div>
-
-  <!-- Correction suggestions from /upload: label them (the file joins the data) or dismiss them -->
-  <div class="panel suggest-panel" id="suggestPanel" hidden>
-    <div class="head">
-      <h2><i class="fa-solid fa-comment-medical" aria-hidden="true"></i> Correction suggestions <span class="n" id="suggestN"></span></h2>
-      <label><input type="checkbox" id="suggestAll" /> Show handled ones</label>
-    </div>
-    <p class="hint">Rosters that users sent from /upload because the AI model read them wrong. <b>Label it</b> adds the file to the data and opens it here with the rows the model read; <b>Dismiss</b> deletes the file.</p>
-    <table class="suggest-list">
-      <thead><tr><th>Sent</th><th>File</th><th>What is wrong</th><th class="hide-sm">Rows</th><th></th></tr></thead>
-      <tbody id="suggestBody"></tbody>
-    </table>
   </div>
 
   <!-- File tree: click a file to open it in the viewer -->
@@ -798,89 +766,27 @@
       }
     }
 
-    // ---------- Correction suggestions (/api/suggestions, sent from /upload) ----------
-    const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-    let suggestions = [];
-    async function loadSuggestions() {
-      if (EMBED) return;
-      try {
-        const res = await fetch(`/api/suggestions?status=${$('suggestAll').checked ? 'all' : 'pending'}`);
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
-        suggestions = data.items || [];
-        const pending = data.counts?.pending || 0;
-        $('suggestN').textContent = pending;
-        $('suggestN').hidden = !pending;
-        // the panel shows while something waits, or when handled ones were asked for
-        $('suggestPanel').hidden = !pending && !$('suggestAll').checked && !Object.values(data.counts || {}).some(Boolean);
-        renderSuggestions();
-      } catch (e) {
-        console.error('[suggestions]', e);
-      }
-    }
-    function renderSuggestions() {
-      const body = $('suggestBody');
-      if (!suggestions.length) { body.innerHTML = `<tr><td colspan="5" class="note none">${__('No suggestion waiting.')}</td></tr>`; return; }
-      body.innerHTML = suggestions.map(x => {
-        const when = new Date(x.createdAt).toLocaleString();
-        const acts = x.status === 'pending'
-          ? `<a class="icon" href="/api/suggestions/${x.id}/file" target="_blank" rel="noopener" title="${esc(__('Open the file in a new tab'))}"><i class="fa-solid fa-eye" aria-hidden="true"></i></a>
-             <button class="small" data-act="accept" data-id="${x.id}"><i class="fa-solid fa-tag" aria-hidden="true"></i> ${__('Label it')}</button>
-             <button class="secondary small" data-act="dismiss" data-id="${x.id}"><i class="fa-solid fa-xmark" aria-hidden="true"></i> ${__('Dismiss')}</button>`
-          : `<span class="st ${x.status}">${x.status === 'accepted' ? __('labeled') : __('dismissed')}</span>`
-            + (x.status === 'accepted' && x.dataName ? ` <button class="secondary small" data-act="open" data-name="${esc(x.dataName)}">${__('Open')}</button>` : '');
-        return `<tr>
-          <td>${esc(when)}</td>
-          <td><i class="fa-regular fa-file" aria-hidden="true"></i> ${esc(x.fileName)} <span style="color:var(--muted)">(${esc(x.fileType.toUpperCase())})</span></td>
-          <td class="note${x.note ? '' : ' none'}">${x.note ? esc(x.note) : __('(no note)')}</td>
-          <td class="hide-sm">${x.rowCount ?? '–'}</td>
-          <td class="acts">${acts}</td>
-        </tr>`;
-      }).join('');
-    }
-    async function openDataFile(name, rows) {
+    // ---------- A file from a correction suggestion (/helpdesk: Label it -> /label?name=<file>&suggestion=<id>) ----------
+    async function openDataFile(name, from) {
       await loadFiles();
       renderTree();
       const file = files.find(x => x.name === name);
       if (!file) return alert(__('{name} is not in the data.', { name }));
       if (!openFolders.has(folderOf(file))) { openFolders.add(folderOf(file)); renderTree(); }
       await selectFile(file, { force: true });
-      // no label yet: start from the rows the model read for the user
-      if (rows && !file.labeled && current === file && (rows.published?.length || rows.planned?.length)) {
+      // no label yet: start from what the model read for the user (a roster's rows, an ACARS picture's fields)
+      if (!from || file.labeled || current !== file) return;
+      const rows = from.rows, fields = from.fields;
+      if (file.kind === 'acars' && fields && Object.values(fields).some(Boolean)) {
+        renderTables(fields);
+        setDirty(true);
+        setStatus('err', __('The fields the AI model read for the user (from the suggestion), not a label yet: fix them against the picture, then Save.'));
+      } else if (rows && (rows.published?.length || rows.planned?.length)) {
         renderTables({ published: rows.published || [], planned: rows.planned || [] });
         setDirty(true);
         setStatus('err', __('The rows the AI model read for the user (from the suggestion), not a label yet: fix them against the file, then Save.'));
       }
     }
-    async function handleSuggestion(act, id) {
-      const x = suggestions.find(s => s.id === id);
-      if (!x) return;
-      try {
-        if (act === 'dismiss') {
-          if (!confirm(`${__('Dismiss this suggestion? The file is deleted.')}\n\n${x.fileName}`)) return;
-          const res = await fetch(`/api/suggestions/${id}/dismiss`, { method: 'POST' });
-          if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'HTTP ' + res.status);
-          return loadSuggestions();
-        }
-        if (viewerOpen() && !confirmLeave()) return;
-        const detail = await (await fetch(`/api/suggestions/${id}`)).json(); // the rows the model read
-        const res = await fetch(`/api/suggestions/${id}/accept`, { method: 'POST' });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
-        await loadSuggestions();
-        setDirty(false);
-        await openDataFile(data.name, detail.rows);
-      } catch (e) {
-        alert(__('Could not do it: {error}', { error: e.message }));
-      }
-    }
-    $('suggestBody').addEventListener('click', (e) => {
-      const b = e.target.closest('button[data-act]');
-      if (!b) return;
-      if (b.dataset.act === 'open') { if (!viewerOpen() || confirmLeave()) { setDirty(false); openDataFile(b.dataset.name); } return; }
-      handleSuggestion(b.dataset.act, b.dataset.id);
-    });
-    $('suggestAll').addEventListener('change', loadSuggestions);
 
     // ---------- Init ----------
     async function loadFiles() {
@@ -921,9 +827,14 @@
     }
 
     async function init() {
-      loadSuggestions();
-      await loadFiles();
       const wanted = PARAMS.get('name'); // /label?name=<file>
+      const fromSuggestion = PARAMS.get('suggestion'); // ... &suggestion=<id>: start from the rows the model read for the user
+      if (wanted && fromSuggestion && !EMBED) {
+        const detail = await fetch(`/api/suggestions/${encodeURIComponent(fromSuggestion)}`).then(r => (r.ok ? r.json() : null)).catch(() => null);
+        history.replaceState(null, '', `/label?name=${encodeURIComponent(wanted)}`); // a reload opens the saved label, not the rows again
+        return openDataFile(wanted, detail);
+      }
+      await loadFiles();
       let start = files.find(f => f.name === wanted);
       if (!start && EMBED && wanted) {
         start = { name: wanted, ext: extOf(wanted), kind: ['pdf', 'csv', 'xls', 'xlsx', 'txt'].includes(extOf(wanted)) ? 'pdf' : 'image', labeled: true, done: true, duplicateOf: null };

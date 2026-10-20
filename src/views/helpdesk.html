@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Helpdesk</title>
+  <script src="/assets/i18n/vi.js"></script>
+  <script src="/assets/i18n.js"></script>
+  <link rel="stylesheet" href="/assets/app.css">
+  <link rel="stylesheet" href="/assets/fontawesome/css/all.min.css">
+  <style>
+    .btn { background: var(--primary); color: #fff; border: none; padding: 7px 12px; border-radius: 6px; cursor: pointer; font-size: 13px; white-space: nowrap; display: inline-flex; gap: 6px; align-items: center; text-decoration: none; }
+    .btn:hover:not(:disabled) { background: var(--primary-dark); }
+    .btn:disabled { background: #ccc; cursor: not-allowed; }
+    .btn.secondary { background: #fff; color: var(--primary); border: 1px solid var(--primary); }
+    .btn.secondary:hover:not(:disabled) { background: #eef4ff; }
+
+    .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 12px 14px; }
+    .toolbar .right { margin-left: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .mailstate { font-size: 13px; color: var(--muted); display: flex; gap: 6px; align-items: center; }
+    .mailstate code { font-size: 12px; overflow-wrap: anywhere; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; background: #bbb; flex: none; }
+    .dot.ok { background: #2e7d32; }
+    .dot.warn { background: #e0a100; }
+    .chips { display: flex; gap: 6px; flex-wrap: wrap; }
+    .chip { font-size: 12px; border-radius: 12px; padding: 3px 10px; background: #eef1f5; color: #444; border: 1px solid transparent; cursor: pointer; }
+    .chip.on { border-color: var(--primary); background: #e8f0fb; }
+
+    .msg { display: none; margin: 12px 0; padding: 10px 14px; border-radius: 6px; font-size: 14px; }
+    .msg.visible { display: block; }
+    .msg.ok { background: #e8f5e9; color: #1b5e20; }
+    .msg.err { background: #fdecea; color: #b71c1c; }
+    .msg.busy { background: #e3f2fd; color: #0d47a1; }
+
+    .layout { display: grid; grid-template-columns: minmax(280px, 400px) 1fr; gap: 16px; margin-top: 16px; align-items: start; }
+    @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
+    .list-card { padding: 0; overflow: hidden; }
+    .list-tools { display: flex; gap: 8px; padding: 10px; border-bottom: 1px solid var(--border); }
+    .list-tools input { flex: 1; min-width: 0; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px; }
+    .items { max-height: calc(100vh - 280px); min-height: 200px; overflow-y: auto; }
+    .item { padding: 10px 12px; border-bottom: 1px solid #f0f1f4; cursor: pointer; font-size: 13px; display: flex; flex-direction: column; gap: 4px; }
+    .item:hover { background: #f5f8fc; }
+    .item.sel { background: #e8f0fb; }
+    .item .top { display: flex; gap: 8px; align-items: center; }
+    .item .who { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+    .item .who.none { color: var(--muted); font-weight: 400; font-style: italic; }
+    .item .sub { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .empty { padding: 24px; text-align: center; color: var(--muted); font-size: 14px; }
+
+    .kind { font-size: 10px; font-weight: 700; border-radius: 4px; padding: 1px 5px; background: #ede7f6; color: #5e35b1; }
+    .tk { font-size: 11px; font-weight: 600; border-radius: 10px; padding: 2px 8px; white-space: nowrap; flex: none; }
+    .tk.open { background: #fff3e0; color: #b26a00; }
+    .tk.in_progress { background: #e3f2fd; color: #0d47a1; }
+    .tk.resolved { background: #e8f5e9; color: #1b5e20; }
+    .tk.closed { background: #eceff1; color: #546e7a; }
+
+    .detail { padding: 18px; min-height: 300px; }
+    .detail h2 { margin: 0 0 4px; font-size: 17px; color: var(--nav-bg); overflow-wrap: anywhere; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .detail .when { color: var(--muted); font-size: 13px; margin-bottom: 14px; }
+    .facts { display: grid; grid-template-columns: 130px 1fr; gap: 6px 12px; font-size: 14px; margin-bottom: 16px; }
+    .facts dt { color: var(--muted); font-weight: 600; font-size: 13px; }
+    .facts dd { margin: 0; overflow-wrap: anywhere; }
+    @media (max-width: 600px) { .facts { grid-template-columns: 1fr; } .facts dd { margin-bottom: 6px; } }
+    .note-box { white-space: pre-wrap; background: #fafbfc; border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; font-size: 14px; }
+    .note-box.none { color: var(--muted); font-style: italic; }
+    .section { margin-top: 18px; }
+    .section h3 { font-size: 14px; margin: 0 0 8px; color: var(--nav-bg); display: flex; gap: 6px; align-items: center; }
+    .row-tools { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    select, textarea, input[type=text], input[type=email] { padding: 7px 9px; border: 1px solid var(--border); border-radius: 6px; font: inherit; font-size: 14px; }
+    textarea { width: 100%; resize: vertical; box-sizing: border-box; }
+    .replies { display: flex; flex-direction: column; gap: 10px; }
+    .reply { border-left: 3px solid var(--primary); padding: 6px 12px; background: #f7f9fc; border-radius: 0 6px 6px 0; font-size: 13px; }
+    .reply .h { color: var(--muted); font-size: 12px; margin-bottom: 4px; }
+    .reply .s { font-weight: 600; margin-bottom: 4px; }
+    .reply .b { white-space: pre-wrap; }
+    .saved { font-size: 12px; color: #2e7d32; }
+
+    dialog.reply-dlg { border: none; border-radius: 10px; padding: 0; width: min(620px, calc(100vw - 32px)); box-shadow: 0 10px 30px rgba(0,0,0,0.25); }
+    dialog.reply-dlg::backdrop { background: rgba(20, 28, 45, 0.45); }
+    dialog.reply-dlg form { padding: 18px 20px; display: flex; flex-direction: column; gap: 10px; }
+    dialog.reply-dlg h3 { margin: 0; font-size: 18px; display: flex; gap: 8px; align-items: center; }
+    dialog.reply-dlg label { font-size: 13px; font-weight: 600; }
+    dialog.reply-dlg input[type=text] { width: 100%; box-sizing: border-box; }
+    dialog.reply-dlg textarea { min-height: 220px; }
+    dialog.reply-dlg .hint { font-size: 13px; color: var(--muted); margin: 0; }
+    dialog.reply-dlg .check { font-weight: 400; display: flex; gap: 6px; align-items: center; }
+    dialog.reply-dlg .actions { display: flex; gap: 8px; justify-content: flex-end; align-items: center; flex-wrap: wrap; }
+    dialog.reply-dlg .err { color: #d32f2f; font-size: 13px; flex: 1; }
+  </style>
+</head>
+<body>
+  <script src="/assets/nav.js"></script>
+  <main class="page">
+    <div class="page-header">
+      <h1><i class="fa-solid fa-headset" aria-hidden="true"></i> Helpdesk</h1>
+      <p class="subtitle" data-i18n>The correction suggestions sent from <a href="/roster">/roster</a> and <a href="/acars">/acars</a>: who sent them, their state, and a reply by email when they are handled. The file itself is labeled on <a href="/label">/label</a>.</p>
+    </div>
+
+    <div class="card toolbar">
+      <div class="chips" id="chips"></div>
+      <div class="right">
+        <span class="mailstate" id="mailState"></span>
+        <button class="btn secondary" id="refreshBtn" title="Refresh"><i class="fa-solid fa-rotate" aria-hidden="true"></i></button>
+      </div>
+    </div>
+    <div id="msg" class="msg"></div>
+
+    <div class="layout">
+      <div class="card list-card">
+        <div class="list-tools">
+          <input type="search" id="search" placeholder="Search by email, file or note…" aria-label="Search by email, file or note">
+        </div>
+        <div class="items" id="items"><div class="empty">Loading…</div></div>
+      </div>
+      <div class="card detail" id="detail">
+        <div class="empty">Choose a suggestion on the left.</div>
+      </div>
+    </div>
+  </main>
+
+  <dialog class="reply-dlg" id="dismissDialog" aria-labelledby="dismissTitle">
+    <form method="dialog" id="dismissForm">
+      <h3 id="dismissTitle"><i class="fa-solid fa-xmark" aria-hidden="true"></i> Dismiss</h3>
+      <p class="hint"><i class="fa-regular fa-file" aria-hidden="true"></i> <strong id="dismissFile"></strong></p>
+      <p class="hint">The file is not used: it is deleted from the server and the ticket is marked resolved.</p>
+      <label for="dismissReason">Why?</label>
+      <textarea id="dismissReason" maxlength="2000" required style="min-height:110px" placeholder="e.g. the AI model reads this roster correctly now; the file is not a roster"></textarea>
+      <label class="check"><input type="checkbox" id="dismissReply" checked> <span>Then reply to the sender with the reason</span></label>
+      <div class="actions">
+        <span class="err" id="dismissErr"></span>
+        <button type="button" class="btn secondary" id="dismissCancel">Cancel</button>
+        <button type="submit" class="btn" id="dismissSend"><i class="fa-solid fa-xmark" aria-hidden="true"></i> Dismiss</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="reply-dlg" id="replyDialog" aria-labelledby="replyTitle">
+    <form method="dialog" id="replyForm">
+      <h3 id="replyTitle"><i class="fa-solid fa-reply" aria-hidden="true"></i> Reply</h3>
+      <p class="hint" id="replyTo"></p>
+      <label for="replySubject">Subject</label>
+      <input type="text" id="replySubject" maxlength="300" required>
+      <label for="replyMessage">Message</label>
+      <textarea id="replyMessage" maxlength="10000" required></textarea>
+      <label class="check"><input type="checkbox" id="replyResolve" checked> <span>Mark as resolved</span></label>
+      <p class="hint" id="replyVia"></p>
+      <div class="actions">
+        <span class="err" id="replyErr"></span>
+        <button type="button" class="btn secondary" id="replyCancel">Cancel</button>
+        <button type="submit" class="btn" id="replySend"><i class="fa-solid fa-paper-plane" aria-hidden="true"></i> <span>Send</span></button>
+      </div>
+    </form>
+  </dialog>
+
+  <script>
+    // Admin page. The suggestions themselves: routes/suggestions-api.js; the mail server: services/mailer.js (.env SMTP_*).
+    const $ = (id) => document.getElementById(id);
+    const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[c]));
+    const fmtSize = (b) => (b == null ? '' : b >= 1048576 ? `${(b / 1048576).toFixed(1)} MB` : `${Math.round(b / 1024)} KB`);
+    const when = (iso) => (iso ? new Date(iso).toLocaleString() : '');
+    const TICKETS = ['open', 'in_progress', 'resolved', 'closed'];
+    const TICKET_NAME = { open: 'Not handled', in_progress: 'In progress', resolved: 'Resolved', closed: 'Closed' };
+    const FILE_STATE = { pending: 'Not handled yet', accepted: 'Added to the data', dismissed: 'Dismissed (file deleted)' };
+    const tk = (t) => `<span class="tk ${t}">${esc(__(TICKET_NAME[t] || t))}</span>`;
+    let items = [], tickets = {}, filter = 'active', selected = null, mail = { configured: false };
+
+    function showMsg(text, kind = 'ok') {
+      const m = $('msg');
+      m.className = `msg visible ${kind}`;
+      m.textContent = text;
+      if (kind === 'ok') setTimeout(() => { if (m.textContent === text) m.classList.remove('visible'); }, 6000);
+    }
+    async function getJson(url, opts) {
+      const res = await fetch(url, opts);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw Object.assign(new Error(data.error || `HTTP ${res.status}`), { status: res.status, data });
+      return data;
+    }
+    const sendJson = (url, method, body) => getJson(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+
+    async function loadMail() {
+      try { mail = await getJson('/api/helpdesk/mail'); } catch { mail = { configured: false }; }
+      $('mailState').innerHTML = mail.configured
+        ? `<span class="dot ok"></span> ${esc(__('Replies are emailed from'))} <code>${esc(mail.from)}</code>`
+        : `<span class="dot warn"></span> <span title="${esc(__('Set SMTP_HOST and MAIL_FROM in .env to send from here'))}">${esc(__('No mail server: replies open your mail program'))}</span>`;
+    }
+
+    async function load() {
+      const data = await getJson('/api/suggestions?status=all&ticket=all');
+      items = data.items || [];
+      tickets = data.tickets || {};
+      if (selected) selected = items.find(i => i.id === selected.id) || null;
+      render();
+      if (selected) openItem(selected, false);
+    }
+
+    const shownBy = (i) => filter === 'all' || (filter === 'active' ? ['open', 'in_progress'].includes(i.ticket) : i.ticket === filter);
+    function render() {
+      const chip = (key, label, n) => `<span class="chip${filter === key ? ' on' : ''}" data-f="${key}">${label} <b>${n}</b></span>`;
+      $('chips').innerHTML = chip('active', esc(__('To do')), (tickets.open || 0) + (tickets.in_progress || 0))
+        + TICKETS.map(t => chip(t, esc(__(TICKET_NAME[t])), tickets[t] || 0)).join('')
+        + chip('all', esc(__('All')), items.length);
+      const q = $('search').value.trim().toLowerCase();
+      const shown = items.filter(i => shownBy(i) && (!q || [i.email, i.fileName, i.note].some(v => String(v || '').toLowerCase().includes(q))));
+      if (!shown.length) { $('items').innerHTML = `<div class="empty">${esc(items.length ? __('No suggestion matches.') : __('No suggestion yet.'))}</div>`; }
+      else $('items').innerHTML = shown.map(i => `<div class="item${selected?.id === i.id ? ' sel' : ''}" data-id="${esc(i.id)}">
+          <div class="top"><span class="who${i.email ? '' : ' none'}">${esc(i.email || __('no email'))}</span>${tk(i.ticket)}</div>
+          <div class="sub">${i.kind === 'acars' ? '<span class="kind">ACARS</span> ' : ''}${esc(i.fileName)} · ${esc(when(i.createdAt))}${i.replies.length ? ` · <i class="fa-solid fa-reply" aria-hidden="true"></i> ${i.replies.length}` : ''}</div>
+          ${i.note ? `<div class="sub">${esc(i.note)}</div>` : ''}
+        </div>`).join('');
+      if (!selected) $('detail').innerHTML = `<div class="empty">${esc(__('Choose a suggestion on the left.'))}</div>`;
+    }
+
+    $('chips').addEventListener('click', (e) => {
+      const c = e.target.closest('.chip[data-f]');
+      if (c) { filter = c.dataset.f; render(); }
+    });
+    $('search').addEventListener('input', render);
+    $('items').addEventListener('click', (e) => {
+      const row = e.target.closest('.item');
+      if (row) openItem(items.find(i => i.id === row.dataset.id));
+    });
+
+    function openItem(i, scroll = true) {
+      if (!i) return;
+      selected = i;
+      document.querySelectorAll('.item').forEach(el => el.classList.toggle('sel', el.dataset.id === i.id));
+      const fileLink = i.status === 'dismissed'
+        ? `<span style="color:var(--muted)">${esc(i.fileName)}</span>`
+        : `<a href="/api/suggestions/${encodeURIComponent(i.id)}/file" target="_blank" rel="noopener">${esc(i.fileName)} <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i></a>`;
+      const labelLink = i.status === 'accepted' && i.dataName
+        ? ` · <a href="/label?name=${encodeURIComponent(i.dataName)}">${esc(__('Open in /label'))}</a>` : '';
+      // the file: label it (it joins the data, /label opens it) or dismiss it with a reason
+      const fileActs = i.status === 'pending' ? `<div class="row-tools" style="margin-bottom:16px">
+          <button class="btn" id="labelBtn" title="${esc(__('Add the file to the data and open it in /label, starting from the rows the AI model read'))}"><i class="fa-solid fa-tag" aria-hidden="true"></i> ${esc(__('Label it'))}</button>
+          <button class="btn secondary" id="dismissBtn" title="${esc(__('Not used: the file is deleted and the ticket resolved'))}"><i class="fa-solid fa-xmark" aria-hidden="true"></i> ${esc(__('Dismiss'))}</button>
+        </div>` : '';
+      $('detail').innerHTML = `
+        <h2>${i.email ? `<a href="mailto:${esc(i.email)}">${esc(i.email)}</a>` : `<span style="color:var(--muted)">${esc(__('no email'))}</span>`} ${tk(i.ticket)}</h2>
+        <div class="when">${esc(__('Sent {when}', { when: when(i.createdAt) }))}${i.lang ? ` · ${esc(__('language'))} ${esc(i.lang.toUpperCase())}` : ''}</div>
+        <dl class="facts">
+          <dt>${esc(__('File'))}</dt><dd>${fileLink} <span style="color:var(--muted)">${esc(fmtSize(i.size))}</span></dd>
+          <dt>${esc(__('The file'))}</dt><dd>${esc(__(FILE_STATE[i.status] || i.status))}${labelLink}</dd>
+          <dt>${esc(__('Type'))}</dt><dd>${i.kind === 'acars' ? esc(__('ACARS picture')) : esc(__('Roster'))}</dd>
+          ${i.kind === 'acars'
+            ? `<dt>${esc(__('Fields read'))}</dt><dd>${i.fieldCount == null ? '—' : `${i.fieldCount} / 9`}</dd>`
+            : `<dt>${esc(__('Rows read'))}</dt><dd>${i.rowCount == null ? '—' : i.rowCount}</dd>`}
+          ${i.dismissReason ? `<dt>${esc(__('Why dismissed'))}</dt><dd style="white-space:pre-wrap">${esc(i.dismissReason)}</dd>` : ''}
+        </dl>
+        ${fileActs}
+        <div class="section"><h3><i class="fa-regular fa-comment" aria-hidden="true"></i> ${esc(__('What is wrong (from the sender)'))}</h3>
+          <div class="note-box${i.note ? '' : ' none'}">${esc(i.note || __('No note.'))}</div></div>
+        <div class="section"><h3><i class="fa-solid fa-flag" aria-hidden="true"></i> ${esc(__('State'))}</h3>
+          <div class="row-tools">
+            <select id="ticketSel" aria-label="${esc(__('State'))}">${TICKETS.map(t => `<option value="${t}"${t === i.ticket ? ' selected' : ''}>${esc(__(TICKET_NAME[t]))}</option>`).join('')}</select>
+            <button class="btn" id="replyBtn"${i.email ? '' : ` disabled title="${esc(__('This suggestion has no email address to reply to'))}"`}><i class="fa-solid fa-reply" aria-hidden="true"></i> ${esc(__('Reply'))}</button>
+            <span class="saved" id="ticketSaved"></span>
+          </div></div>
+        <div class="section"><h3><i class="fa-solid fa-note-sticky" aria-hidden="true"></i> ${esc(__('Admin note (not sent)'))}</h3>
+          <textarea id="adminNote" rows="3" maxlength="4000" placeholder="${esc(__('What was done, for the other admins'))}">${esc(i.adminNote || '')}</textarea>
+          <div class="row-tools" style="margin-top:6px"><button class="btn secondary" id="noteSave">${esc(__('Save note'))}</button><span class="saved" id="noteSaved"></span></div></div>
+        <div class="section"><h3><i class="fa-solid fa-envelope" aria-hidden="true"></i> ${esc(__('Replies'))} (${i.replies.length})</h3>
+          ${i.replies.length ? `<div class="replies">${i.replies.slice().reverse().map(r => `<div class="reply">
+            <div class="h">${esc(when(r.at))} · ${esc(r.to)} · ${esc(r.via === 'mailto' ? __('from your mail program') : __('emailed'))}</div>
+            <div class="s">${esc(r.subject)}</div><div class="b">${esc(r.message || '')}</div></div>`).join('')}</div>`
+            : `<div class="note-box none">${esc(__('No reply yet.'))}</div>`}</div>`;
+      $('ticketSel').addEventListener('change', (e) => saveTicket(i, e.target.value));
+      $('noteSave').addEventListener('click', () => saveNote(i));
+      $('replyBtn').addEventListener('click', () => openReply(i));
+      $('labelBtn')?.addEventListener('click', () => labelIt(i));
+      $('dismissBtn')?.addEventListener('click', () => openDismiss(i));
+      if (scroll && window.innerWidth <= 900) $('detail').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    async function saveTicket(i, ticket) {
+      try {
+        const r = await sendJson(`/api/suggestions/${encodeURIComponent(i.id)}`, 'PATCH', { ticket });
+        tickets[i.ticket]--; tickets[r.ticket] = (tickets[r.ticket] || 0) + 1;
+        i.ticket = r.ticket;
+        render();
+        openItem(i, false);
+        $('ticketSaved').textContent = __('Saved');
+      } catch (err) { showMsg(err.message, 'err'); }
+    }
+    async function saveNote(i) {
+      try {
+        const r = await sendJson(`/api/suggestions/${encodeURIComponent(i.id)}`, 'PATCH', { adminNote: $('adminNote').value });
+        i.adminNote = r.adminNote;
+        $('noteSaved').textContent = __('Saved');
+      } catch (err) { showMsg(err.message, 'err'); }
+    }
+
+    // ---- Label it: the file joins the data (deduplicated), then /label opens it with the rows the model read ----
+    async function labelIt(i) {
+      $('labelBtn').disabled = true;
+      try {
+        const r = await getJson(`/api/suggestions/${encodeURIComponent(i.id)}/accept`, { method: 'POST' });
+        location.href = `/label?name=${encodeURIComponent(r.name)}&suggestion=${encodeURIComponent(i.id)}`;
+      } catch (err) {
+        showMsg(err.message, 'err');
+        $('labelBtn').disabled = false;
+      }
+    }
+
+    // ---- Dismiss: with a reason; the file is deleted, the ticket resolved; then the reply can tell the sender why ----
+    let dismissing = null;
+    function openDismiss(i) {
+      dismissing = i;
+      $('dismissFile').textContent = i.fileName;
+      $('dismissReason').value = '';
+      $('dismissReply').checked = !!i.email;
+      $('dismissReply').disabled = !i.email;
+      $('dismissErr').textContent = '';
+      $('dismissSend').disabled = false;
+      $('dismissDialog').showModal();
+      $('dismissReason').focus();
+    }
+    $('dismissCancel').addEventListener('click', () => $('dismissDialog').close());
+    $('dismissForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const i = dismissing, reason = $('dismissReason').value.trim();
+      if (!i || !reason) return;
+      $('dismissSend').disabled = true;
+      try {
+        await sendJson(`/api/suggestions/${encodeURIComponent(i.id)}/dismiss`, 'POST', { reason });
+        $('dismissDialog').close();
+        showMsg(__('Dismissed: the file is deleted and the ticket resolved.'));
+        await load();
+        const fresh = items.find(x => x.id === i.id);
+        if ($('dismissReply').checked && fresh?.email) openReply(fresh);
+      } catch (err) {
+        $('dismissErr').textContent = __(err.message);
+        $('dismissSend').disabled = false;
+      }
+    });
+
+    // ---- Reply: a ready-made message in the sender's language, sent by the mail server or the admin's mail program ----
+    // The text is translated into the sender's language (meta.lang), not the admin's: the keys are in /assets/i18n/vi.js.
+    // A dismissed one tells why (the reason as the admin wrote it: edit it in the message if needed).
+    const REPLY_SUBJECT = 'RosterParser: your correction for {file}';
+    const REPLY_MESSAGE = 'Hello,\n\nThank you for your correction suggestion for "{file}" (sent {date}).\n\nWe have checked the file and corrected the rows. It is now used to teach the AI model, so the next rosters like it should be read correctly.\n\nBest regards,\nThe RosterParser team';
+    const REPLY_DISMISSED = 'Hello,\n\nThank you for your correction suggestion for "{file}" (sent {date}).\n\nWe have checked it, but could not use it: {reason}\n\nThe file has been deleted from our server.\n\nBest regards,\nThe RosterParser team';
+    function replyTemplate(i) {
+      const vi = i.lang === 'vi' && window.I18N_VI;
+      const tr = window.I18N_CORE.makeT(vi ? window.I18N_VI : null);
+      const params = { file: i.fileName, date: new Date(i.createdAt).toLocaleDateString(vi ? 'vi-VN' : 'en-GB'), reason: i.dismissReason || '' };
+      return { subject: tr(REPLY_SUBJECT, params), message: tr(i.status === 'dismissed' ? REPLY_DISMISSED : REPLY_MESSAGE, params) };
+    }
+    let replying = null, mailtoReady = null;
+    function openReply(i) {
+      replying = i;
+      mailtoReady = null;
+      const t = replyTemplate(i);
+      $('replyTo').innerHTML = esc(__('To {email}', { email: i.email }));
+      $('replySubject').value = t.subject;
+      $('replyMessage').value = t.message;
+      $('replyResolve').checked = true;
+      $('replyErr').textContent = '';
+      setSendMode(mail.configured ? 'smtp' : 'mailto');
+      $('replyDialog').showModal();
+      $('replyMessage').focus();
+    }
+    // smtp: Send (the server emails it). mailto: open the mail program, then "I sent it" records it.
+    let mode = 'smtp';
+    function setSendMode(m) {
+      mode = m;
+      $('replySend').disabled = false;
+      $('replySend').querySelector('span').textContent = m === 'smtp' ? __('Send') : m === 'mailto' ? __('Open my mail program') : __('I sent it');
+      $('replyVia').textContent = m === 'smtp' ? __('Sent by the mail server from {from}.', { from: mail.from })
+        : m === 'mailto' ? __('No mail server is set: your mail program opens with this message. Send it there, then come back and confirm.')
+        : __('Did you send it from your mail program? Confirm to record the reply.');
+    }
+    $('replyCancel').addEventListener('click', () => $('replyDialog').close());
+    $('replyForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const i = replying;
+      if (!i) return;
+      const body = { subject: $('replySubject').value.trim(), message: $('replyMessage').value.trim(), resolve: $('replyResolve').checked };
+      $('replyErr').textContent = '';
+      if (mode === 'mailto') {
+        const link = mailtoReady || `mailto:${encodeURIComponent(i.email)}?subject=${encodeURIComponent(body.subject)}&body=${encodeURIComponent(body.message)}`;
+        window.open(link, '_blank', 'noopener');
+        setSendMode('confirm');
+        return;
+      }
+      $('replySend').disabled = true;
+      try {
+        const r = await sendJson(`/api/suggestions/${encodeURIComponent(i.id)}/reply`, 'POST', { ...body, ...(mode === 'confirm' ? { via: 'mailto' } : {}) });
+        $('replyDialog').close();
+        showMsg(r.via === 'smtp' ? __('Reply emailed to {email}.', { email: i.email }) : __('Reply recorded.'));
+        await load();
+      } catch (err) {
+        if (err.data?.mailto) { // no mail server, or it refused: fall back to the mail program
+          mailtoReady = err.data.mailto;
+          $('replyErr').textContent = __(err.message);
+          setSendMode('mailto');
+        } else {
+          $('replyErr').textContent = __(err.message);
+          $('replySend').disabled = false;
+        }
+      }
+    });
+
+    async function refresh() {
+      try { await Promise.all([loadMail(), load()]); } catch (err) { showMsg(err.message, 'err'); }
+    }
+    $('refreshBtn').addEventListener('click', refresh);
+    refresh().then(() => {
+      const id = new URLSearchParams(location.search).get('id');
+      if (id) { filter = 'all'; render(); openItem(items.find(i => i.id === id)); }
+    });
+  </script>
+</body>
+</html>

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Retrains the learned roster extractor (the AI model /upload and /acars use) from every
+ * Retrains the learned roster extractor (the AI model /roster and /acars use) from every
  * label, PDFs, images and ACARS pictures (the /models page's "Train" runs this too):
  *   1. training words from the labels (scripts/build-pdf-token-data.mjs for labels/pdf/,
  *      scripts/build-image-token-data.mjs for image labels, scripts/build-acars-token-data.mjs for the

@@ -109,7 +109,7 @@
   <main class="page">
     <div class="page-header">
       <h1><i class="fa-solid fa-calendar-days" aria-hidden="true"></i> Roster Calendar</h1>
-      <p class="subtitle" data-i18n>Open one or more <code>.ics</code> files (exported from /upload or from any calendar) to see them by month. Files are read in the browser only, nothing is sent to the server.</p>
+      <p class="subtitle" data-i18n>Open one or more <code>.ics</code> files (exported from /roster or from any calendar) to see them by month. Files are read in the browser only, nothing is sent to the server.</p>
     </div>
 
     <div class="card toolbar" id="toolbar">
@@ -140,7 +140,7 @@
 
     <div class="empty" id="empty">
       <i class="fa-regular fa-calendar" aria-hidden="true"></i>
-      <span data-i18n>No calendars yet. Click <b>Open .ics file</b>, drop a file here, or on <a href="/upload">/upload</a> click <b>View calendar</b> after reading a roster.</span>
+      <span data-i18n>No calendars yet. Click <b>Open .ics file</b>, drop a file here, or on <a href="/roster">/roster</a> click <b>View calendar</b> after reading a roster.</span>
     </div>
   </main>
 
@@ -157,7 +157,7 @@
     const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'].map(m => __(m));
     const DOW = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(d => __(d));
     const STORE_KEY = 'roster-calendar:cals';   // calendars kept for this browser (a convenience)
-    const HANDOFF_KEY = 'roster-calendar:handoff'; // one .ics passed from /upload "View calendar"
+    const HANDOFF_KEY = 'roster-calendar:handoff'; // one .ics passed from /roster "View calendar"
     const MAX_EVENTS_IN_CELL = 4;
 
     // { id, name, color, on, text, events }
@@ -517,7 +517,7 @@
     });
     $('clearBtn').addEventListener('click', () => { cals = []; save(); render(); });
 
-    // ---- start: calendars kept in this browser, one passed from /upload, the URL's month ----
+    // ---- start: calendars kept in this browser, one passed from /roster, the URL's month ----
     {
       try {
         for (const c of JSON.parse(store.get(STORE_KEY) || '[]')) addCalendar(c.name, c.text, { color: c.color, on: c.on, quiet: true });

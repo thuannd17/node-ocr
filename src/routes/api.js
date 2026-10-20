@@ -122,7 +122,7 @@ export async function readRosterImage(file) {
 
     const t0 = Date.now();
     let uploadPhase = 'init';
-    // /upload is for trying the AI model: every upload is read by the model (OCR + learned
+    // /roster is for trying the AI model: every upload is read by the model (OCR + learned
     // tagger), never answered from a saved label or the parser. /label Auto-fill offers the parser.
     if (!modelInfo().ready) throw new Error('No AI model yet: label a few files, then click "Train" on /models.');
     uploadPhase = 'ocr+model';
@@ -285,7 +285,7 @@ router.post('/labels', async (req, res) => {
 });
 
 // Review one labeled image against its label (/benchmark "Xem & sửa" -> /label?review=1).
-// Prediction = the AI model's reading, as /upload and the AI model benchmark read it.
+// Prediction = the AI model's reading, as /roster and the AI model benchmark read it.
 // Rows are paired with the benchmark's own alignRows, so the marked cells are the benchmark's errors.
 const REVIEW_FIELDS = ['date', 'day', 'duty', 'dep', 'begin', 'end', 'arr'];
 router.get('/review', async (req, res) => {
@@ -403,7 +403,7 @@ router.get('/benchmark/types', async (req, res) => {
 router.get('/benchmark/ocr/stream', (req, res) => streamBenchmark(req, res, async (opts) => { await syncMedia({ force: true }); return runOcrBenchmark(opts); }));
 
 // AI model over the labeled files of the chosen types (?types=image,pdf,csv; default all),
-// as /upload reads them (services/model-benchmark.js).
+// as /roster reads them (services/model-benchmark.js).
 router.get('/benchmark/model/stream', (req, res) => {
   const asked = String(req.query.types || '').split(',').map(t => t.trim().toLowerCase()).filter(t => FILE_TYPES.includes(t));
   const types = asked.length ? asked : FILE_TYPES;

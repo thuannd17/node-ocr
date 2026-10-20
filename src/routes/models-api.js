@@ -55,7 +55,7 @@ const FAMILIES = {
     name: 'Roster AI',
     icon: 'fa-brain',
     description: 'Reads the words (OCR text of an image, or the text layer of a PDF) into roster rows: puts every word in a column (date, duty, dep, begin…), then joins them into rows. Learns from the labels (in MinIO).',
-    applyNote: 'Activating takes effect at once on /upload and the AI model benchmark.',
+    applyNote: 'Activating takes effect at once on /roster and the AI model benchmark.',
     trainNote: 'Trains a new version on all image labels + PDF, CSV, XLS, XLSX, TXT + ACARS pictures (about 10 minutes). When done the new version is activated; the old one stays here.',
     train: () => ({ args: ['src/scripts/model-train.mjs'] }),
     versions: (__) => listModels().map(m => ({

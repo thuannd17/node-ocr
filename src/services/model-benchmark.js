@@ -1,12 +1,12 @@
 /**
  * Benchmark of the AI model over every labeled file, images and PDFs together:
- * each file is read exactly as /upload reads it and compared with its verified
+ * each file is read exactly as /roster reads it and compared with its verified
  * label (ground truth).
  *
  *   image: PaddleOCR lines -> learned tagger -> rows (extractImageWithModel),
  *          scored like the image benchmark (compareSection: 7 fields, OCR-tolerant).
  *   PDF:   text layer -> learned tagger -> rows (extractWithModel), scored like the
- *          PDF benchmark (compareRows: 13 fields, exact). A picture-only PDF, as on /upload
+ *          PDF benchmark (compareRows: 13 fields, exact). A picture-only PDF, as on /roster
  *          (readPdfWithModel): a duty plan by the parser on its OCR text (source 'parser'),
  *          a roster picture by the model on its OCR lines as an image.
  *
@@ -65,7 +65,7 @@ async function readImage(file, dir) {
   return { ...(await extractImageWithModel(lines, width, height, dir)), source: 'model' };
 }
 
-// as /upload does (an image-only duty plan: the parser; a roster picture: the model as on an image)
+// as /roster does (an image-only duty plan: the parser; a roster picture: the model as on an image)
 const readPdf = (file, dir) => readPdfWithModel(file, dir);
 
 const MAX_DIFFS = 200; // per file, enough to see what is wrong without a huge page

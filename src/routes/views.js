@@ -32,8 +32,10 @@ router.get('/', (req, res) => {
 	res.sendFile(path.join(viewsDir, 'home.html'));
 });
 
-router.get('/upload', (req, res) => {
-	res.sendFile(path.join(viewsDir, 'upload.html'));
+// Read a roster with the AI model (was /upload until 2026-10-20: old links and bookmarks still lead here)
+router.get('/upload', (req, res) => res.redirect(301, `/roster${req.originalUrl.slice('/upload'.length)}`));
+router.get('/roster', (req, res) => {
+	res.sendFile(path.join(viewsDir, 'roster.html'));
 });
 
 // Public: scan or upload a cockpit ACARS (OOOI) picture, read by the AI model
@@ -59,7 +61,12 @@ router.get('/media', (req, res) => {
 });
 router.get('/storage', (req, res) => res.redirect(301, '/media'));
 
-// .ics files (exported from /upload, or any calendar) shown as a month calendar, read in the browser
+// Admin: the correction suggestions sent from /roster, their state and the reply by email (routes/suggestions-api.js)
+router.get('/helpdesk', (req, res) => {
+	res.sendFile(path.join(viewsDir, 'helpdesk.html'));
+});
+
+// .ics files (exported from /roster, or any calendar) shown as a month calendar, read in the browser
 router.get('/calendar', (req, res) => {
 	res.sendFile(path.join(viewsDir, 'calendar.html'));
 });

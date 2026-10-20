@@ -1,10 +1,10 @@
-// Storage of Roster OCR (MinIO): the only code that reads or writes the roster data and the trained models. The app server and
+// Storage of RosterParser (MinIO): the only code that reads or writes the roster data and the trained models. The app server and
 // its scripts use it through services/media-client.js (which adds the local mirror); it talks to
 // MinIO directly (no service of its own). Object layout (MinIO bucket, or a folder with MEDIA_BACKEND=fs):
 //
 //   files/<ext>/<name>                 a roster file: image, PDF, CSV, XLS, XLSX, TXT
 //   labels/<ext>/<name>.json           its verified label (ground truth)
-//   suggestions/<id>/meta.json         a correction suggestion sent from /upload
+//   suggestions/<id>/meta.json         a correction suggestion sent from /roster
 //   suggestions/<id>/file.<ext>        ... and its roster file (removed once handled)
 //   trash/<YYYY-MM-DD>/<key>           files and labels deleted on /label, models deleted on /models (nothing is erased)
 //   models/ai/<id>/...                 a trained version of the AI roster model; models/ai/active.json: the one in use

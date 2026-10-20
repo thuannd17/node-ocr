@@ -21,6 +21,7 @@ import { ACARS_FIELDS } from '../services/acars.js';
 import { modelInfo } from '../services/pdf-ai-extract.js';
 import { isDataName, kindOf, IMAGE_EXTS } from '../utils/data-files.js';
 import { UPLOADS_DIR } from '../utils/paths.js';
+import { createSuggestion, cleanEmail } from './suggestions-api.js';
 
 const router = Router();
 
@@ -62,6 +63,32 @@ router.post('/acars/read', uploadFile, async (req, res) => {
     fail(res, e, 'POST /api/acars/read');
   } finally {
     for (const p of [req.file.path, file]) fs.rm(p, { force: true }, () => {});
+  }
+});
+
+/**
+ * POST /api/acars/suggestions  multipart: file (the picture), email? (to get an answer), note? (what is wrong),
+ * fields? (JSON, as read by POST /api/acars/read). Sends the picture to the admins (/helpdesk), who label it
+ * (it then joins the ACARS training data) or dismiss it. -> 201 { id, status: 'pending' }
+ */
+router.post('/acars/suggestions', uploadFile, async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'Send the ACARS picture in the multipart field "file"' });
+  try {
+    let fields = null;
+    if (req.body?.fields) {
+      try { fields = JSON.parse(req.body.fields); } catch { return res.status(400).json({ error: '"fields" must be JSON: { "flt": "...", "out": "...", ... }' }); }
+    }
+    const note = String(req.body?.note || '').trim();
+    if (note.length > 2000) return res.status(400).json({ error: 'The note is longer than 2000 characters' });
+    const email = cleanEmail(req.body?.email);
+    if (email === null) return res.status(400).json({ error: 'The email address is not valid' });
+    const s = await createSuggestion(req.file, { note, fields, acars: true, lang: req.lang, email });
+    res.status(201).json({ id: s.id, status: s.status, createdAt: s.createdAt });
+  } catch (e) {
+    if (e.code !== 'MEDIA_DOWN') console.error('[acars suggestion]', e);
+    res.status(e.code === 'MEDIA_DOWN' ? 503 : 500).json({ error: e.code === 'MEDIA_DOWN' ? 'Suggestions cannot be received right now, please try again later' : e.message });
+  } finally {
+    fs.rm(req.file.path, { force: true }, () => {});
   }
 });
 

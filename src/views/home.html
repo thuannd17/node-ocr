@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Roster OCR — Home</title>
+  <title>RosterParser — Home</title>
   <script src="/assets/i18n/vi.js"></script>
   <script src="/assets/i18n.js"></script>
   <link rel="stylesheet" href="/assets/app.css">
@@ -64,7 +64,7 @@
   <script src="/assets/nav.js"></script>
   <main class="page">
   <div class="page-header">
-    <h1>Roster OCR</h1>
+    <h1>RosterParser</h1>
     <p class="subtitle">Reads crew rosters (eCrew screenshots, duty-plan PDFs, CSV / Excel exports) into Published / Planned rows with a self-learning AI model, and turns them into calendars, airport details and night time.</p>
   </div>
 
@@ -72,11 +72,11 @@
     <h2 class="group-title"><i class="fa-solid fa-globe" aria-hidden="true"></i> Tools</h2>
     <p class="group-note">Open to everyone, also as a public API for other apps.</p>
     <div class="grid">
-    <a class="card" href="/upload">
-      <div class="icon"><i class="fa-solid fa-upload" aria-hidden="true"></i></div>
-      <h2>Upload Roster</h2>
+    <a class="card" href="/roster">
+      <div class="icon"><i class="fa-solid fa-file-lines" aria-hidden="true"></i></div>
+      <h2>Roster</h2>
       <p>Upload roster images, PDFs, CSV or Excel files (drop or pick) and see the Published / Planned rows the AI model reads, then export them to a calendar.</p>
-      <span class="url">/upload</span>
+      <span class="url">/roster</span>
       <span class="badge green">AI Model</span>
     </a>
     <a class="card" href="/acars">
@@ -146,10 +146,17 @@
       <span class="url">/media</span>
       <span class="badge orange">Data</span>
     </a>
+    <a class="card" href="/helpdesk">
+      <div class="icon"><i class="fa-solid fa-headset" aria-hidden="true"></i></div>
+      <h2>Helpdesk</h2>
+      <p>The correction suggestions sent from /roster: who sent them, their state, and a reply by email.</p>
+      <span class="url">/helpdesk</span>
+      <span class="badge orange">Support</span>
+    </a>
     </div>
   </section>
 
-  <footer><span data-i18n>Building on Roster OCR? See the <a href="/api-docs">API documentation</a> (<a href="/api/openapi.json">OpenAPI JSON</a>).</span></footer>
+  <footer><span data-i18n>Building on RosterParser? See the <a href="/api-docs">API documentation</a> (<a href="/api/openapi.json">OpenAPI JSON</a>).</span></footer>
   </main>
 </body>
 </html>

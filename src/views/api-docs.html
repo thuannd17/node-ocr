@@ -34,7 +34,7 @@
   <main class="page">
     <div class="page-header">
       <h1><i class="fa-solid fa-book" aria-hidden="true"></i> API Documentation</h1>
-      <p class="subtitle">The public API of Roster OCR, for other apps: read rosters, export calendars, look up airports and weather, compute night time.</p>
+      <p class="subtitle">The public API of RosterParser, for other apps: read rosters, export calendars, look up airports and weather, compute night time.</p>
       <div class="header-extra">
         <a class="btn secondary" href="/api/openapi.json" target="_blank" rel="noopener"><i class="fa-solid fa-file-code" aria-hidden="true"></i> OpenAPI JSON</a>
       </div>
@@ -46,6 +46,8 @@
         <a href="#/Roster/uploadRoster"><i class="fa-solid fa-file-arrow-up" aria-hidden="true"></i><span><b>Read a roster: image, PDF, CSV, Excel or TXT</b><code>POST /api/roster/upload</code></span></a>
         <a href="#/Roster/suggestCorrection"><i class="fa-solid fa-comment-medical" aria-hidden="true"></i><span><b>Suggest a correction</b><code>POST /api/roster/suggestions</code></span></a>
         <a href="#/Calendar/exportCalendar"><i class="fa-solid fa-calendar-days" aria-hidden="true"></i><span><b>Roster rows to .ics</b><code>POST /api/calendar/export</code></span></a>
+        <a href="#/ACARS/readAcars"><i class="fa-solid fa-satellite-dish" aria-hidden="true"></i><span><b>Read an ACARS picture</b><code>POST /api/acars/read</code></span></a>
+        <a href="#/Route%20map/routeMap"><i class="fa-solid fa-route" aria-hidden="true"></i><span><b>Routes of rosters on a world map</b><code>POST /api/route-map</code></span></a>
         <a href="#/Airports/searchAirports"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i><span><b>Search airports</b><code>GET /api/airports</code></span></a>
         <a href="#/Airports/getAirport"><i class="fa-solid fa-plane-departure" aria-hidden="true"></i><span><b>One airport</b><code>GET /api/airports/{code}</code></span></a>
         <a href="#/Airports/getAirportWeather"><i class="fa-solid fa-cloud-sun" aria-hidden="true"></i><span><b>Airport weather, 7 days</b><code>GET /api/airports/{code}/weather</code></span></a>

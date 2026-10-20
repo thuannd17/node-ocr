@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Upload Roster</title>
+  <title>Roster</title>
   <script src="/assets/i18n/vi.js"></script>
   <script src="/assets/i18n.js"></script>
   <link rel="stylesheet" href="/assets/app.css">
@@ -28,6 +28,8 @@
     dialog.suggest p { margin: 0; font-size: 14px; color: var(--muted); line-height: 1.5; }
     dialog.suggest textarea { width: 100%; min-height: 110px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; font: inherit; font-size: 14px; resize: vertical; box-sizing: border-box; }
     dialog.suggest .file { font-size: 13px; overflow-wrap: anywhere; }
+    dialog.suggest input[type=email] { width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; font: inherit; font-size: 14px; box-sizing: border-box; }
+    dialog.suggest p.small { font-size: 12px; margin-top: -6px; }
     dialog.suggest .actions { display: flex; gap: 8px; justify-content: flex-end; align-items: center; flex-wrap: wrap; }
     dialog.suggest .actions .btn { margin-top: 0; padding: 8px 16px; font-size: 14px; }
     dialog.suggest .err { color: #d32f2f; font-size: 13px; flex: 1; }
@@ -248,7 +250,7 @@
   <script src="/assets/nav.js"></script>
   <main class="page">
   <div class="page-header">
-    <h1><i class="fa-solid fa-upload" aria-hidden="true"></i> Upload Roster</h1>
+    <h1><i class="fa-solid fa-file-lines" aria-hidden="true"></i> Roster</h1>
     <p class="subtitle">Upload rosters and see the Published / Planned results, to check how the AI model reads a file (view only).</p>
   </div>
 
@@ -285,6 +287,9 @@
       <h3 id="suggestTitle"><i class="fa-solid fa-comment-medical" aria-hidden="true"></i> Suggest a correction</h3>
       <p>Does the table not match your roster? Send the file to the administrators: they check it, write the right rows and use it to teach the AI model. The file is kept on the server until they have handled it.</p>
       <div class="file"><i class="fa-regular fa-file" aria-hidden="true"></i> <strong id="suggestFile"></strong></div>
+      <label for="suggestEmail" style="font-size:14px; font-weight:600">Your email</label>
+      <input type="email" id="suggestEmail" required maxlength="254" autocomplete="email" placeholder="name@example.com">
+      <p class="small">We write to you there when your suggestion is handled.</p>
       <label for="suggestNote" style="font-size:14px; font-weight:600">What is wrong? (optional)</label>
       <textarea id="suggestNote" maxlength="2000" placeholder="e.g. 12 Mar: the duty is OS 769, not OS 768; the planned rows are missing"></textarea>
       <div class="actions">
@@ -404,7 +409,7 @@
     }
     setMode('image');
 
-    // /upload always shows what the AI model read: say so.
+    // /roster always shows what the AI model read: say so.
     function modelInfoHtml(result) {
       if (result.source !== 'model') return result.source === 'parser' ? ` | ${__('Read by the parser')}` : '';
       return ` | <span style="color:#7b1fa2"><i class="fa-solid fa-brain" aria-hidden="true"></i> AI model</span>`;
@@ -434,7 +439,7 @@
     // (the OCR server takes one request at a time) and each keeps its own result.
     // The select list shows them all; the one selected is shown below.
     // The server only reads a file, it does not keep it; "Suggest a correction" sends it to the admins.
-    // /upload is a public page: it calls the public API only (/api/roster/upload, /api/roster/suggestions), never /label or its APIs.
+    // /roster is a public page: it calls the public API only (/api/roster/upload, /api/roster/suggestions), never /label or its APIs.
     const jobs = [];       // { id, file, title, kind: 'image'|'pdf', status: 'waiting'|'reading'|'done'|'error', result, error, previewUrl, suggestion }
     let selected = null;   // the job shown
     let reading = false;   // the queue is running
@@ -610,7 +615,9 @@
       document.getElementById('suggestErr').textContent = '';
       document.getElementById('suggestSend').disabled = false;
       suggestDialog.showModal();
-      document.getElementById('suggestNote').focus();
+      const email = document.getElementById('suggestEmail');
+      if (!email.value) { try { email.value = localStorage.getItem('suggest.email') || ''; } catch { /* storage blocked */ } }
+      (email.value ? document.getElementById('suggestNote') : email).focus();
     }
     document.getElementById('suggestCancel').addEventListener('click', () => suggestDialog.close());
     document.getElementById('suggestForm').addEventListener('submit', async (e) => {
@@ -621,12 +628,15 @@
       document.getElementById('suggestErr').textContent = '';
       try {
         const form = formDataOf('file', job.file);
+        const email = document.getElementById('suggestEmail').value.trim();
+        form.append('email', email);
         form.append('note', document.getElementById('suggestNote').value.trim());
         form.append('rows', JSON.stringify({ published: job.result.published || [], planned: job.result.planned || [] }));
         const res = await fetch('/api/roster/suggestions', { method: 'POST', body: form });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
         job.suggestion = data;
+        try { localStorage.setItem('suggest.email', email); } catch { /* storage blocked */ }
         suggestDialog.close();
         document.getElementById('suggestNote').value = '';
         renderQueue();

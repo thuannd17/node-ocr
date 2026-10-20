@@ -1,9 +1,9 @@
 {
   "openapi": "3.0.3",
   "info": {
-    "title": "Roster OCR public API",
+    "title": "RosterParser public API",
     "version": "1.0.0",
-    "description": "Public endpoints of Roster OCR: read a crew roster (image, PDF, CSV, Excel, text) into rows, turn rows into an iCalendar file, look up airports with their weather, and compute the night time of a flight.\n\n**Base URL**: the host serving this page (all paths start with `/api`).\n\n**Authentication**: none for now. These endpoints are meant to stay public; the administration endpoints (labels, benchmarks, models) are not part of this API and will require an account later.\n\n**Formats**: JSON in and out (UTF-8) unless stated; uploads are `multipart/form-data`. Times are ISO 8601; roster times keep the roster's notation (`HH:MM Z` = UTC, `L` / `LB` = local).\n\n**Errors**: a non-2xx status with `{ \"error\": \"message\" }`. Messages are English by default; send the cookie `lang=vi` for Vietnamese.\n\n**Limits**: uploads up to 10 MB. Roster reading uses one OCR server for everyone: requests queue, and `503` with `busy: true` means the queue is full, retry after a few seconds. Weather is cached for 30 minutes per airport.\n\n**Privacy**: `POST /api/roster/upload` only reads the file: it is deleted right after and nothing is kept. A roster is kept only when you send it with `POST /api/roster/suggestions` (a correction suggestion): the administrators then use it to improve the model, or delete it."
+    "description": "Public endpoints of RosterParser: read a crew roster (image, PDF, CSV, Excel, text) into rows, turn rows into an iCalendar file, look up airports with their weather, and compute the night time of a flight.\n\n**Base URL**: the host serving this page (all paths start with `/api`).\n\n**Authentication**: none for now. These endpoints are meant to stay public; the administration endpoints (labels, benchmarks, models) are not part of this API and will require an account later.\n\n**Formats**: JSON in and out (UTF-8) unless stated; uploads are `multipart/form-data`. Times are ISO 8601; roster times keep the roster's notation (`HH:MM Z` = UTC, `L` / `LB` = local).\n\n**Errors**: a non-2xx status with `{ \"error\": \"message\" }`. Messages are English by default; send the cookie `lang=vi` for Vietnamese.\n\n**Limits**: uploads up to 10 MB. Roster reading uses one OCR server for everyone: requests queue, and `503` with `busy: true` means the queue is full, retry after a few seconds. Weather is cached for 30 minutes per airport.\n\n**Privacy**: `POST /api/roster/upload` only reads the file: it is deleted right after and nothing is kept. A roster is kept only when you send it with `POST /api/roster/suggestions` (a correction suggestion): the administrators then use it to improve the model, or delete it."
   },
   "servers": [
     {
@@ -14,7 +14,7 @@
   "tags": [
     {
       "name": "Roster",
-      "description": "Read a roster file into Published / Planned rows (the AI model, as on /upload)."
+      "description": "Read a roster file into Published / Planned rows (the AI model, as on /roster)."
     },
     {
       "name": "ACARS",
@@ -23,6 +23,10 @@
     {
       "name": "Calendar",
       "description": "Roster rows to iCalendar (.ics), as on /calendar."
+    },
+    {
+      "name": "Route map",
+      "description": "The flights of rosters on a world map or a globe, as on /route-map: the routes as data (JSON or GeoJSON), and a link that opens the map with them."
     },
     {
       "name": "Airports",
@@ -40,7 +44,7 @@
           "Roster"
         ],
         "summary": "Read a roster file",
-        "description": "Reads a crew roster into its two tables, \"Published roster\" and \"Rest of this roster is planned\", with the AI model (as on /upload). One endpoint for every file type; the server picks the reader from the file:\n\n| File | How it is read | `readMode` |\n|---|---|---|\n| JPG, PNG, BMP, JFIF (eCrew screenshot) | OCR (PaddleOCR) + AI model | `ocr-image` |\n| PDF with a text layer (duty plan, schedule report) | its text + AI model | `text` |\n| PDF without a text layer, duty plan | OCR + parser (`source: parser`) | `ocr` |\n| PDF without a text layer, roster screen printed to PDF | pages OCRed as one roster image + AI model | `ocr-image` |\n| CSV, XLS, XLSX, TXT | its cells / text + AI model | `text` |\n\nImages give the columns date, day, duty, dep, begin, end, arr; other files can add more (see RosterRow). Takes from about one second to a minute depending on the queue. The file is only read: it is deleted right after. To send it to the administrators because the rows are wrong, use `POST /api/roster/suggestions`.",
+        "description": "Reads a crew roster into its two tables, \"Published roster\" and \"Rest of this roster is planned\", with the AI model (as on /roster). One endpoint for every file type; the server picks the reader from the file:\n\n| File | How it is read | `readMode` |\n|---|---|---|\n| JPG, PNG, BMP, JFIF (eCrew screenshot) | OCR (PaddleOCR) + AI model | `ocr-image` |\n| PDF with a text layer (duty plan, schedule report) | its text + AI model | `text` |\n| PDF without a text layer, duty plan | OCR + parser (`source: parser`) | `ocr` |\n| PDF without a text layer, roster screen printed to PDF | pages OCRed as one roster image + AI model | `ocr-image` |\n| CSV, XLS, XLSX, TXT | its cells / text + AI model | `text` |\n\nImages give the columns date, day, duty, dep, begin, end, arr; other files can add more (see RosterRow). Takes from about one second to a minute depending on the queue. The file is only read: it is deleted right after. To send it to the administrators because the rows are wrong, use `POST /api/roster/suggestions`.",
         "operationId": "uploadRoster",
         "requestBody": {
           "required": true,
@@ -140,7 +144,7 @@
           "Roster"
         ],
         "summary": "Suggest a correction",
-        "description": "The rows read from a roster are wrong? Send the roster file to the administrators, with an optional note and the rows that were read. They check it and label it (the file then becomes training data for the model) or dismiss it (the file is deleted). This is the only call that keeps a roster on the server.",
+        "description": "The rows read from a roster are wrong? Send the roster file to the administrators, with an optional email address (to get an answer when it is handled), note and the rows that were read. They check it and label it (the file then becomes training data for the model) or dismiss it (the file is deleted). This is the only call that keeps a roster on the server.",
         "operationId": "suggestCorrection",
         "requestBody": {
           "required": true,
@@ -156,6 +160,12 @@
                     "type": "string",
                     "format": "binary",
                     "description": "The roster: JPG, PNG, BMP, JFIF, PDF, CSV, XLS, XLSX or TXT, up to 10 MB"
+                  },
+                  "email": {
+                    "type": "string",
+                    "format": "email",
+                    "maxLength": 254,
+                    "description": "Where the administrators answer when they have handled it (optional; `400` when it is not an email address)"
                   },
                   "note": {
                     "type": "string",
@@ -205,7 +215,7 @@
         "x-codeSamples": [
           {
             "lang": "curl",
-            "source": "curl -F file=@roster.png -F \"note=12 Mar: the duty is OS 769\" http://localhost:3000/api/roster/suggestions"
+            "source": "curl -F file=@roster.png -F email=crew@example.com -F \"note=12 Mar: the duty is OS 769\" http://localhost:3000/api/roster/suggestions"
           }
         ]
       }
@@ -300,6 +310,88 @@
           {
             "lang": "curl",
             "source": "curl -F \"file=@acars.jpg\" http://localhost:3000/api/acars/read"
+          }
+        ]
+      }
+    },
+    "/api/acars/suggestions": {
+      "post": {
+        "tags": [
+          "ACARS"
+        ],
+        "summary": "Suggest a correction (ACARS)",
+        "description": "The values read from an ACARS picture are wrong? Send the picture to the administrators, with an optional email address (to get an answer when it is handled), note and the fields `POST /api/acars/read` returned. They check it and label it (the picture then becomes training data for the model) or dismiss it (the picture is deleted). This is the only ACARS call that keeps a picture on the server.",
+        "operationId": "suggestAcarsCorrection",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "file"
+                ],
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "The picture: JPG, PNG, BMP or JFIF, up to 10 MB"
+                  },
+                  "email": {
+                    "type": "string",
+                    "format": "email",
+                    "maxLength": 254,
+                    "description": "Where the administrators answer when they have handled it (optional; `400` when it is not an email address)"
+                  },
+                  "note": {
+                    "type": "string",
+                    "maxLength": 2000,
+                    "description": "What is wrong (optional)"
+                  },
+                  "fields": {
+                    "type": "string",
+                    "description": "Optional JSON: the `fields` object `POST /api/acars/read` returned (`flt`, `date`, `dept`, `dest`, `out`, `off`, `on`, `in`, `info`)"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Sent: waiting for an administrator",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuggestionCreated"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "413": {
+            "description": "The file is larger than 10 MB",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "File larger than 10 MB"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "curl",
+            "source": "curl -F file=@acars.jpg -F email=crew@example.com -F \"note=OFF is 12:39\" http://localhost:3000/api/acars/suggestions"
           }
         ]
       }
@@ -402,7 +494,7 @@
                 "schema": {
                   "type": "string"
                 },
-                "example": "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Roster OCR//Roster export//EN\r\n...\r\nEND:VCALENDAR\r\n"
+                "example": "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//RosterParser//Roster export//EN\r\n...\r\nEND:VCALENDAR\r\n"
               },
               "application/json": {
                 "schema": {
@@ -419,6 +511,137 @@
           {
             "lang": "curl",
             "source": "curl -X POST -H 'Content-Type: application/json' -d @rows.json -o roster.ics http://localhost:3000/api/calendar/export"
+          }
+        ]
+      }
+    },
+    "/api/route-map": {
+      "post": {
+        "tags": [
+          "Route map"
+        ],
+        "summary": "Routes of rosters on a world map",
+        "description": "The flights of one or more rosters as routes on a world map, as /route-map draws them: one route per airport pair, along the great circle, one colour per roster. Rosters can be given as roster rows, as an .ics text or as a list of flights.\n\n**Showing the map.** The answer's `viewUrl` opens `/route-map` with the routes drawn (nothing is kept on the server: the routes are in the link). The link can also be built by hand:\n\n`/route-map?r=<name>|<#color>|<DEP-ARR[*count]>,<DEP-ARR>...&r=...`\n\none `r` per roster, e.g. `/route-map?r=Jan|%23c0392b|VIE-HAN*2,HAN-VIE*2,VIE-JFK`. Options: `embed=1` (only the map and its legend, for an iframe), `view=globe` (the globe instead of the flat map), `table=0` (no route table).\n\n`?format=geojson` answers a GeoJSON FeatureCollection instead: one LineString per route and roster (properties: from, to, roster, color, flights, distanceKm) and one Point per airport.",
+        "operationId": "routeMap",
+        "parameters": [
+          {
+            "name": "format",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "json",
+                "geojson"
+              ],
+              "default": "json"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RouteMapRequest"
+              },
+              "examples": {
+                "flights": {
+                  "summary": "A list of flights",
+                  "value": {
+                    "rosters": [
+                      {
+                        "name": "Mar 2025",
+                        "color": "#c0392b",
+                        "flights": [
+                          {
+                            "dep": "VIE",
+                            "arr": "HAN",
+                            "flight": "OS21",
+                            "date": "2025-03-11"
+                          },
+                          {
+                            "dep": "HAN",
+                            "arr": "VIE",
+                            "flight": "OS22",
+                            "date": "2025-03-13"
+                          },
+                          {
+                            "dep": "VIE",
+                            "arr": "JFK",
+                            "flight": "OS87"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                },
+                "rows": {
+                  "summary": "Roster rows (one roster at the top level)",
+                  "value": {
+                    "name": "Jan 25",
+                    "published": [
+                      {
+                        "date": "7 Jan 25",
+                        "day": "Tue",
+                        "duty": "WAZ7015",
+                        "dep": "AUH",
+                        "begin": "A02:00 Z",
+                        "end": "A05:00 Z",
+                        "arr": "GYD"
+                      },
+                      {
+                        "date": "7 Jan 25",
+                        "day": "Tue",
+                        "duty": "WAZ7016",
+                        "dep": "GYD",
+                        "begin": "A05:55 Z",
+                        "end": "09:15 Z",
+                        "arr": "AUH"
+                      }
+                    ],
+                    "planned": []
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The routes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouteMapResult"
+                }
+              },
+              "application/geo+json": {
+                "schema": {
+                  "type": "object",
+                  "description": "GeoJSON FeatureCollection (?format=geojson)"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Nothing to draw, or a bad input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "rosters[0].flights[0]: dep and arr must be airport codes"
+                }
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "curl",
+            "source": "curl -X POST http://localhost:3000/api/route-map -H \"Content-Type: application/json\" \\\n  -d '{\"rosters\":[{\"name\":\"Mar 2025\",\"flights\":[{\"dep\":\"VIE\",\"arr\":\"HAN\"},{\"dep\":\"HAN\",\"arr\":\"VIE\"}]}]}'"
           }
         ]
       }
@@ -1560,6 +1783,248 @@
           "ms": {
             "type": "integer",
             "description": "Time taken on the server, in milliseconds"
+          }
+        }
+      },
+      "RouteMapFlight": {
+        "type": "object",
+        "required": [
+          "dep",
+          "arr"
+        ],
+        "properties": {
+          "dep": {
+            "type": "string",
+            "example": "VIE",
+            "description": "Departure airport code (IATA, ICAO, ...)"
+          },
+          "arr": {
+            "type": "string",
+            "example": "HAN",
+            "description": "Arrival airport code"
+          },
+          "flight": {
+            "type": "string",
+            "example": "OS21"
+          },
+          "date": {
+            "type": "string",
+            "example": "2025-03-11",
+            "description": "YYYY-MM-DD; only used by the month filter"
+          },
+          "planned": {
+            "type": "boolean",
+            "description": "A planned flight (left out with includePlanned: false)"
+          }
+        }
+      },
+      "RouteMapRoster": {
+        "type": "object",
+        "description": "One roster, with its flights given in any of three ways (they add up). A row or event is a flight when it goes from one airport to another and its duty is a flight number (has a digit) or empty: ground duties such as \"GT LTN → STC\" are left out.",
+        "properties": {
+          "name": {
+            "type": "string",
+            "example": "Roster Jan 25"
+          },
+          "color": {
+            "type": "string",
+            "example": "#4a90e2",
+            "description": "Its colour on the map (#rrggbb); a palette colour when left out"
+          },
+          "published": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RosterRow"
+            },
+            "description": "Roster rows, as POST /api/roster/upload gives them"
+          },
+          "planned": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RosterRow"
+            }
+          },
+          "ics": {
+            "type": "string",
+            "description": "An iCalendar text, as POST /api/calendar/export gives it"
+          },
+          "flights": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RouteMapFlight"
+            }
+          }
+        }
+      },
+      "RouteMapRequest": {
+        "type": "object",
+        "description": "Several rosters in \"rosters\", or the fields of one roster at the top level.",
+        "properties": {
+          "rosters": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "$ref": "#/components/schemas/RouteMapRoster"
+            }
+          },
+          "month": {
+            "type": "string",
+            "example": "2025-01",
+            "description": "Only the flights of this month (YYYY-MM)"
+          },
+          "includePlanned": {
+            "type": "boolean",
+            "default": true,
+            "description": "false: leave the Planned rows / tentative events out"
+          }
+        }
+      },
+      "RouteMapAirport": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "iata": {
+            "type": "string",
+            "nullable": true
+          },
+          "icao": {
+            "type": "string",
+            "nullable": true
+          },
+          "name": {
+            "type": "string"
+          },
+          "city": {
+            "type": "string",
+            "nullable": true
+          },
+          "country": {
+            "type": "string",
+            "nullable": true,
+            "description": "ISO 3166 code"
+          },
+          "lat": {
+            "type": "number"
+          },
+          "lon": {
+            "type": "number"
+          }
+        }
+      },
+      "RouteMapResult": {
+        "type": "object",
+        "properties": {
+          "rosters": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "color": {
+                  "type": "string"
+                },
+                "flights": {
+                  "type": "integer",
+                  "description": "Flights on the map"
+                },
+                "flightsGiven": {
+                  "type": "integer",
+                  "description": "Flights found in the input"
+                }
+              }
+            }
+          },
+          "stats": {
+            "type": "object",
+            "properties": {
+              "flights": {
+                "type": "integer"
+              },
+              "routes": {
+                "type": "integer"
+              },
+              "airports": {
+                "type": "integer"
+              },
+              "distanceKm": {
+                "type": "number",
+                "description": "Sum of the flights' great-circle distances"
+              }
+            }
+          },
+          "routes": {
+            "type": "array",
+            "description": "One per airport pair (both directions together), busiest first",
+            "items": {
+              "type": "object",
+              "properties": {
+                "from": {
+                  "type": "string",
+                  "example": "HAN"
+                },
+                "to": {
+                  "type": "string",
+                  "example": "VIE"
+                },
+                "flights": {
+                  "type": "integer",
+                  "example": 2
+                },
+                "distanceKm": {
+                  "type": "number",
+                  "example": 8214.4
+                },
+                "directions": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "example": [
+                    "VIE-HAN",
+                    "HAN-VIE"
+                  ]
+                },
+                "rosters": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "color": {
+                        "type": "string"
+                      },
+                      "flights": {
+                        "type": "integer"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "airports": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/RouteMapAirport"
+            }
+          },
+          "unknown": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Airport codes not found (their flights are not on the map)"
+          },
+          "viewUrl": {
+            "type": "string",
+            "example": "http://localhost:3000/route-map?r=Mar+2025%7C%23c0392b%7CVIE-HAN%2CHAN-VIE%2CVIE-JFK",
+            "description": "Opens /route-map with these routes. Add &embed=1 to show only the map (for an iframe), &view=globe for the globe, &table=0 without the route table."
           }
         }
       }

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Benchmark — Roster OCR</title>
+  <title>Benchmark — RosterParser</title>
   <script src="/assets/i18n/vi.js"></script>
   <script src="/assets/i18n.js"></script>
   <link rel="stylesheet" href="/assets/app.css">
@@ -113,7 +113,7 @@
   </section>
 
   <section class="model-section" style="margin-top:32px">
-    <h2 class="bench-heading"><i class="fa-solid fa-brain" aria-hidden="true"></i> <span data-i18n>2. Reading roster data per file type <small>the AI model reads like on /upload, compared with the labels</small></span></h2>
+    <h2 class="bench-heading"><i class="fa-solid fa-brain" aria-hidden="true"></i> <span data-i18n>2. Reading roster data per file type <small>the AI model reads like on /roster, compared with the labels</small></span></h2>
     <div class="controls" style="flex-wrap:wrap">
       <b>File types</b>
       <span id="typeChoices" style="display:flex;gap:12px;flex-wrap:wrap;font-size:13px">loading…</span>
@@ -316,7 +316,7 @@
       const sorted = (r.files || []).slice().sort((a, b) => (a.error ? -1 : b.error ? 1 : (a.rowExact ?? 0) - (b.rowExact ?? 0)));
       const rows = sorted.map((f) => {
         const t = typeOfFile(f.file);
-        const tags = [f.source === 'parser' ? `<span title="${__('A PDF of images only: the AI model cannot read it, the parser reads the OCR text (as on /upload)')}">parser</span>` : '',
+        const tags = [f.source === 'parser' ? `<span title="${__('A PDF of images only: the AI model cannot read it, the parser reads the OCR text (as on /roster)')}">parser</span>` : '',
           f.afterTraining ? `<span title="${__('Label made or changed after the last model training')}">${__('new label')}</span>` : ''].filter(Boolean).join(' · ');
         const score = f.error ? `<span style="color:#d32f2f">${escapeHtml(f.error)}</span>` : `${f.rowMatches}/${f.rowTotal} (${f.rowExact ?? 0}%)`;
         const more = f.diffCount > (f.diffs || []).length ? `<li>${__('… and {n} more differences', { n: f.diffCount - f.diffs.length })}</li>` : '';

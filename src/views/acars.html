@@ -24,9 +24,12 @@
     .msg.err { background: #fdecea; color: #b71c1c; }
     .msg.busy { background: #e3f2fd; color: #0d47a1; }
 
-    .layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 420px); gap: 16px; margin-top: 16px; align-items: start; }
+    .layout[hidden] { display: none; }
+    /* both cards as tall as the taller one; the picture centred in its card */
+    .layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 420px); gap: 16px; margin-top: 16px; align-items: stretch; }
+    .layout > .card { margin-bottom: 0; }
     @media (max-width: 860px) { .layout { grid-template-columns: 1fr; } }
-    .picture { padding: 12px; }
+    .picture { padding: 12px; display: flex; align-items: center; justify-content: center; }
     .picture img { display: block; max-width: 100%; max-height: 70vh; margin: 0 auto; border-radius: 6px; }
     .empty { padding: 32px 16px; text-align: center; color: var(--muted); font-size: 14px; }
     .result { padding: 16px; }
@@ -39,6 +42,22 @@
     .fields dt:nth-last-of-type(1), .fields dd:nth-last-of-type(1) { border-bottom: none; }
     .meta { font-size: 12px; color: var(--muted); margin-top: 10px; }
     .actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+    .btn.sent, .btn.sent:disabled { background: #2e7d32; color: #fff; border-color: #2e7d32; cursor: default; }
+    .msg.ok { background: #e8f5e9; color: #1b5e20; }
+
+    /* "Suggest a correction" dialog (as on /roster) */
+    dialog.suggest { border: none; border-radius: 10px; padding: 0; width: min(520px, calc(100vw - 32px)); box-shadow: 0 10px 30px rgba(0,0,0,0.25); }
+    dialog.suggest::backdrop { background: rgba(20, 28, 45, 0.45); }
+    dialog.suggest form { padding: 18px 20px; display: flex; flex-direction: column; gap: 12px; }
+    dialog.suggest h3 { margin: 0; font-size: 18px; display: flex; gap: 8px; align-items: center; }
+    dialog.suggest p { margin: 0; font-size: 14px; color: var(--muted); line-height: 1.5; }
+    dialog.suggest p.small { font-size: 12px; margin-top: -6px; }
+    dialog.suggest label { font-size: 14px; font-weight: 600; }
+    dialog.suggest input[type=email], dialog.suggest textarea { width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; font: inherit; font-size: 14px; box-sizing: border-box; }
+    dialog.suggest textarea { min-height: 110px; resize: vertical; }
+    dialog.suggest .file { font-size: 13px; overflow-wrap: anywhere; }
+    dialog.suggest .dlg-actions { display: flex; gap: 8px; justify-content: flex-end; align-items: center; flex-wrap: wrap; }
+    dialog.suggest .err { color: #d32f2f; font-size: 13px; flex: 1; }
   </style>
 </head>
 <body>
@@ -46,19 +65,19 @@
   <main class="page">
     <div class="page-header">
       <h1><i class="fa-solid fa-satellite-dish" aria-hidden="true"></i> ACARS</h1>
-      <p class="subtitle" data-i18n>Take a picture of the cockpit's ACARS / AOC OOOI page, or upload one: the AI model reads the flight number, the date, the airports and the OUT, OFF, ON, IN times. The picture is only read, never kept.</p>
+      <p class="subtitle" data-i18n>Take a picture of the cockpit's ACARS / AOC OOOI page, or upload one: the AI model reads the flight number, the date, the airports and the OUT, OFF, ON, IN times. The picture is only read, never kept (unless you send it with Suggest a correction).</p>
     </div>
 
     <div class="card toolbar">
       <button class="btn" id="scanBtn"><i class="fa-solid fa-camera" aria-hidden="true"></i> <span>Scan</span></button>
-      <button class="btn secondary" id="pickBtn"><i class="fa-solid fa-upload" aria-hidden="true"></i> <span>Upload a picture</span></button>
+      <button class="btn secondary" id="pickBtn"><i class="fa-solid fa-upload" aria-hidden="true"></i> <span>Upload</span></button>
       <span class="hint" data-i18n>JPG, PNG, BMP or JFIF, up to 10 MB. You can also drop a picture on the page.</span>
       <input type="file" id="cameraInput" accept="image/*" capture="environment">
       <input type="file" id="fileInput" accept=".jpg,.jpeg,.png,.bmp,.jfif,image/jpeg,image/png,image/bmp">
     </div>
     <div id="msg" class="msg"></div>
 
-    <div class="layout">
+    <div class="layout" id="layout" hidden>
       <div class="card picture" id="picture"><div class="empty">No picture yet.</div></div>
       <div class="card result" id="result">
         <h2><i class="fa-solid fa-plane" aria-hidden="true"></i> <span>Flight</span></h2>
@@ -67,11 +86,30 @@
     </div>
   </main>
 
+  <dialog class="suggest" id="suggestDialog" aria-labelledby="suggestTitle">
+    <form method="dialog" id="suggestForm">
+      <h3 id="suggestTitle"><i class="fa-solid fa-comment-medical" aria-hidden="true"></i> Suggest a correction</h3>
+      <p>Did the AI model read the picture wrong? Send it to the administrators: they check it, write the right values and use it to teach the AI model. The picture is kept on the server until they have handled it.</p>
+      <div class="file"><i class="fa-regular fa-image" aria-hidden="true"></i> <strong id="suggestFile"></strong></div>
+      <label for="suggestEmail">Your email</label>
+      <input type="email" id="suggestEmail" required maxlength="254" autocomplete="email" placeholder="name@example.com">
+      <p class="small">We write to you there when your suggestion is handled.</p>
+      <label for="suggestNote">What is wrong? (optional)</label>
+      <textarea id="suggestNote" maxlength="2000" placeholder="e.g. OFF is 12:39, not 12:32; the flight number is SA0558"></textarea>
+      <div class="dlg-actions">
+        <span class="err" id="suggestErr"></span>
+        <button type="button" class="btn secondary" id="suggestCancel">Cancel</button>
+        <button type="submit" class="btn" id="suggestSend"><i class="fa-solid fa-paper-plane" aria-hidden="true"></i> Send</button>
+      </div>
+    </form>
+  </dialog>
+
   <script>
     const $ = (id) => document.getElementById(id);
     const escapeHtml = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[c]));
     const FIELDS = [['flt', 'Flt No'], ['date', 'Date'], ['dept', 'Dept'], ['dest', 'Dest'], ['out', 'Out'], ['off', 'Off'], ['on', 'On'], ['in', 'In'], ['info', 'Info']];
     let last = null, busy = false;
+    let current = null; // { file, name, fields, suggestion } of the picture shown
 
     function showMsg(text, kind) {
       const m = $('msg');
@@ -84,7 +122,10 @@
       $('fields').innerHTML = `<dl class="fields">${FIELDS.map(([k, label]) => `<dt>${__(label)}</dt>${
         fields[k] ? `<dd>${escapeHtml(fields[k])}</dd>` : `<dd class="none">${__('not read')}</dd>`}`).join('')}</dl>
         <div class="meta">${escapeHtml(meta)}</div>
-        <div class="actions"><button class="btn secondary" id="copyBtn"><i class="fa-regular fa-copy" aria-hidden="true"></i> <span>${__('Copy')}</span></button></div>`;
+        <div class="actions"><button class="btn secondary" id="copyBtn"><i class="fa-regular fa-copy" aria-hidden="true"></i> <span>${__('Copy')}</span></button>
+          <button class="btn secondary" id="suggestBtn" title="${escapeHtml(__('A value is wrong? Send the picture to the administrators to check'))}"><i class="fa-solid fa-comment-medical" aria-hidden="true"></i> <span>${__('Suggest a correction')}</span></button></div>`;
+      $('suggestBtn').addEventListener('click', openSuggest);
+      renderSuggestBtn();
       $('copyBtn').addEventListener('click', async () => {
         const text = FIELDS.map(([k, label]) => `${label}: ${fields[k] || '-'}`).join('\n');
         try { await navigator.clipboard.writeText(text); $('copyBtn').querySelector('span').textContent = __('Copied'); } catch { /* no clipboard: nothing */ }
@@ -101,6 +142,7 @@
       $('scanBtn').disabled = $('pickBtn').disabled = true;
       if (last) URL.revokeObjectURL(last);
       last = URL.createObjectURL(file);
+      $('layout').hidden = false; // shown from the first picture on
       $('picture').innerHTML = `<img src="${last}" alt="${escapeHtml(file.name)}">`;
       $('fields').innerHTML = `<div class="empty"><i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i> ${__('Reading the picture…')}</div>`;
       hideMsg();
@@ -112,6 +154,7 @@
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
         const secs = ((data.ms || 0) / 1000).toFixed(1);
+        current = { file, name: file.name || 'acars.jpg', fields: data.fields || {}, suggestion: null };
         renderFields(data.fields || {}, __('Read in {s} s by the AI model (trained {when}).', { s: secs, when: data.model?.trainedAt ? new Date(data.model.trainedAt).toLocaleString() : '?' }));
       } catch (err) {
         $('fields').innerHTML = `<div class="empty">${__('Nothing read.')}</div>`;
@@ -121,6 +164,56 @@
         $('scanBtn').disabled = $('pickBtn').disabled = false;
       }
     }
+
+    // ---- Suggest a correction: the picture + what the model read go to the admins (/helpdesk) ----
+    const suggestDialog = $('suggestDialog');
+    function renderSuggestBtn() {
+      const btn = $('suggestBtn');
+      if (!btn) return;
+      const sent = !!current?.suggestion;
+      btn.disabled = sent;
+      btn.classList.toggle('sent', sent);
+      btn.querySelector('i').className = sent ? 'fa-solid fa-check' : 'fa-solid fa-comment-medical';
+      btn.querySelector('span').textContent = sent ? __('Suggestion sent') : __('Suggest a correction');
+    }
+    function openSuggest() {
+      if (!current || current.suggestion) return;
+      $('suggestFile').textContent = current.name;
+      $('suggestErr').textContent = '';
+      $('suggestSend').disabled = false;
+      suggestDialog.showModal();
+      const email = $('suggestEmail');
+      if (!email.value) { try { email.value = localStorage.getItem('suggest.email') || ''; } catch { /* storage blocked */ } }
+      (email.value ? $('suggestNote') : email).focus();
+    }
+    $('suggestCancel').addEventListener('click', () => suggestDialog.close());
+    $('suggestForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const pic = current;
+      if (!pic || pic.suggestion) return;
+      $('suggestSend').disabled = true;
+      $('suggestErr').textContent = '';
+      try {
+        const email = $('suggestEmail').value.trim();
+        const body = new FormData();
+        body.append('file', pic.file, /\.(jpe?g|png|bmp|jfif)$/i.test(pic.name) ? pic.name : 'acars.jpg');
+        body.append('email', email);
+        body.append('note', $('suggestNote').value.trim());
+        body.append('fields', JSON.stringify(pic.fields));
+        const res = await fetch('/api/acars/suggestions', { method: 'POST', body });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+        pic.suggestion = data;
+        try { localStorage.setItem('suggest.email', email); } catch { /* storage blocked */ }
+        suggestDialog.close();
+        $('suggestNote').value = '';
+        if (pic === current) renderSuggestBtn();
+        showMsg(__('Thank you! Your suggestion for {name} was sent to the administrators.', { name: pic.name }), 'ok');
+      } catch (err) {
+        $('suggestErr').textContent = __('Could not send it: {error}', { error: __(err.message) });
+        $('suggestSend').disabled = false;
+      }
+    });
 
     $('scanBtn').addEventListener('click', () => $('cameraInput').click());
     $('pickBtn').addEventListener('click', () => $('fileInput').click());

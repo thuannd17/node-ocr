@@ -20,7 +20,7 @@ const app = express();
 app.use(express.json({ limit: '2mb' }));
 app.use(i18n); // UI language from the 'lang' cookie: req.__(), JSON errors translated
 
-// Views (HTML) — /, /upload, /label, /benchmark
+// Views (HTML) — /, /roster, /label, /benchmark
 app.use('/', viewsRouter);
 
 // API (JSON) — /api/roster/upload (public), /api/ocr/upload (deprecated), /api/files, /api/raw, /api/labels, /api/predict, /api/benchmark
@@ -38,7 +38,7 @@ const port = Number(process.env.PORT) || 3000;
 const host = process.env.HOST || '0.0.0.0';
 
 const server = app.listen(port, host, () => {
-	console.log(`Roster OCR app listening on http://${host}:${port}`);
+	console.log(`RosterParser app listening on http://${host}:${port}`);
 });
 
 // The roster data and the trained models live in MinIO (media/): mirror them locally in the background

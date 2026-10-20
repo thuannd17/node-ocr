@@ -8,6 +8,9 @@
  *   npm run ocr:train -- --restart    # drop an unfinished run instead of resuming it
  *   npm run ocr:train -- --force      # train again even if this exact run was already done
  *   npm run ocr:train -- --acars-repeat=5   # how many times each ACARS training crop is listed (default 5)
+ *   npm run ocr:train -- --fine-tune  # start from the deployed version's weights instead of the stock
+ *                                     # ones: 4 epochs, lower learning rate, ACARS crops listed twice
+ *                                     # (--epochs= / --acars-repeat= / --lr= still win)
  *
  * Fair comparison, rolling: the test set is every labeled roster the deployed
  * model has NOT seen (neither trained on nor tested on, per its model.json).
@@ -63,7 +66,8 @@ const PORT = Number(process.env.RETRAIN_OCR_PORT || 8506);
 const DET_LIMIT = Number(process.env.OCR_TEXT_DET_LIMIT_SIDE_LEN || 1920);
 
 function parseArgs(argv) {
-	const a = { minNew: 5, minNewAcars: 4, epochs: 15, keepCheckpoint: false, status: false, acarsRepeat: 5 };
+	const a = { minNew: 5, minNewAcars: 4, epochs: 15, keepCheckpoint: false, status: false, acarsRepeat: 5, fineTune: false, lr: null };
+	if (argv.includes('--fine-tune')) Object.assign(a, { fineTune: true, epochs: 4, acarsRepeat: 2, lr: 0.00002 });
 	for (const x of argv) {
 		if (x === '--status') a.status = true;
 		else if (x === '--keep-checkpoint') a.keepCheckpoint = true;
@@ -74,6 +78,7 @@ function parseArgs(argv) {
 		if (m?.[1] === 'epochs') a.epochs = Number(m[2]);
 		if (m?.[1] === 'min-new-acars') a.minNewAcars = Number(m[2]);
 		if (m?.[1] === 'acars-repeat') a.acarsRepeat = Number(m[2]);
+		if (m?.[1] === 'lr') a.lr = Number(m[2]);
 	}
 	return a;
 }
@@ -356,6 +361,7 @@ async function main() {
 	const key = (list) => (list || []).map(x => x.hash).sort().join(',');
 	const repeatOf = listVersions().map(v => ({ v, m: fs.existsSync(path.join(REC_DIR, v, 'model.json')) ? readJson(path.join(REC_DIR, v, 'model.json')) : null }))
 		.find(({ m }) => m?.comparison?.against === current && m.recipe?.epochs === args.epochs
+			&& (m.recipe?.fineTunedFrom || null) === (args.fineTune ? current : null)
 			&& key(m.testedOn) === key(rosterMode === 'unseen' ? fresh : []) && key(m.trainedOn) === key(trainSet)
 			&& key(m.acarsTestedOn) === key(acarsTestList) && key(m.acarsTrainedOn) === key(acarsTrain));
 	if (repeatOf && !args.force && !fs.existsSync(PENDING)) {
@@ -370,9 +376,9 @@ This exact run was already done as ${repeatOf.v} (${repeatOf.m.createdAt}): ${c.
 	const datasetDir = path.join(EXPORTS_DIR, 'recognition-groundtruth', 'rec-pending');
 	const newLines = path.join(CACHE_DIR, 'rec-lines', '_pending');
 	const statePath = path.join(pDir, 'pending.json');
-	const basis = { basedOn: current, testHashes: [...testHashes].sort(), acarsTestHashes: [...acarsTest].sort(), epochs: args.epochs };
+	const basis = { basedOn: current, testHashes: [...testHashes].sort(), acarsTestHashes: [...acarsTest].sort(), epochs: args.epochs, fineTune: args.fineTune };
 	let state = fs.existsSync(statePath) ? readJson(statePath) : null;
-	const sameBasis = state && state.basedOn === basis.basedOn && state.epochs === basis.epochs
+	const sameBasis = state && state.basedOn === basis.basedOn && state.epochs === basis.epochs && !!state.fineTune === basis.fineTune
 		&& JSON.stringify(state.testHashes) === JSON.stringify(basis.testHashes)
 		&& JSON.stringify(state.acarsTestHashes || []) === JSON.stringify(basis.acarsTestHashes);
 	if (fs.existsSync(pDir) && (!sameBasis || args.restart)) {
@@ -391,7 +397,8 @@ This exact run was already done as ${repeatOf.v} (${repeatOf.m.createdAt}): ${c.
 	const cfg = path.join(pDir, 'train.yml');
 	const inferDir = path.join(pDir, 'infer');
 	const recipe = { template: 'models/rec/train-template.yml', epochs: args.epochs, general: 'table', tightCrops: true, linesDir: rel(STOCK_LINES), exportedCheckpoint: 'latest', evalDuringTraining: false,
-		acars: { linesDir: rel(STOCK_ACARS_LINES), repeat: args.acarsRepeat } };
+		acars: { linesDir: rel(STOCK_ACARS_LINES), repeat: args.acarsRepeat },
+		...(args.fineTune ? { fineTunedFrom: current } : {}), ...(args.lr ? { learningRate: args.lr } : {}) };
 	const resumed = Object.keys(state.done);
 	console.log(`\n=== New version: train on ${trainSet.length} rosters + ${acarsTrain.length} ACARS pictures; `
 		+ `test on ${rosterMode === 'unseen' ? `${fresh.length} new rosters` : `all ${rosterTest.length} rosters (regression check)`} + ${acarsTestList.length} new ACARS pictures (log: ${rel(log)}) ===`);
@@ -416,6 +423,16 @@ This exact run was already done as ${repeatOf.v} (${repeatOf.m.createdAt}): ${c.
 	} else console.log('[1/4] Dataset: done earlier');
 
 	await ensurePretrained();
+	// Fine-tune: the deployed version's weights are the start. Its training checkpoint is usually not kept,
+	// so they are rebuilt from its exported model (scripts/rec_infer_to_train.py; the SAR head, which an
+	// exported model has not, comes from the stock weights).
+	const initWeights = path.join(pDir, 'init');
+	if (args.fineTune && !state.done.init) {
+		console.log(`[2/4] Weights of ${current} as the starting point ...`);
+		await run(PY, ['-u', path.join(ROOT, 'src', 'scripts', 'rec_infer_to_train.py'), path.join(curDir, 'train.yml'), path.join(curDir, 'infer'),
+			path.join(PRETRAINED_DIR, 'en_PP-OCRv3_rec_train', 'best_accuracy.pdparams'), `${initWeights}.pdparams`], { env: gpuEnv(), logFile: log });
+		markDone('init');
+	}
 	// 2. Train with the deployed model's recipe.
 	if (!state.done.train) {
 		// No evaluation during training: its only output is best_accuracy, which is
@@ -425,12 +442,15 @@ This exact run was already done as ${repeatOf.v} (${repeatOf.m.createdAt}): ${c.
 			.replace(/__SAVE_DIR__/g, ymlPath(path.join(pDir, 'checkpoint')))
 			.replace(/__DATASET_DIR__/g, ymlPath(datasetDir))
 			.replace(/__PRETRAINED__/g, ymlPath(PRETRAINED_DIR))
+			.replace(/^(\s*pretrained_model:\s*).*$/m, (l, k) => (args.fineTune ? `${k}${ymlPath(initWeights)}` : l))
+			.replace(/^(\s*learning_rate:\s*).*$/m, (l, k) => (args.lr ? `${k}${args.lr}` : l))
+			.replace(/^(\s*warmup_epoch:\s*).*$/m, (l, k) => (args.fineTune ? `${k}0` : l))
 			.replace(/^(\s*epoch_num:\s*).*$/m, `$1${args.epochs}`)
 			.replace(/^(\s*eval_batch_step:\s*).*$/m, '$1[0, 100000000]'), 'utf8');
 		// An interrupted run continues from the last finished epoch instead of epoch 1.
 		const latest = path.join(pDir, 'checkpoint', 'latest');
 		const resumeFrom = fs.existsSync(`${latest}.pdparams`) && fs.existsSync(`${latest}.states`) ? latest : null;
-		console.log(`[2/4] Training (${args.epochs} epochs, ~45 min on this machine)${resumeFrom ? ', resuming from the last saved epoch' : ''} ...`);
+		console.log(`[2/4] Training (${args.epochs} epochs${args.fineTune ? `, fine-tuning ${current}` : ''}, ~${Math.max(5, Math.round(args.epochs * 3))} min on this machine)${resumeFrom ? ', resuming from the last saved epoch' : ''} ...`);
 		const logFrom = fs.existsSync(log) ? fs.statSync(log).size : 0;
 		await withStatus(run(PY, ['-u', path.join(PADDLEOCR_PKG, 'tools', 'train.py'), '-c', cfg,
 			...(resumeFrom ? ['-o', `Global.checkpoints=${resumeFrom}`] : [])], { env: gpuEnv(), logFile: log }),

@@ -3,10 +3,12 @@
 // (documented in docs/openapi.json, /api-docs). Same code as the pages:
 //   POST /api/night-time/calc   night time of a flight along the great circle (views/assets/night.js + SunCalc)
 //   POST /api/calendar/export   roster rows -> iCalendar (.ics) with duties / hotels (views/assets/ics.js)
+//   POST /api/route-map         rosters -> their routes on a world map, and a /route-map link that shows them (views/assets/route-map.js)
 import { Router } from 'express';
 import { createRequire } from 'node:module';
 import { findByCode } from './airports-api.js';
 import '../views/assets/ics.js';
+import '../views/assets/route-map.js';
 
 globalThis.SunCalc = globalThis.SunCalc || createRequire(import.meta.url)('suncalc');
 await import('../views/assets/night.js');
@@ -86,6 +88,93 @@ router.post('/calendar/export', (req, res) => {
   const file = `${name.replace(/[^\w.-]+/g, '_').replace(/^_+|_+$/g, '') || 'roster'}.ics`;
   res.set({ 'Content-Type': 'text/calendar; charset=utf-8', 'Content-Disposition': `attachment; filename="${file}"`, 'X-Events': String(events), 'X-Skipped-Rows': String(skipped.length) });
   res.send(ics);
+});
+
+/**
+ * POST /api/route-map  { rosters: [roster], month?: "YYYY-MM", includePlanned?: true }   (or one roster's fields at the top)
+ *   roster: { name?, color?: "#rrggbb", and its flights as any of:
+ *             published / planned: roster rows (as POST /api/roster/upload gives them),
+ *             ics: an iCalendar text (as POST /api/calendar/export gives it),
+ *             flights: [{ dep, arr, flight?, date?: "YYYY-MM-DD" }] }
+ * -> { rosters, stats, routes, airports, unknown, viewUrl }; ?format=geojson -> a GeoJSON FeatureCollection
+ *   (one LineString per route and roster along the great circle, one Point per airport).
+ * viewUrl opens /route-map with these routes drawn (append &embed=1 for an iframe, &view=globe for the globe).
+ */
+const RouteMap = globalThis.RouteMap;
+const { flightsFromRows, flightsFromEvents, toParam, greatCircle } = RouteMap;
+const { parseIcs } = globalThis.RosterIcs;
+const MAX_ROSTERS = 20, MAX_FLIGHTS = 20000;
+router.post('/route-map', (req, res) => {
+  const body = req.body || {};
+  const given = Array.isArray(body.rosters) ? body.rosters : ['published', 'planned', 'ics', 'flights'].some(k => body[k]) ? [body] : [];
+  if (!given.length) return bad(res, 'Send "rosters": [{ name, published / planned rows, ics, or flights: [{ dep, arr }] }]');
+  if (given.length > MAX_ROSTERS) return bad(res, `At most ${MAX_ROSTERS} rosters`);
+  const month = body.month == null || body.month === '' ? '' : String(body.month);
+  if (month && !/^\d{4}-\d{2}$/.test(month)) return bad(res, 'month must be YYYY-MM');
+  const includePlanned = body.includePlanned !== false;
+  const rosters = [];
+  for (const [i, r] of given.entries()) {
+    if (!r || typeof r !== 'object') return bad(res, `rosters[${i}] must be an object`);
+    const flights = [];
+    if (Array.isArray(r.published) || Array.isArray(r.planned)) flights.push(...flightsFromRows({ published: r.published || [], planned: r.planned || [] }));
+    if (typeof r.ics === 'string' && r.ics.trim()) {
+      try { flights.push(...flightsFromEvents(parseIcs(r.ics).events)); } catch (e) { return bad(res, `rosters[${i}].ics: ${e.message}`); }
+    }
+    if (Array.isArray(r.flights)) {
+      for (const [k, f] of r.flights.entries()) {
+        const dep = String(f?.dep || '').trim().toUpperCase(), arr = String(f?.arr || '').trim().toUpperCase();
+        if (!/^[A-Z0-9]{3,4}$/.test(dep) || !/^[A-Z0-9]{3,4}$/.test(arr)) return bad(res, `rosters[${i}].flights[${k}]: dep and arr must be airport codes`);
+        if (dep === arr) continue;
+        const d = /^(\d{4})-(\d{2})/.exec(String(f.date || ''));
+        flights.push({ dep, arr, flight: String(f.flight || ''), month: d ? `${d[1]}-${d[2]}` : '', planned: f.planned === true });
+      }
+    }
+    const color = /^#[0-9a-f]{6}$/i.test(r.color || '') ? r.color : RouteMap.COLORS[i % RouteMap.COLORS.length];
+    rosters.push({ name: String(r.name || `Roster ${i + 1}`).slice(0, 100), color, on: true, flights });
+  }
+  if (rosters.reduce((n, r) => n + r.flights.length, 0) > MAX_FLIGHTS) return bad(res, `At most ${MAX_FLIGHTS} flights`);
+
+  const airports = {};
+  for (const code of new Set(rosters.flatMap(r => r.flights.flatMap(f => [f.dep, f.arr])))) {
+    const hit = findByCode(code);
+    if (hit) { const a = hit.airport; airports[code] = { code, iata: a.iata || null, icao: a.icao || null, name: a.name, city: a.city || null, country: a.country || null, lat: a.lat, lon: a.lon }; }
+  }
+  const r = RouteMap.routes(rosters, airports, { month, planned: includePlanned });
+  const km1 = (v) => Math.round(v * 10) / 10;
+  const shown = (f) => (!month || f.month === month) && (includePlanned || !f.planned) && airports[f.dep] && airports[f.arr];
+
+  if (req.query.format === 'geojson') {
+    return res.type('application/geo+json').json({
+      type: 'FeatureCollection',
+      features: [
+        ...r.routes.map(x => ({ type: 'Feature', geometry: { type: 'LineString', coordinates: greatCircle(airports[x.a], airports[x.b]).map(([lat, lon]) => [round(lon, 4), round(lat, 4)]) },
+          properties: { from: x.a, to: x.b, roster: rosters[x.ci].name, color: rosters[x.ci].color, flights: x.n, distanceKm: km1(x.km), directions: [...x.dirs] } })),
+        ...r.used.map(c => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [airports[c].lon, airports[c].lat] }, properties: { ...airports[c] } })),
+      ],
+    });
+  }
+  // one entry per airport pair, all rosters together, busiest first
+  const pairs = new Map();
+  for (const x of r.routes) {
+    if (!pairs.has(x.pair)) pairs.set(x.pair, { from: x.a, to: x.b, flights: 0, distanceKm: km1(x.km), directions: new Set(), rosters: [] });
+    const p = pairs.get(x.pair);
+    p.flights += x.n;
+    x.dirs.forEach(d => p.directions.add(d));
+    p.rosters.push({ name: rosters[x.ci].name, color: rosters[x.ci].color, flights: x.n });
+  }
+  const view = new URLSearchParams();
+  for (const ro of rosters) {
+    const flights = ro.flights.filter(shown);
+    if (flights.length) view.append('r', toParam({ ...ro, flights }));
+  }
+  res.json({
+    rosters: rosters.map(ro => ({ name: ro.name, color: ro.color, flights: ro.flights.filter(shown).length, flightsGiven: ro.flights.length })),
+    stats: { flights: r.flights, routes: pairs.size, airports: r.used.length, distanceKm: km1(r.km) },
+    routes: [...pairs.values()].map(p => ({ ...p, directions: [...p.directions] })).sort((a, b) => b.flights - a.flights || b.distanceKm - a.distanceKm),
+    airports: Object.fromEntries(r.used.map(c => [c, airports[c]])),
+    unknown: r.unknown,
+    viewUrl: `${req.protocol}://${req.get('host')}/route-map?${view}`,
+  });
 });
 
 export default router;

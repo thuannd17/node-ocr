@@ -8,7 +8,7 @@
  *   --> services/roster-parser.js parse bảng --> { published, planned }
  *
  * The quality analysis (analyzeExtractionQuality) is returned as `_quality` so
- * /upload can say when a result needs a closer look. (The Gemini/VLM fallback
+ * /roster can say when a result needs a closer look. (The Gemini/VLM fallback
  * was removed 2026-10-09; backup in tmp/backup-remove-vlm-20261009.)
  *
  * Yêu cầu: chạy `npm run ocr:server` (hoặc `python scripts/ocr_server.py`).
@@ -144,7 +144,7 @@ export async function extractWithPaddleOCR(filePath) {
    timings.parseMs = Date.now() - t1;
    console.log(`[PaddleOCR] Parser took ${timings.parseMs}ms: ${result.published?.length || 0} published, ${result.planned?.length || 0} planned`);
    
-   // How trustworthy the result looks (shown on /upload when low).
+   // How trustworthy the result looks (shown on /roster when low).
    const qualityAnalysis = analyzeExtractionQuality(result);
    console.log(`[PaddleOCR] Extraction confidence: ${(qualityAnalysis.confidence * 100).toFixed(0)}%`
      + (qualityAnalysis.lowQuality ? ` - low (${qualityAnalysis.reason})` : ' - satisfactory'));

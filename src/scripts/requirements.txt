@@ -19,6 +19,6 @@ paddle2onnx==1.3.1
 
 # Utilities
 minio==7.2.20                # the recognition model is downloaded from MinIO (scripts/rec_model.py)
-pypdfium2==5.13.0          # renders image-only PDF pages for OCR (/upload)
+pypdfium2==5.13.0          # renders image-only PDF pages for OCR (/roster)
 Pillow==11.3.0
 python-dotenv>=1.0.0

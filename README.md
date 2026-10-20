@@ -16,19 +16,19 @@ when you run a command and choose to switch.
 ```mermaid
 flowchart TD
     subgraph READ["1. Read a roster"]
-        U["Browser /upload"] -->|"POST /api/roster/upload"| API["src/routes/api.js"]
+        U["Browser /roster"] -->|"POST /api/roster/upload"| API["src/routes/api.js"]
         API -->|"same image seen before"| PC[("&lt;work&gt;/cache/parsed/<br/>result-cache.js")]
         API --> PO["src/services/paddle-ocr.js"]
         PO -->|"HTTP :8501"| OS["src/scripts/ocr_server.py<br/>PaddleOCR det 1920<br/>rec model in use: MinIO<br/>models/rec/active.json"]
         OS -->|"text lines + boxes"| RP["src/services/roster-parser.js<br/>parser-rules.js<br/>models/parser-patterns.json"]
         RP --> OUT["published + planned rows"]
         PC --> OUT
-        OUT --> T["Table on /upload"]
+        OUT --> T["Table on /roster"]
     end
 
     subgraph LABEL["2. Label (manual)"]
         FD[("MinIO<br/>files/, deduplicated by content")]
-        SL["Save as Label<br/>/upload or /label"] -->|"POST /api/labels"| LB[("labels/&lt;ext&gt;/&lt;file&gt;.json<br/>verified ground truth")]
+        SL["Save as Label<br/>/roster or /label"] -->|"POST /api/labels"| LB[("labels/&lt;ext&gt;/&lt;file&gt;.json<br/>verified ground truth")]
     end
 
     subgraph MEASURE["3. Measure"]
@@ -63,7 +63,7 @@ Same diagram as plain text (for terminals):
 ```
  ┌──────────────────────────── 1. READ A ROSTER ─────────────────────────────┐
  │                                                                           │
- │  Browser /upload ──POST /api/roster/upload──> src/routes/api.js               │
+ │  Browser /roster ──POST /api/roster/upload──> src/routes/api.js               │
  │                                              │  same image seen before?   │
  │                                              ├─yes─> <work>/cache/parsed/ │
  │                                              │      (result-cache.js)     │
@@ -83,13 +83,13 @@ Same diagram as plain text (for terminals):
  │                                     models/parser-patterns.json)          │
  │                                              │                            │
  │                                              ▼                            │
- │          { published: [...], planned: [...] } ──> table on /upload        │
+ │          { published: [...], planned: [...] } ──> table on /roster        │
  └───────────────────────────────────┬───────────────────────────────────────┘
                                      │ a person checks / fixes the table
                                      ▼
  ┌──────────────────────────── 2. LABEL (manual) ────────────────────────────┐
  │  a roster joins the data (MinIO) via an accepted suggestion               │
- │  "Save as Label" on /upload or /label ──POST /api/labels──>               │
+ │  "Save as Label" on /roster or /label ──POST /api/labels──>               │
  │      labels/<ext>/<file>.json in MinIO (verified ground truth)            │
  └────────────┬───────────────────────────────────────┬──────────────────────┘
               │                                       │
@@ -289,16 +289,17 @@ docker compose logs -f app ocr
 
 | Page | Purpose |
 |---|---|
-| `/upload` | **Try the AI model**: every uploaded roster **image or duty-plan PDF** is read by the learned model (images: PaddleOCR lines -> model), never by the parser and never answered from a saved label. Uploads are **only read, never stored**. If the rows are wrong, **Suggest a correction** sends the file, an optional note and the rows the model read to the admins (`POST /api/roster/suggestions`, kept in `suggestions/<id>/`, git-ignored). The page is read-only and public: it only uses the public API and never links to or calls the admin pages (/label, /benchmark, /models) or their APIs; admin pages may link to it. The toolbar holds the file picker (or drop a file anywhere) and, once a result is shown, **↻ Re-read** (read again, e.g. after retraining). An image-only PDF (no text layer) is read by OCR: a duty plan by the parser (the model has no words for it); any other one, e.g. a Ryanair eCrew roster screen printed to PDF, has its pages stacked into one tall roster picture that the model reads as an image (and, once labeled, trains on as an image). A PDF shows the PDF and 12 columns; empty optional columns (DC, Reg., AC, Crew) are hidden. |
-| `/acars` | **Read an ACARS picture** (public): **Scan** takes a photo (the phone's camera), **Upload a picture** picks one (or drop / paste it). The AI model reads it (OCR + the model's ACARS fields, `POST /api/acars/read`): **Flt No, Date, Dept, Dest, Out, Off, On, In** and **Info** (`[Flight: 02:35] [Block: 02:56]`); **Copy** copies them as text. The picture is only read, never kept. It needs a model version trained with labeled ACARS pictures (/models shows "ACARS" among its training files); an older version answers 409 with what to do. |
-| `/label` | **Correction suggestions** from /upload on top (pending first; *Show handled ones* for the rest): 👁 opens the file, **Label it** adds it to the data (MinIO, deduplicated) and opens it with the rows the model read as a starting point (not saved until Save), **Dismiss** deletes the file and keeps the record. Below: folder tree of `fake-data/` (one folder per extension; unlabeled 🆕 first, byte-identical image copies hidden unless asked). Hovering a file shows 🗑: it removes the file from the dataset (after a confirm) by moving it and its label to `trash/<date>/` in MinIO (its cached OCR result is dropped). Clicking a file opens a popup (Esc / × closes; drag the bar in the middle to resize) with the file next to its label as editable Published / Planned tables (one cell per field, add / insert / delete rows; Enter moves down a column); the label is still saved as JSON (**{ } JSON** shows it). Making ground truth: **Auto-fill** proposes the rows with **Parser** (OCR + `roster-parser.js` for an image, the PDF parser for a PDF) or **AI model** (chosen in the list next to it), and says how many rows match the saved label; check, fix, save. Ctrl+S saves, Alt+↑/↓ moves between files. `/label?name=<file>` opens one. A second folder, **ACARS files**, lists the ACARS pictures (bucket `acars-ocr`): the popup shows the picture next to a form of 9 fields (Flt No, Date, Dept, Dest, Out, Off, On, In, Info; times HH:MM as printed), with the same Auto-fill (**Parser**: label words like OUT / FLT NO / ORIG/DEST and the value under or after them, `src/services/acars.js`; or **AI model**), Save and 🗑. |
-| `/benchmark` | Two scores against the labels. **1. Text recognition from images (OCR)**: PaddleOCR alone on every labeled image (`npm run ocr:benchmark`): each labeled cell (date, day, duty, dep, begin, end, arr; a day's date/weekday once) is looked for in the OCR lines; cells read exactly and characters right, per field and per image with the misread cells. **2. Reading roster data per file type**: the AI model, read as on /upload (`npm run model:benchmark -- --types=image,pdf,csv,xls,xlsx,txt`), with a score per file type; tick the types to run. A run of only some types of a kind does not overwrite the score /models shows. Each file lists its differences from the label. **Review & fix** on a file opens the /label editor in a popup over the page (`/label?embed=1&review=1&name=<file>`): for an image, the table is the label and cells where the model differs are marked (yellow, model value underneath: click to take it), label rows the model missed are blue, rows only the model has are struck through (**+ label** adds one); a PDF opens without the marks. A saved label shows "✓ label saved": run the benchmark again to update the scores. **3. Reading ACARS pictures**: the AI model on every labeled ACARS picture, read as on /acars (`npm run acars:benchmark`): fields right per field (times compared as HH:MM, Info as its two times) and pictures fully right; the score is saved with the model version (/models). |
-| `/calendar` | Month / list calendar of `.ics` files, read in the browser (nothing is uploaded). On `/upload`, **Export .ics** downloads the shown file's rows as iCalendar (Google Calendar, Outlook, Apple Calendar) and **View calendar** opens them here (`src/views/assets/ics.js`: `Z` times are UTC, `L`/`LB`/`B` local times are floating, rows without times are all-day, Planned rows are TENTATIVE; a check-in .. check-out (C/I..C/O, CHECK-IN..CHECK-OUT) is one duty event with its flights / sims / hotel inside it (RELATED-TO), rows without a check-in stand alone; a hotel lasts from the end of the event before it to the start of the event after it, nights in a row at one hotel are one event). Times can be shown in UTC or this computer's zone. |
-| `/route-map` | The flights of the calendars opened on /calendar (its **Route map** button) on a world map (Leaflet + OpenStreetMap), or on a **globe** (**Map | Globe**; MapLibre GL in its globe projection, `/assets/maplibre` from npm maplibre-gl (6.x: its ES module `maplibre-gl.mjs`; 5.x: `maplibre-gl.js`), loaded only when the globe is shown; drag to turn it, the view is remembered): each flight from its departure to its arrival along the great circle, **one colour per roster** (the calendar's colour; click a roster in the legend to hide / show it), line width by how often the route is flown. A month filter, Planned flights on / off, airport codes on / off; a table of the routes (flights, great-circle distance, rosters; click one to zoom to it). A flight is an event `<flight no> DEP → ARR` (ground duties without a number, like `GT LTN → STC`, are left out); airports come from `/api/airports`. Read in the browser from the calendars /calendar keeps (`localStorage`), nothing is uploaded. |
+| `/roster` | **Try the AI model**: every uploaded roster **image or duty-plan PDF** is read by the learned model (images: PaddleOCR lines -> model), never by the parser and never answered from a saved label. Uploads are **only read, never stored**. If the rows are wrong, **Suggest a correction** sends the file, an optional note and the rows the model read to the admins (`POST /api/roster/suggestions`, kept in `suggestions/<id>/`, git-ignored). The page is read-only and public: it only uses the public API and never links to or calls the admin pages (/label, /benchmark, /models) or their APIs; admin pages may link to it. The toolbar holds the file picker (or drop a file anywhere) and, once a result is shown, **↻ Re-read** (read again, e.g. after retraining). An image-only PDF (no text layer) is read by OCR: a duty plan by the parser (the model has no words for it); any other one, e.g. a Ryanair eCrew roster screen printed to PDF, has its pages stacked into one tall roster picture that the model reads as an image (and, once labeled, trains on as an image). A PDF shows the PDF and 12 columns; empty optional columns (DC, Reg., AC, Crew) are hidden. |
+| `/acars` | **Read an ACARS picture** (public): **Scan** takes a photo (the phone's camera), **Upload** picks one (or drop / paste it). The AI model reads it (OCR + the model's ACARS fields, `POST /api/acars/read`): **Flt No, Date, Dept, Dest, Out, Off, On, In** and **Info** (`[Flight: 02:35] [Block: 02:56]`); **Copy** copies them as text; **Suggest a correction** sends the picture, the sender's email, a note and the fields read to the admins (`POST /api/acars/suggestions`, handled on /helpdesk like the roster ones: *Label it* puts it in the ACARS bucket and opens it in /label with those fields). Otherwise the picture is only read, never kept. It needs a model version trained with labeled ACARS pictures (/models shows "ACARS" among its training files); an older version answers 409 with what to do. |
+| `/label` | Folder tree of `fake-data/` (one folder per extension; unlabeled 🆕 first, byte-identical image copies hidden unless asked). Hovering a file shows 🗑: it removes the file from the dataset (after a confirm) by moving it and its label to `trash/<date>/` in MinIO (its cached OCR result is dropped). Clicking a file opens a popup (Esc / × closes; drag the bar in the middle to resize) with the file next to its label as editable Published / Planned tables (one cell per field, add / insert / delete rows; Enter moves down a column); the label is still saved as JSON (**{ } JSON** shows it). Making ground truth: **Auto-fill** proposes the rows with **Parser** (OCR + `roster-parser.js` for an image, the PDF parser for a PDF) or **AI model** (chosen in the list next to it), and says how many rows match the saved label; check, fix, save. Ctrl+S saves, Alt+↑/↓ moves between files. `/label?name=<file>` opens one. A second folder, **ACARS files**, lists the ACARS pictures (bucket `acars-ocr`): the popup shows the picture next to a form of 9 fields (Flt No, Date, Dept, Dest, Out, Off, On, In, Info; times HH:MM as printed), with the same Auto-fill (**Parser**: label words like OUT / FLT NO / ORIG/DEST and the value under or after them, `src/services/acars.js`; or **AI model**), Save and 🗑. |
+| `/benchmark` | Two scores against the labels. **1. Text recognition from images (OCR)**: PaddleOCR alone on every labeled image (`npm run ocr:benchmark`): each labeled cell (date, day, duty, dep, begin, end, arr; a day's date/weekday once) is looked for in the OCR lines; cells read exactly and characters right, per field and per image with the misread cells. **2. Reading roster data per file type**: the AI model, read as on /roster (`npm run model:benchmark -- --types=image,pdf,csv,xls,xlsx,txt`), with a score per file type; tick the types to run. A run of only some types of a kind does not overwrite the score /models shows. Each file lists its differences from the label. **Review & fix** on a file opens the /label editor in a popup over the page (`/label?embed=1&review=1&name=<file>`): for an image, the table is the label and cells where the model differs are marked (yellow, model value underneath: click to take it), label rows the model missed are blue, rows only the model has are struck through (**+ label** adds one); a PDF opens without the marks. A saved label shows "✓ label saved": run the benchmark again to update the scores. **3. Reading ACARS pictures**: the AI model on every labeled ACARS picture, read as on /acars (`npm run acars:benchmark`): fields right per field (times compared as HH:MM, Info as its two times) and pictures fully right; the score is saved with the model version (/models). |
+| `/calendar` | Month / list calendar of `.ics` files, read in the browser (nothing is uploaded). On `/roster`, **Export .ics** downloads the shown file's rows as iCalendar (Google Calendar, Outlook, Apple Calendar) and **View calendar** opens them here (`src/views/assets/ics.js`: `Z` times are UTC, `L`/`LB`/`B` local times are floating, rows without times are all-day, Planned rows are TENTATIVE; a check-in .. check-out (C/I..C/O, CHECK-IN..CHECK-OUT) is one duty event with its flights / sims / hotel inside it (RELATED-TO), rows without a check-in stand alone; a hotel lasts from the end of the event before it to the start of the event after it, nights in a row at one hotel are one event). Times can be shown in UTC or this computer's zone. |
+| `/route-map` | The flights of the calendars opened on /calendar (its **Route map** button) on a world map (Leaflet + OpenStreetMap), or on a **globe** (**Map | Globe**; MapLibre GL in its globe projection, `/assets/maplibre` from npm maplibre-gl (6.x: its ES module `maplibre-gl.mjs`; 5.x: `maplibre-gl.js`), loaded only when the globe is shown; drag to turn it, the view is remembered): each flight from its departure to its arrival along the great circle, **one colour per roster** (the calendar's colour; click a roster in the legend to hide / show it), line width by how often the route is flown. A month filter, Planned flights on / off, airport codes on / off; a table of the routes (flights, great-circle distance, rosters; click one to zoom to it). A flight is an event `<flight no> DEP → ARR` (ground duties without a number, like `GT LTN → STC`, are left out); airports come from `/api/airports`. Read in the browser from the calendars /calendar keeps (`localStorage`), nothing is uploaded; or from the URL: `/route-map?r=<name>|<#color>|DEP-ARR*count,...&r=...` (one `r` per roster, what `POST /api/route-map` answers as `viewUrl`), with `embed=1` (only the map, for an iframe), `view=globe`, `table=0`. The logic is shared with the API (`src/views/assets/route-map.js`). |
 | `/airport` | Airport lookup by IATA, ICAO, FAA, WMO code or name / city / country: codes, coordinates, elevation, city, country, time zone, a map (Leaflet + OpenStreetMap) and a 7-day forecast (Open-Meteo, no key, cached 30 min by the server). The airport codes in an event's details on `/calendar` link here. Data: `data/airports.json`, rebuilt by `npm run airports:update` (OurAirports + NOAA ISD for WMO station numbers). ICAO is the airport's id; a WMO number belongs to a weather station, not the airport. |
 | `/night-time` | Night time of a flight: departure / arrival (airport code or "lat, lon"), off-block and on-block in UTC. The aircraft flies the great circle at a constant speed; the sun altitude is taken at its position every 30 s with SunCalc and each day/night edge is bisected to the second (`src/views/assets/night.js`). Night = sun below −6° (end of civil twilight: ICAO / EASA / FAA) or below −0.833° (sunset to sunrise). Shows night / day / block time, take-off and landing by day or night, the route on a map coloured by night and day with the points where night starts and ends, and the sun altitude over the flight. Flights with UTC times on `/calendar` link here. |
 | `/media` | Admin. The roster files as **MinIO** keeps them: the list (filter by type and labeled / not labeled) and a preview of the one clicked. **Delete** moves a file and its label to `trash/<date>/` in MinIO; **Delete all unlabeled** does that for every file without a label (of the type chosen). `/storage` redirects here. |
-| `/api-docs` | Public API reference for other apps (Swagger UI over `docs/openapi.json`, also served as `/api/openapi.json`): read a roster of any type, image, PDF, CSV, Excel or TXT (`POST /api/roster/upload`, field `file`), read an ACARS picture (`POST /api/acars/read`), suggest a correction (`POST /api/roster/suggestions`), roster rows to .ics (`POST /api/calendar/export`), airports and weather (`GET /api/airports...`), night time (`POST /api/night-time/calc`). The last two tools run the same code as the pages (`src/routes/tools-api.js`). |
+| `/helpdesk` | Admin: the correction suggestions from /roster with the sender's **email**, file, note and rows count. The file is handled here: **Label it** adds it to the data (MinIO, deduplicated) and opens `/label?name=<file>&suggestion=<id>`, which starts from the rows the model read (not saved until Save); **Dismiss** asks why, deletes the file and resolves the ticket (the reply then tells the sender the reason). Each has a ticket state **Not handled → In progress → Resolved / Closed** (Label it moves it to In progress; set by hand from the list), an admin note (not sent) and **Reply**: a ready-made message in the sender's language (EN/VI), sent by the mail server set in `.env` (`SMTP_*`, `MAIL_FROM`) or, without one, opened in the admin's own mail program and then recorded; *Mark as resolved* closes the ticket. Every reply is kept with the suggestion. `/helpdesk?id=<id>` opens one. |
+| `/api-docs` | Public API reference for other apps (Swagger UI over `docs/openapi.json`, also served as `/api/openapi.json`): read a roster of any type, image, PDF, CSV, Excel or TXT (`POST /api/roster/upload`, field `file`), read an ACARS picture (`POST /api/acars/read`), suggest a correction (`POST /api/roster/suggestions`, `POST /api/acars/suggestions`), roster rows to .ics (`POST /api/calendar/export`), airports and weather (`GET /api/airports...`), night time (`POST /api/night-time/calc`). The last two tools run the same code as the pages (`src/routes/tools-api.js`). |
 
 **Public and admin.** The topnav and the home page keep the public tools (Upload, ACARS, Calendar, Airport, Night Time, API Docs) apart from **Admin** (Label, Benchmark, AI Models). Admin is only separated for now: there are no accounts yet, so its pages and APIs are still open; protect them before exposing the app.
 
@@ -315,10 +316,13 @@ is written only when a person presses **Save as Label**.
 |---|---|
 | `POST /api/roster/upload` | public: multipart field `file`, any roster type (image, PDF, CSV, XLS, XLSX, TXT); the server picks the reader (`src/routes/roster-api.js`) and answers one shape (`readMode`, `source`, `period`, `notices`, both tables; `?preview=1` adds `previewHtml` for CSV / Excel / TXT); no label information; the file is not kept |
 | `POST /api/acars/read` | public: multipart field `file` (JPG, PNG, BMP, JFIF) -> `{ fields: { flt, dept, dest, out, off, on, in, info }, timings, model, ms }`, read by the AI model (`src/routes/acars-api.js`); 409 when the model in use was not trained on ACARS pictures; the picture is not kept |
+| `POST /api/acars/suggestions` | public: multipart `file`, `email?`, `note?`, `fields?` (JSON) -> `201 { id }`; a suggestion of kind `acars` for /helpdesk |
 | `GET /api/acars/files`, `GET /api/acars/raw?name=`, `GET`/`POST /api/acars/labels?name=`, `GET /api/acars/parse?name=&engine=parser\|model`, `DELETE /api/acars/files?name=` | admin (/label ACARS files): the pictures, their labels, Auto-fill, delete to the trash |
-| `POST /api/roster/suggestions` | public: multipart `file`, `note?`, `rows?` (JSON) -> `201 { id }`; the only way an uploaded roster is kept |
+| `POST /api/route-map` | public: rosters (`published` / `planned` rows, an `ics` text, or `flights: [{ dep, arr, date? }]`) -> routes (pairs, flights, great-circle km, rosters), airports, stats and a `viewUrl` that opens /route-map with them; `?format=geojson` for a GeoJSON FeatureCollection (`src/routes/tools-api.js`) |
+| `POST /api/roster/suggestions` | public: multipart `file`, `email?`, `note?`, `rows?` (JSON) -> `201 { id }`; the only way an uploaded roster is kept |
 | `GET /api/media/status`, `GET /api/media/items`, `GET`/`DELETE /api/media/file?name=`, `POST /api/media/delete-unlabeled` | admin (/media): MinIO, the files, deleting to the trash (`src/routes/media-api.js`) |
-| `GET /api/suggestions?status=pending\|accepted\|dismissed\|all`, `GET /api/suggestions/:id[/file]`, `POST /api/suggestions/:id/accept\|dismiss` | admin (/label): list, view, accept into the data (MinIO, deduplicated) or dismiss (`src/routes/suggestions-api.js`) |
+| `GET /api/suggestions?status=pending\|accepted\|dismissed\|all&ticket=open\|in_progress\|resolved\|closed\|all`, `GET /api/suggestions/:id[/file]`, `POST /api/suggestions/:id/accept\|dismiss` (dismiss: `{ reason }`) | admin (/helpdesk): list, view, accept into the data (MinIO, deduplicated) or dismiss (`src/routes/suggestions-api.js`) |
+| `PATCH /api/suggestions/:id` `{ ticket?, adminNote? }`, `POST /api/suggestions/:id/reply` `{ subject, message, resolve?, via? }`, `GET /api/helpdesk/mail` | admin (/helpdesk): the ticket state, the admins' note, the reply by email (SMTP from `.env`, `src/services/mailer.js`; no mail server: `501` with a `mailto:` link, then `via: "mailto"` records it) |
 | `POST /api/ocr/upload`, `POST /api/pdf/upload` | deprecated (header `Deprecation: true`): the old per-type uploads, not in the public docs |
 | `GET /api/predict?name=...&engine=parser\|model` | read an image of the data (default parser) |
 | `GET /api/pdf/parse?name=...&engine=parser\|model` | read a stored PDF (default model); `&label=true` returns its label when there is one |
@@ -332,7 +336,7 @@ is written only when a person presses **Save as Label**.
 
 ## PDF duty plans (NetLine/Crew)
 
-`/upload` and `/label` read "Individual duty plan" PDFs exported by NetLine/Crew. Most have a
+`/roster` and `/label` read "Individual duty plan" PDFs exported by NetLine/Crew. Most have a
 text layer, so there is **no OCR**: `src/services/pdf-text.js` reads the words with
 their positions (pdfjs-dist; pages printed sideways, e.g. via "Microsoft Print to
 PDF", are turned upright) and `src/services/pdf-roster-parser.js` turns the day
@@ -392,7 +396,7 @@ A PDF **without** a text layer (e.g. printed from a browser as an image) is
 rendered page by page and read by the OCR server (`src/services/pdf-ocr.js`, needs
 `npm run ocr:server`); typical OCR slips (header words, "Sa227", "8325",
 statistics without brackets) are repaired before the same parser runs, and
-`/upload` warns that the result needs checking.
+`/roster` warns that the result needs checking.
 
 
 
@@ -413,9 +417,9 @@ period ends" (or "... a round trip ending outside the printed period").
 | `info` (crew message) | "To c/m: ..." / "From c/m: ..." with its wrapped lines, on the event of that line or else the event before |
 | `info` (legend) | a duty code listed in *Absence/Ground Activity Legend* (`STBY`, `DBF`, `--`, ...) adds its description, e.g. `[STBY: Standby]` |
 
-Notes printed on the *Period:* line ("Local times at event airport. (!) if not in homebase timezone", "All CI/CO times are local") are shown as an alert above the table on `/upload`. Info of an item: statistics, then the legend description. Statistics printed under a hotel line still belong to the item before it. The other tables after the last day (crew lists, totals, training expiry, contacts) are skipped.
+Notes printed on the *Period:* line ("Local times at event airport. (!) if not in homebase timezone", "All CI/CO times are local") are shown as an alert above the table on `/roster`. Info of an item: statistics, then the legend description. Statistics printed under a hotel line still belong to the item before it. The other tables after the last day (crew lists, totals, training expiry, contacts) are skipped.
 
-Same loop as for images: upload on `/upload`, check and fix the table, **Save as
+Same loop as for images: upload on `/roster`, check and fix the table, **Save as
 Label** (`labels/pdf/<file>.json`, `{ published: [...], planned: [...] }`), then measure:
 
 ```powershell
@@ -427,13 +431,13 @@ npm run label:check                             # the parser (/label Auto-fill) 
 PDFs and their labels are kept in MinIO (`files/pdf/`, `labels/pdf/`); both are personal
 data and not in git.
 
-### Learned extractor (the AI model used by /upload)
+### Learned extractor (the AI model used by /roster)
 
 An offline model, trained from all labels (`labels/pdf/` and the image labels),
-reads layouts without new parser code. `/upload` always uses it, to try out
+reads layouts without new parser code. `/roster` always uses it, to try out
 each newly trained model; `/label` Auto-fill can use it or the parser to make
 ground truth. The loop: label files on `/label` (or **Save as Label** on
-`/upload`), then **Train** on `/models` (or `npm run model:train`, ~7 min
+`/roster`), then **Train** on `/models` (or `npm run model:train`, ~7 min
 for 44 PDFs + 94 images; image OCR lines are cached in `<work>/exports/ocr-lines/`, so
 only new images need the OCR server). One labeled file of a layout is usually
 enough to read the others.
@@ -502,6 +506,9 @@ MINIO_SECRET_KEY=...
 MINIO_BUCKET=roster-ocr                 # created on first use
 # ACARS_BUCKET=acars-ocr                # the ACARS pictures (files/<name>, labels/<name>.json)
 # ACARS_CACHE_DIR=                      # their local mirror (default: <ROSTER_WORK_DIR>/acars)
+# Mail server for the /helpdesk replies (without SMTP_HOST + MAIL_FROM a reply opens the admin's mail program)
+# SMTP_HOST=smtp.example.com  SMTP_PORT=587  SMTP_SECURE=false  SMTP_USER=...  SMTP_PASS=...
+# MAIL_FROM="RosterParser <helpdesk@example.com>"  MAIL_REPLY_TO=...
 ```
 
 Restart `ocr-server` and the app after changing `.env`.
@@ -516,7 +523,7 @@ runs keep Paddle's default.
 The OCR server holds one model and OCRs **one image at a time**; other requests
 wait in line (about 0.8 s per image ahead of you on a GTX 1660 Ti). Up to
 `OCR_MAX_QUEUE` requests wait; beyond that the server answers `503 busy` at once
-and `/upload` shows "The OCR server is busy". Running a second OCR server on the same
+and `/roster` shows "The OCR server is busy". Running a second OCR server on the same
 6 GB GPU was measured to be much slower, not faster.
 
 ```powershell
@@ -533,6 +540,7 @@ These need labeled rosters in MinIO (see [Data](#5-data-minio-not-in-git)); the 
 ```powershell
 npm run model:benchmark                                 # AI model vs every label (as /benchmark)
 npm run acars:benchmark -- --files                      # AI model vs the ACARS labels, field by field
+npm run acars:guid-names -- --apply                     # rename new ACARS pictures (and labels) in MinIO to <uuid>.<ext>; old ones to trash/<day>/
 npm run ocr:benchmark                                   # PaddleOCR alone on the labeled images
 node src/scripts/eval-parser-cached.mjs                     # parser only, from cached OCR lines (seconds)
 node --env-file=.env src/scripts/diagnose-errors.mjs        # which pipeline stage each wrong field came from
@@ -553,7 +561,7 @@ Since 2026-10-19 every version is in **MinIO**, `models/rec/vN/`: `infer/` (load
 `models/rec/active.json` names the one in use; /models and `npm run ocr:use-model` switch it.
 Nothing of them is in git or in the project (only `models/rec/train-template.yml`, the training recipe).
 
-**ACARS pictures train the recognizer too** (`npm run ocr:train`): after the roster cells, `src/scripts/ocr-acars-crops.mjs` crops every OCR line of a labeled ACARS picture whose true text is known from its label (`acarsLineTruths` in `src/services/acars.js`: values in their printed form, `1223` -> `1229`, `0UT23:30` -> `OUT 23:30`; lines with a word not known for sure are left out), each listed 5 times (`--acars-repeat=N`). About a quarter of the ACARS pictures the deployed model never saw are kept out and score both models (label values found among the OCR words). A run starts with 5+ new rosters or 4+ new ACARS pictures (`--min-new`, `--min-new-acars`); with too few new rosters all rosters are trained on and scored as a regression check. The verdict: worse if the rosters are read worse or ACARS lose 2+ values, better if the rosters gain or ACARS gain 2+ values.
+**ACARS pictures train the recognizer too** (`npm run ocr:train`): after the roster cells, `src/scripts/ocr-acars-crops.mjs` crops every OCR line of a labeled ACARS picture whose true text is known from its label (`acarsLineTruths` in `src/services/acars.js`: values in their printed form, `1223` -> `1229`, `0UT23:30` -> `OUT 23:30`; lines with a word not known for sure are left out), each listed 5 times (`--acars-repeat=N`). About a quarter of the ACARS pictures the deployed model never saw are kept out and score both models (label values found among the OCR words). A run starts with 5+ new rosters or 4+ new ACARS pictures (`--min-new`, `--min-new-acars`); with too few new rosters all rosters are trained on and scored as a regression check. `--fine-tune` starts from the deployed version (its weights are rebuilt from the exported model by `src/scripts/rec_infer_to_train.py` when no checkpoint was kept; checked to give the same output). The verdict: worse if the rosters are read worse or ACARS lose 2+ values, better if the rosters gain or ACARS gain 2+ values.
 
 - **The OCR server** (`src/scripts/ocr_server.py` + `src/scripts/rec_model.py`) reads `active.json` at start (or
   `OCR_REC_VERSION`), downloads that version's `infer/` into `<work>/models/rec/<ver>/infer` (only the files that
@@ -577,6 +585,7 @@ Nothing of them is in git or in the project (only `models/rec/train-template.yml
 npm run ocr:use-model                    # list versions, * = in use
 npm run ocr:train -- --status    # how many labeled rosters the current model never saw
 npm run ocr:train                # train v(N+1) and compare (~45 min + OCR)
+npm run ocr:train -- --fine-tune  # start from the deployed version instead of the stock weights: 4 epochs, lr 2e-5, ACARS x2 (~15 min + OCR)
 npm run ocr:use-model -- v8              # switch only if the verdict was "better", then restart the OCR server
 ```
 

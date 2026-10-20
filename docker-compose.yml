@@ -1,4 +1,4 @@
-# Roster OCR: the web app and the PaddleOCR server.
+# RosterParser: the web app and the PaddleOCR server.
 #
 #   docker compose up -d --build                                  CPU OCR, http://localhost:3000
 #   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build    OCR on the NVIDIA GPU
