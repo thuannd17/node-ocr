@@ -10,7 +10,8 @@ import toolsApiRouter from './routes/tools-api.js';
 import rosterApiRouter from './routes/roster-api.js';
 import suggestionsApiRouter from './routes/suggestions-api.js';
 import mediaApiRouter from './routes/media-api.js';
-import { syncMedia } from './services/media-client.js';
+import acarsApiRouter from './routes/acars-api.js';
+import { syncMedia, acars } from './services/media-client.js';
 import { syncModels } from './services/ai-models.js';
 import { WORK_DIR } from './utils/paths.js';
 import i18n from './utils/i18n.js';
@@ -29,6 +30,7 @@ app.use('/api/airports', airportsApiRouter); // airport search + details + 7-day
 app.use('/api', rosterApiRouter); // public: POST /api/roster/upload (any roster file type), /api/roster/suggestions
 app.use('/api', suggestionsApiRouter); // admin: correction suggestions, handled on /label
 app.use('/api', mediaApiRouter); // admin: the files + labels in MinIO, the local mirror (/media)
+app.use('/api', acarsApiRouter); // ACARS pictures: POST /api/acars/read (public, /acars); the dataset (admin, /label)
 app.use('/api', toolsApiRouter); // public tools: /api/night-time/calc, /api/calendar/export
 app.use('/api', apiRouter);
 
@@ -44,6 +46,10 @@ const server = app.listen(port, host, () => {
 syncMedia({ force: true }).then(
 	(r) => console.log(`[media] mirror ready: ${r.index.files.length} files, ${r.index.labels.length} labels`),
 	(e) => console.warn(`[media] ${e.message}`),
+);
+acars.syncMedia({ force: true }).then(
+	(r) => console.log(`[acars] mirror ready: ${r.index.files.length} pictures, ${r.index.labels.length} labels`),
+	(e) => console.warn(`[acars] ${e.message}`),
 );
 syncModels({ force: true }).then(
 	() => console.log(`[media] models ready (work folder ${WORK_DIR})`),

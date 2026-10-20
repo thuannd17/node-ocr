@@ -12,6 +12,7 @@
     .btn { background: var(--primary); color: #fff; border: none; padding: 8px 14px; border-radius: 6px; cursor: pointer; font-size: 14px; display: inline-flex; gap: 6px; align-items: center; }
     .btn:hover { background: var(--primary-dark); }
     .btn.secondary { background: #fff; color: var(--text); border: 1px solid var(--border); }
+    a.btn { text-decoration: none; }
     .btn.secondary:hover { background: #f0f2f5; }
     .btn.icon { padding: 8px 10px; }
     #fileInput { display: none; }
@@ -129,6 +130,7 @@
         <select id="monthSelect" title="Months with events"></select>
         <span class="spacer"></span>
         <span class="seg" id="tzSeg" title="Show UTC (Z) times in"><button data-tz="utc" class="on">UTC</button><button data-tz="local">LOCAL</button></span>
+        <a class="btn secondary" id="routeMapBtn" href="/route-map" title="The flights of the shown calendars on a world map"><i class="fa-solid fa-route" aria-hidden="true"></i> Route map</a>
         <span class="seg" id="viewSeg"><button data-view="month" class="on"><i class="fa-solid fa-table-cells" aria-hidden="true"></i> Month</button><button data-view="list"><i class="fa-solid fa-list" aria-hidden="true"></i> List</button></span>
       </div>
       <div id="calendar"></div>

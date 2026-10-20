@@ -21,7 +21,8 @@ def main():
     use_learned_header_words(os.path.join(model_dir, 'conventions.json'))  # the header words it was trained with
     pages = json.load(sys.stdin)['pages']
     X, ctx = doc_features(pages)
-    pred = model.predict({'X': X, 'ctx': ctx}) if X else []
+    kind = pages[0].get('kind') if pages else None  # 'acars': only ACARS fields (pdf_tagger.predict_masked)
+    pred = model.predict({'X': X, 'ctx': ctx, 'kind': kind}) if X else []
     out, k = [], 0
     for page in pages:
         out.append([str(p) for p in pred[k:k + len(page['tokens'])]])

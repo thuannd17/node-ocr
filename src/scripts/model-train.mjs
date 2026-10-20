@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 /**
- * Retrains the learned roster extractor (the AI model /upload uses) from every
- * label, PDFs and images (the /models page's "Train" runs this too):
+ * Retrains the learned roster extractor (the AI model /upload and /acars use) from every
+ * label, PDFs, images and ACARS pictures (the /models page's "Train" runs this too):
  *   1. training words from the labels (scripts/build-pdf-token-data.mjs for labels/pdf/,
- *      scripts/build-image-token-data.mjs for image labels: OCR lines are cached in
- *      <work>/exports/ocr-lines/, so only images new since the last run need the OCR server)
+ *      scripts/build-image-token-data.mjs for image labels, scripts/build-acars-token-data.mjs for the
+ *      ACARS pictures' labels: OCR lines are cached in <work>/exports/ocr-lines/ and ocr-lines-acars/, so only pictures
+ *      new since the last run need the OCR server)
  *   2. what the labels teach about layouts (conventions.json: column-header words, where dates
  *      stand, how values are written; services/pdf-row-assembler.js learnConventions)
  *   3. the word tagger (scripts/train_pdf_tagger.py --no-eval, with those header words) -> <models mirror>/ai/.next/
@@ -55,7 +56,9 @@ console.log('1/4 Training words from the labels');
 fs.rmSync(TOKENS, { recursive: true, force: true });
 await run(process.execPath, ['src/scripts/build-pdf-token-data.mjs']);
 await run(process.execPath, ['src/scripts/build-image-token-data.mjs']);
+await run(process.execPath, ['src/scripts/build-acars-token-data.mjs']);
 const imageSummary = JSON.parse(fs.readFileSync(path.join(EXPORTS_DIR, 'image-tokens', 'summary.json'), 'utf8'));
+const acarsSummary = JSON.parse(fs.readFileSync(path.join(EXPORTS_DIR, 'acars-tokens', 'summary.json'), 'utf8'));
 
 console.log('2/4 Conventions');
 fs.rmSync(NEXT, { recursive: true, force: true });
@@ -73,13 +76,14 @@ console.log('3/4 Training the word tagger');
 await run(PYTHON, ['-I', 'src/scripts/train_pdf_tagger.py', '--no-eval', '--conventions', path.join(NEXT, 'conventions.json'), '--save', NEXT]);
 const meta = {
   trainedAt: new Date().toISOString(),
-  files: summary.files.length + imageSummary.files.length,
+  files: summary.files.length + imageSummary.files.length + acarsSummary.files.length,
   pdfs: summary.files.length,
   images: imageSummary.files.length,
-  filesByType: countByType([...summary.files, ...imageSummary.files].map(f => f.file)),
+  acars: acarsSummary.files.length, // ACARS pictures: /acars reads only with a version trained on some
+  filesByType: { ...countByType([...summary.files, ...imageSummary.files].map(f => f.file)), acars: acarsSummary.files.length },
   fromLabelOnly: summary.aligned.length, // formats the parser misreads, learned from the label alone
   rows: summary.files.reduce((s, f) => s + f.rows, 0) + imageSummary.rows,
-  words: summary.tokens + imageSummary.tokens,
+  words: summary.tokens + imageSummary.tokens + acarsSummary.tokens,
   skipped: summary.skipped.map(s => `${s.file}: ${s.reason}`),
   seconds: Math.round((Date.now() - t0) / 1000),
 };

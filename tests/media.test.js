@@ -62,6 +62,25 @@ test('store a file (deduplicated by content), label it, mirror it, delete it to 
   assert.equal(await media.localFile(a.name), null);
 });
 
+test('ACARS pictures: their own bucket, flat (files/<name>, labels/<name>.json), names as given', async () => {
+  const { acars } = media;
+  const store = path.join(tmp, 'store', '_acars-ocr'); // MEDIA_BACKEND=fs: a folder per bucket
+  fs.mkdirSync(path.join(store, 'files'), { recursive: true });
+  const pic = crypto.randomBytes(300);
+  fs.writeFileSync(path.join(store, 'files', 'ACARS 01.jpeg'), pic); // put there by hand, as in the MinIO console
+  const { index } = await acars.syncMedia({ force: true });
+  assert.deepEqual(index.files.map(f => f.name), ['ACARS 01.jpeg']);
+  assert.equal(md5(fs.readFileSync(await acars.localFile('ACARS 01.jpeg'))), md5(pic));
+  await acars.saveLabel('ACARS 01.jpeg', { flt: 'DE4800', out: '09:58' });
+  assert.ok(fs.existsSync(path.join(store, 'labels', 'ACARS 01.jpeg.json')));
+  assert.equal((await acars.readLabel('ACARS 01.jpeg')).flt, 'DE4800');
+  // the roster collection does not see them
+  assert.ok(!(await media.mediaIndex(true)).files.some(f => f.name === 'ACARS 01.jpeg'));
+  const { moved } = await acars.deleteFile('ACARS 01.jpeg');
+  assert.equal(moved.length, 2);
+  assert.ok(moved.every(k => k.startsWith('trash/')));
+});
+
 test('import keeps the given names and bytes', async () => {
   const name = '11111111-2222-3333-4444-555555555555.pdf';
   await media.importFile(name, Buffer.from('%PDF-1.4 test'));

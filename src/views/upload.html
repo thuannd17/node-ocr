@@ -227,6 +227,11 @@
     .file-queue .job-status.visible { display: block; }
 
     /* Responsive: stack on small screens */
+    @media (max-width: 700px) {
+      .upload-toolbar .result-actions { flex-wrap: wrap; flex-basis: 100%; }
+      .upload-toolbar .drop-hint { flex-basis: 100%; }
+      .upload-toolbar .spacer { display: none; }
+    }
     @media (max-width: 900px) {
       .split-layout {
         flex-direction: column;

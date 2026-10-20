@@ -9,10 +9,11 @@ import multer from 'multer';
 import { alignRows, normalizeField, compareSection } from '../services/benchmark.js';
 import { runModelBenchmark, labeledCounts, FILE_TYPES } from '../services/model-benchmark.js';
 import { runOcrBenchmark } from '../services/ocr-benchmark.js';
+import { runAcarsBenchmark, labeledAcars } from '../services/acars-benchmark.js';
 import { ocrLines, extractWithPaddleOCR } from '../services/paddle-ocr.js';
 import { extractImageWithModel, modelInfo } from '../services/pdf-ai-extract.js';
 import { saveLabelResult, savePredictedResult } from '../services/result-cache.js';
-import { syncMedia, localFile, readLabel, saveLabel, deleteFile, mediaErrorStatus } from '../services/media-client.js';
+import { syncMedia, localFile, readLabel, saveLabel, deleteFile, mediaErrorStatus, acars } from '../services/media-client.js';
 import sharp from 'sharp';
 import { isDataName, kindOf, extOf } from '../utils/data-files.js';
 import { UPLOADS_DIR, CACHE_DIR } from '../utils/paths.js';
@@ -387,11 +388,11 @@ async function streamBenchmark(req, res, run) {
   }
 }
 
-// Labeled files per type, for the /benchmark choices: { image: 75, pdf: 74, csv: 20, ... }
+// Labeled files per type, for the /benchmark choices: { image: 75, pdf: 74, csv: 20, ... }; acars: labeled ACARS pictures
 router.get('/benchmark/types', async (req, res) => {
   try {
-    await syncMedia();
-    res.json({ types: FILE_TYPES, counts: labeledCounts() });
+    await Promise.all([syncMedia(), acars.syncMedia()]);
+    res.json({ types: FILE_TYPES, counts: labeledCounts(), acars: labeledAcars().length });
   } catch (e) {
     mediaFail(res, e, '/api/benchmark/types');
   }
@@ -408,5 +409,8 @@ router.get('/benchmark/model/stream', (req, res) => {
   const types = asked.length ? asked : FILE_TYPES;
   return streamBenchmark(req, res, async (opts) => { await syncMedia({ force: true }); return runModelBenchmark({ types, ...opts }); });
 });
+
+// AI model over the labeled ACARS pictures, as /acars reads them (services/acars-benchmark.js).
+router.get('/benchmark/acars/stream', (req, res) => streamBenchmark(req, res, async (opts) => { await acars.syncMedia({ force: true }); return runAcarsBenchmark(opts); }));
 
 export default router;

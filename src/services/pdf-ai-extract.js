@@ -9,6 +9,7 @@
  *   extractWithModel(pages, dir?) -> { format: 'ai-model', period, notices, published, planned }
  *   extractImageWithModel(ocrLines, width, height, dir?) -> { format: 'ai-model', published, planned }
  *   readPdfWithModel(file, dir?) -> any PDF: text layer, or an image-only one (see there)
+ *   extractAcarsWithModel(ocrLines, width, height, dir?) -> { flt, dept, dest, out, off, on, in, info } (services/acars.js)
  * dir: a model version's folder; the active one when left out.
  */
 import fs from 'node:fs';
@@ -21,6 +22,7 @@ import { findPeriod, findNotices, parseNetlinePdf } from './pdf-roster-parser.js
 import { readPdfText, hasTextLayer } from './pdf-text.js';
 import { ocrPdfPages, ocrPdfAsImage } from './pdf-ocr.js';
 import { ocrWordPages } from './ocr-tokens.js';
+import { acarsWordPages, assembleAcars } from './acars.js';
 import { ROOT } from '../utils/paths.js';
 import { activeModelDir } from './ai-models.js';
 
@@ -105,4 +107,22 @@ export async function extractImageWithModel(lines, width, height, dir = activeMo
     published: rows.published,
     planned: rows.planned,
   };
+}
+
+/**
+ * An ACARS picture read by the same model: its OCR words (services/acars.js acarsWordPages) tagged with
+ * the ACARS fields only, then one value per field (assembleAcars). A version trained before ACARS
+ * pictures were labeled knows no ACARS field: 409 with what to do.
+ */
+export async function extractAcarsWithModel(lines, width, height, dir = activeModelDir()) {
+  if (!dir || !fs.existsSync(path.join(dir, 'tagger.joblib'))) throw new Error('No AI model yet: label a few files, then click "Train" on /models.');
+  let meta = {};
+  try { meta = JSON.parse(fs.readFileSync(path.join(dir, 'meta.json'), 'utf8')); } catch { /* trained by hand */ }
+  if (!meta.acars) {
+    throw Object.assign(new Error('The AI model in use was not trained on ACARS pictures: label some under "ACARS files" on /label, then train a new version on /models.'), { status: 409 });
+  }
+  const pages = acarsWordPages(lines, width, height);
+  const { fields } = await runPython('pdf_tagger_predict.py', [dir], { pages });
+  pages.forEach((p, i) => p.tokens.forEach((t, k) => { t.field = fields[i][k]; }));
+  return { format: 'acars-model', fields: assembleAcars(pages) };
 }

@@ -19,6 +19,9 @@ router.use('/assets/fontawesome', express.static(path.resolve(__dirname, '..', '
 // Leaflet (npm leaflet), served locally for the airport map: /assets/leaflet/leaflet.js
 router.use('/assets/leaflet', express.static(path.resolve(__dirname, '..', '..', 'node_modules', 'leaflet', 'dist')));
 
+// MapLibre GL (npm maplibre-gl), served locally for the globe view of /route-map: /assets/maplibre/maplibre-gl.js
+router.use('/assets/maplibre', express.static(path.resolve(__dirname, '..', '..', 'node_modules', 'maplibre-gl', 'dist')));
+
 // SunCalc (npm suncalc) for /night-time: /assets/suncalc/suncalc.js
 router.use('/assets/suncalc', express.static(path.resolve(__dirname, '..', '..', 'node_modules', 'suncalc')));
 
@@ -31,6 +34,11 @@ router.get('/', (req, res) => {
 
 router.get('/upload', (req, res) => {
 	res.sendFile(path.join(viewsDir, 'upload.html'));
+});
+
+// Public: scan or upload a cockpit ACARS (OOOI) picture, read by the AI model
+router.get('/acars', (req, res) => {
+	res.sendFile(path.join(viewsDir, 'acars.html'));
 });
 
 router.get('/label', (req, res) => {
@@ -54,6 +62,11 @@ router.get('/storage', (req, res) => res.redirect(301, '/media'));
 // .ics files (exported from /upload, or any calendar) shown as a month calendar, read in the browser
 router.get('/calendar', (req, res) => {
 	res.sendFile(path.join(viewsDir, 'calendar.html'));
+});
+
+// The flights of the calendars opened on /calendar on a world map, one colour per roster (opened from /calendar)
+router.get('/route-map', (req, res) => {
+	res.sendFile(path.join(viewsDir, 'route-map.html'));
 });
 
 // Airport search + details, map and 7-day weather; /airport?code=VIE (linked from /calendar)

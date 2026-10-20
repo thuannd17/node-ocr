@@ -43,8 +43,15 @@ function airports() {
 const rank = (a) => (a.scheduled ? 0 : 10) + (TYPE_RANK[a.type] ?? 5);
 const byRank = (x, y) => rank(x) - rank(y) || x.name.localeCompare(y.name);
 
+// IATA codes OurAirports gives to another airport (or not at all) that rosters use: code -> ICAO.
+// FRU: Manas, Bishkek, listed there as BSZ; without this, FRU found a Papuan airstrip's local code.
+const IATA_FIXES = { FRU: 'UCFM' };
+
 /** The airport a code means: IATA first, then ICAO, FAA, GPS, ... (the order of CODE_FIELDS). */
 export function findByCode(code) {
+  const fix = IATA_FIXES[String(code || '').trim().toUpperCase()];
+  const fixed = fix && (airports().byCode.get(fix) || []).find(a => a.icao === fix);
+  if (fixed) return { airport: fixed, matchedBy: 'iata' };
   const hits = airports().byCode.get(String(code || '').trim().toUpperCase()) || [];
   for (const f of CODE_FIELDS) {
     const same = hits.filter(a => String(a[f]).toUpperCase() === String(code).trim().toUpperCase()).sort(byRank);

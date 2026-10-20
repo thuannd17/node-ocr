@@ -17,6 +17,10 @@
       "description": "Read a roster file into Published / Planned rows (the AI model, as on /upload)."
     },
     {
+      "name": "ACARS",
+      "description": "Read a picture of the cockpit's ACARS / AOC OOOI page (the AI model, as on /acars)."
+    },
+    {
       "name": "Calendar",
       "description": "Roster rows to iCalendar (.ics), as on /calendar."
     },
@@ -202,6 +206,100 @@
           {
             "lang": "curl",
             "source": "curl -F file=@roster.png -F \"note=12 Mar: the duty is OS 769\" http://localhost:3000/api/roster/suggestions"
+          }
+        ]
+      }
+    },
+    "/api/acars/read": {
+      "post": {
+        "tags": [
+          "ACARS"
+        ],
+        "summary": "Read an ACARS picture",
+        "description": "Reads a photo or screenshot of the cockpit's ACARS / AOC OOOI page (OOOI STATUS, FLT LOG, FLIGHT TIMES...) with OCR (PaddleOCR) and the AI model, as on /acars: flight number, date, departure and destination, OUT, OFF, ON, IN, and the flight and block times. The picture is only read: it is deleted right after.",
+        "operationId": "readAcars",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "file"
+                ],
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "JPG, PNG, BMP or JFIF, up to 10 MB"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Fields read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AcarsResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "description": "The AI model in use was not trained on ACARS pictures yet",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "The AI model in use was not trained on ACARS pictures: label some under \"ACARS files\" on /label, then train a new version on /models."
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The file is larger than 10 MB",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "File larger than 10 MB"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "description": "The OCR server is busy: retry in a few seconds",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "The OCR server is busy (5 images in progress / waiting). Please try again in a few seconds.",
+                  "busy": true
+                }
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "curl",
+            "source": "curl -F \"file=@acars.jpg\" http://localhost:3000/api/acars/read"
           }
         ]
       }
@@ -1363,6 +1461,105 @@
           "createdAt": {
             "type": "string",
             "format": "date-time"
+          }
+        }
+      },
+      "AcarsFields": {
+        "type": "object",
+        "description": "What an ACARS OOOI page shows. Times as HH:MM as printed (ACARS prints UTC); a field the picture does not show (or the model could not read) is an empty string.",
+        "properties": {
+          "flt": {
+            "type": "string",
+            "example": "DE4800",
+            "description": "Flight number (FLIGHT NO / FLT ID / CALLSIGN)"
+          },
+          "date": {
+            "type": "string",
+            "example": "11 Nov 25",
+            "description": "As much of the date as the page prints: \"11 Nov 25\" (11NOV25, 11/11/25), \"28 May\" (28/MAY), or only the day, \"14\" (QFA0057/14)"
+          },
+          "dept": {
+            "type": "string",
+            "example": "EDDL",
+            "description": "Departure airport (ICAO or IATA)"
+          },
+          "dest": {
+            "type": "string",
+            "example": "EDDF",
+            "description": "Destination airport"
+          },
+          "out": {
+            "type": "string",
+            "example": "09:58",
+            "description": "OUT: off blocks"
+          },
+          "off": {
+            "type": "string",
+            "example": "10:14",
+            "description": "OFF: airborne"
+          },
+          "on": {
+            "type": "string",
+            "example": "10:45",
+            "description": "ON: touchdown"
+          },
+          "in": {
+            "type": "string",
+            "example": "10:55",
+            "description": "IN: on blocks"
+          },
+          "info": {
+            "type": "string",
+            "example": "[Flight: 00:31] [Block: 00:57]",
+            "description": "Flight (airborne) and block times"
+          }
+        },
+        "required": [
+          "flt",
+          "date",
+          "dept",
+          "dest",
+          "out",
+          "off",
+          "on",
+          "in",
+          "info"
+        ]
+      },
+      "AcarsResult": {
+        "type": "object",
+        "properties": {
+          "fileName": {
+            "type": "string",
+            "example": "acars.jpg"
+          },
+          "fields": {
+            "$ref": "#/components/schemas/AcarsFields"
+          },
+          "timings": {
+            "type": "object",
+            "properties": {
+              "ocrMs": {
+                "type": "integer"
+              },
+              "readMs": {
+                "type": "integer"
+              }
+            }
+          },
+          "model": {
+            "type": "object",
+            "properties": {
+              "trainedAt": {
+                "type": "string",
+                "format": "date-time",
+                "nullable": true
+              }
+            }
+          },
+          "ms": {
+            "type": "integer",
+            "description": "Time taken on the server, in milliseconds"
           }
         }
       }

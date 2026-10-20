@@ -12,6 +12,10 @@
 //
 //   MEDIA_BACKEND = minio (default: MINIO_* settings) | fs (MEDIA_FS_DIR, a folder; tests / no MinIO)
 //
+// The ACARS pictures are a second collection in their own bucket (ACARS_BUCKET, default acars-ocr), "flat":
+//   files/<name>                       an ACARS picture, under the name it was put there with
+//   labels/<name>.json                 its label
+//
 // Errors carry .status (400 / 404 / ...); a store that cannot be reached gives code MEDIA_DOWN, status 503.
 import crypto from 'node:crypto';
 import path from 'node:path';
@@ -30,16 +34,19 @@ export const isDataName = (name) => !!name && /^[^/\\]+$/.test(name) && !name.st
 const isSuggestionId = (id) => /^[0-9A-Za-z-]{6,64}$/.test(String(id));
 /** A key of a model object: models/<part>/<part>..., plain parts only. */
 const isModelKey = (key) => /^models(\/[A-Za-z0-9_][A-Za-z0-9._-]*)+$/.test(String(key)) && !String(key).split('/').includes('..');
-const fileKey = (name) => `files/${extOf(name)}/${name}`;
-const labelKey = (name) => `labels/${extOf(name)}/${name}.json`;
 const md5 = (buf) => crypto.createHash('md5').update(buf).digest('hex');
 const typeOf = (name) => TYPES[extOf(name)] || 'application/octet-stream';
 
 const httpError = (status, message) => Object.assign(new Error(message), { status });
 const DOWN_CODES = new Set(['ECONNREFUSED', 'ENOTFOUND', 'ETIMEDOUT', 'ECONNRESET', 'EHOSTUNREACH', 'EAI_AGAIN']);
 
-/** The media functions on one object store (minio-store.js or fs-store.js). */
-export function createMedia(store) {
+/**
+ * The media functions on one object store (minio-store.js or fs-store.js).
+ * flat: files/<name> and labels/<name>.json (the ACARS bucket) instead of files/<ext>/<name>.
+ */
+export function createMedia(store, { flat = false } = {}) {
+  const fileKey = (name) => (flat ? `files/${name}` : `files/${extOf(name)}/${name}`);
+  const labelKey = (name) => (flat ? `labels/${name}.json` : `labels/${extOf(name)}/${name}.json`);
   const where = () => {
     const d = store.describe();
     return d.backend === 'minio' ? `MinIO at ${d.endpoint}` : `the folder ${d.dir}`;
@@ -69,7 +76,9 @@ export function createMedia(store) {
       const [files, labels] = await Promise.all([s.list('files/'), s.list('labels/')]);
       const pick = (objs, re) => new Map(objs.map(o => [re.exec(o.key)?.[1], o]).filter(([n]) => isDataName(n))
         .map(([n, o]) => [n, { name: n, size: o.size, md5: o.etag, lastModified: o.lastModified }]));
-      index = { files: pick(files, /^files\/[^/]+\/([^/]+)$/), labels: pick(labels, /^labels\/[^/]+\/([^/]+)\.json$/) };
+      index = flat
+        ? { files: pick(files, /^files\/([^/]+)$/), labels: pick(labels, /^labels\/([^/]+)\.json$/) }
+        : { files: pick(files, /^files\/[^/]+\/([^/]+)$/), labels: pick(labels, /^labels\/[^/]+\/([^/]+)\.json$/) };
       indexAt = Date.now();
     }
     return index;
@@ -248,9 +257,13 @@ export function createMedia(store) {
   };
 }
 
-/** The store chosen by the environment: MinIO (MINIO_*) or a folder (MEDIA_BACKEND=fs, MEDIA_FS_DIR). */
-export function storeFromEnv(env = process.env) {
+/**
+ * The store chosen by the environment: MinIO (MINIO_*) or a folder (MEDIA_BACKEND=fs, MEDIA_FS_DIR).
+ * bucket: another bucket than MINIO_BUCKET (with fs: a folder of that name inside MEDIA_FS_DIR).
+ */
+export function storeFromEnv(env = process.env, { bucket = null } = {}) {
+  const dir = env.MEDIA_FS_DIR || 'media-data';
   return String(env.MEDIA_BACKEND || 'minio').toLowerCase() === 'fs'
-    ? createFsStore(env.MEDIA_FS_DIR || 'media-data')
-    : createMinioStore(env);
+    ? createFsStore(bucket ? path.join(dir, `_${bucket}`) : dir)
+    : createMinioStore(bucket ? { ...env, MINIO_BUCKET: bucket } : env);
 }

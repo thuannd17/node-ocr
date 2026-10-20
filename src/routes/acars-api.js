@@ -1,0 +1,151 @@
+// /routes/acars-api.js
+// ACARS pictures (services/acars.js): the cockpit's OOOI page read into Flt No, Dept, Dest, Out, Off, On, In, Info.
+//
+// Public (docs/openapi.json, used by /acars):
+//   POST   /api/acars/read            multipart "file" (JPG, PNG, BMP, JFIF) -> { fields, ms, model } (AI model only;
+//                                     the picture is only read, never kept)
+// Admin (/label "ACARS files"; the pictures and labels live in MinIO, bucket ACARS_BUCKET, services/media-client.js acars):
+//   GET    /api/acars/files           every picture with its label state and byte-identical copies
+//   GET    /api/acars/raw?name=       the picture
+//   GET    /api/acars/labels?name=    its label            POST: save a label { flt, dept, dest, out, off, on, in, info }
+//   GET    /api/acars/parse?name=&engine=parser|model      Auto-fill: the parser (default) or the AI model
+//   DELETE /api/acars/files?name=     move the picture and its label to trash/<date>/
+import { Router } from 'express';
+import fs from 'node:fs';
+import path from 'node:path';
+import multer from 'multer';
+
+import { acars, mediaErrorStatus } from '../services/media-client.js';
+import { readAcarsPicture } from '../services/acars-read.js';
+import { ACARS_FIELDS } from '../services/acars.js';
+import { modelInfo } from '../services/pdf-ai-extract.js';
+import { isDataName, kindOf, IMAGE_EXTS } from '../utils/data-files.js';
+import { UPLOADS_DIR } from '../utils/paths.js';
+
+const router = Router();
+
+const fail = (res, e, where) => {
+  const status = e?.code === 'OCR_BUSY' ? 503 : mediaErrorStatus(e);
+  if (status >= 500 && !['MEDIA_DOWN', 'OCR_BUSY'].includes(e?.code)) console.error(`[${where}]`, e);
+  return res.status(status).json({ error: e.message || String(e), busy: e?.code === 'OCR_BUSY' || undefined });
+};
+const nameOf = (req) => {
+  const name = String(req.query.name || '');
+  return isDataName(name) && kindOf(name) === 'image' ? name : null;
+};
+
+// ---- public: read a picture ----
+
+const upload = multer({
+  dest: UPLOADS_DIR,
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => (kindOf(file.originalname) === 'image'
+    ? cb(null, true)
+    : cb(new Error(`Only ${IMAGE_EXTS.map(e => e.toUpperCase()).join(', ')} pictures are accepted`))),
+});
+const uploadFile = (req, res, next) => upload.single('file')(req, res, (err) => {
+  if (!err) return next();
+  res.status(err.code === 'LIMIT_FILE_SIZE' ? 413 : 400).json({ error: err.code === 'LIMIT_FILE_SIZE' ? 'File larger than 10 MB' : err.message });
+});
+
+router.post('/acars/read', uploadFile, async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'Send the ACARS picture in the multipart field "file"' });
+  const t0 = Date.now();
+  // the OCR server needs the extension to know the picture's format
+  const file = req.file.path + path.extname(req.file.originalname).toLowerCase();
+  try {
+    fs.renameSync(req.file.path, file);
+    const r = await readAcarsPicture(file, { engine: 'model' });
+    res.json({ fileName: req.file.originalname, fields: r.fields, timings: r.timings, model: { trainedAt: modelInfo().trainedAt || null }, ms: Date.now() - t0 });
+  } catch (e) {
+    if (e.status === 409) return res.status(409).json({ error: e.message });
+    fail(res, e, 'POST /api/acars/read');
+  } finally {
+    for (const p of [req.file.path, file]) fs.rm(p, { force: true }, () => {});
+  }
+});
+
+// ---- admin: the dataset ----
+
+router.get('/acars/files', async (req, res) => {
+  try {
+    const { index } = await acars.syncMedia({ maxAgeMs: 2000 });
+    const labeled = new Set(index.labels.map(l => l.name));
+    const files = index.files.filter(f => kindOf(f.name) === 'image').sort((a, b) => a.name.localeCompare(b.name));
+    const firstByHash = new Map();
+    for (const f of files) if (!firstByHash.has(f.md5)) firstByHash.set(f.md5, f.name);
+    const items = files.map(f => {
+      const first = firstByHash.get(f.md5);
+      return { name: f.name, labeled: labeled.has(f.name), duplicateOf: first === f.name ? null : first };
+    });
+    res.json({ items, counts: { files: items.length, labeled: items.filter(i => i.labeled).length } });
+  } catch (e) {
+    fail(res, e, 'GET /api/acars/files');
+  }
+});
+
+router.get('/acars/raw', async (req, res) => {
+  const name = nameOf(req);
+  if (!name) return res.status(400).send('Missing or invalid ?name=');
+  try {
+    const file = await acars.localFile(name);
+    if (!file) return res.status(404).send('File not found');
+    res.sendFile(file);
+  } catch (e) {
+    res.status(mediaErrorStatus(e)).send(e.message);
+  }
+});
+
+router.get('/acars/labels', async (req, res) => {
+  const name = nameOf(req);
+  if (!name) return res.status(400).json({ error: 'Missing or invalid ?name=' });
+  try {
+    const label = await acars.readLabel(name);
+    if (!label) return res.status(404).json({ error: 'No label yet' });
+    res.json(label);
+  } catch (e) {
+    fail(res, e, 'GET /api/acars/labels');
+  }
+});
+
+router.post('/acars/labels', async (req, res) => {
+  const name = nameOf(req);
+  if (!name) return res.status(400).json({ error: 'Missing or invalid ?name=' });
+  const body = req.body || {};
+  if (ACARS_FIELDS.some(f => body[f] != null && typeof body[f] !== 'string')) return res.status(400).json({ error: `Fields must be text: ${ACARS_FIELDS.join(', ')}` });
+  try {
+    if (!(await acars.localFile(name))) return res.status(404).json({ error: 'File not found' });
+    const label = Object.fromEntries(ACARS_FIELDS.map(f => [f, String(body[f] || '').trim()]));
+    await acars.saveLabel(name, { ...label, _reviewedAt: new Date().toISOString() });
+    res.json({ ok: true, name });
+  } catch (e) {
+    fail(res, e, 'POST /api/acars/labels');
+  }
+});
+
+router.get('/acars/parse', async (req, res) => {
+  const name = nameOf(req);
+  if (!name) return res.status(400).json({ error: 'Missing or invalid ?name=' });
+  const engine = req.query.engine === 'model' ? 'model' : 'parser';
+  try {
+    const file = await acars.localFile(name);
+    if (!file) return res.status(404).json({ error: 'File not found' });
+    res.json(await readAcarsPicture(file, { engine, cacheName: name }));
+  } catch (e) {
+    if (e.status === 409) return res.status(409).json({ error: e.message });
+    fail(res, e, 'GET /api/acars/parse');
+  }
+});
+
+router.delete('/acars/files', async (req, res) => {
+  const name = nameOf(req);
+  if (!name) return res.status(400).json({ error: 'Missing or invalid ?name=' });
+  try {
+    const { moved } = await acars.deleteFile(name);
+    res.json({ ok: true, name, moved });
+  } catch (e) {
+    fail(res, e, 'DELETE /api/acars/files');
+  }
+});
+
+export default router;

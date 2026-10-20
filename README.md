@@ -209,6 +209,12 @@ npm run media:import    # one-time: copy the old fake-data/, labels/, suggestion
 - `MEDIA_BACKEND=fs` (`MEDIA_FS_DIR`) keeps the data in a folder instead of MinIO: the tests use it.
 - Admin page **/media**: every roster file in MinIO, labeled or not, with a preview; delete one file or all unlabeled ones (to trash/<date>/).
 
+**ACARS pictures** (photos of the cockpit's ACARS / AOC OOOI page) are a second collection in a bucket of their own,
+`ACARS_BUCKET` (default `acars-ocr`), laid out flat and under the names they were put there with:
+`files/<name>` and `labels/<name>.json` (`{ flt, date, dept, dest, out, off, on, in, info }`; the date as much of it as the screen prints: `11 Nov 25`, `28 May`, or only the day `14` from `QFA0057/14`), deleted ones in `trash/<date>/`.
+The app mirrors it like the roster data (`acars` in `src/services/media-client.js`, mirror `<work>/acars/`).
+Put new pictures there with the MinIO console; label them on /label (**ACARS files**).
+
 Code never builds these paths itself: `src/utils/data-files.js` (`DATA_ROOT`, `LABELS_ROOT`, `listData`, `dataFile`,
 `labelFile`, ...) resolves a file name to its place in the mirror, so training, benchmark and
 the app all see the same files. File names are unique across folders, so caches,
@@ -235,9 +241,10 @@ work folder `ROSTER_WORK_DIR` (default `<system temp>/roster-ocr-work`, `src/uti
 | `<work>/` | What |
 |---|---|
 | `media/` | mirror of the roster files and labels (`MEDIA_CACHE_DIR`) |
+| `acars/` | mirror of the ACARS pictures and their labels (`ACARS_CACHE_DIR`) |
 | `models/` | mirror of the trained AI models |
 | `cache/` | OCR and parse results kept to run faster again (`ocr/`, `parsed/`, `rec-lines/`, ...) |
-| `exports/` | training datasets built from the labels (`ocr-lines/`, `pdf-tokens/`, `recognition-groundtruth/`, ...) |
+| `exports/` | training datasets built from the labels (`ocr-lines/`, `ocr-lines-acars/`, `pdf-tokens/`, `image-tokens/`, `acars-tokens/`, `recognition-groundtruth/`, ...) |
 | `uploads/`, `tmp/` | files being read, OCR crops, load tests (short-lived) |
 | `train/` | OCR k-fold runs |
 | `pretrained/` | the PaddleOCR base model for retraining (downloaded, see [Recognition model versions](#recognition-model-versions)) |
@@ -283,15 +290,19 @@ docker compose logs -f app ocr
 | Page | Purpose |
 |---|---|
 | `/upload` | **Try the AI model**: every uploaded roster **image or duty-plan PDF** is read by the learned model (images: PaddleOCR lines -> model), never by the parser and never answered from a saved label. Uploads are **only read, never stored**. If the rows are wrong, **Suggest a correction** sends the file, an optional note and the rows the model read to the admins (`POST /api/roster/suggestions`, kept in `suggestions/<id>/`, git-ignored). The page is read-only and public: it only uses the public API and never links to or calls the admin pages (/label, /benchmark, /models) or their APIs; admin pages may link to it. The toolbar holds the file picker (or drop a file anywhere) and, once a result is shown, **↻ Re-read** (read again, e.g. after retraining). An image-only PDF (no text layer) is read by OCR: a duty plan by the parser (the model has no words for it); any other one, e.g. a Ryanair eCrew roster screen printed to PDF, has its pages stacked into one tall roster picture that the model reads as an image (and, once labeled, trains on as an image). A PDF shows the PDF and 12 columns; empty optional columns (DC, Reg., AC, Crew) are hidden. |
-| `/label` | **Correction suggestions** from /upload on top (pending first; *Show handled ones* for the rest): 👁 opens the file, **Label it** adds it to the data (MinIO, deduplicated) and opens it with the rows the model read as a starting point (not saved until Save), **Dismiss** deletes the file and keeps the record. Below: folder tree of `fake-data/` (one folder per extension; unlabeled 🆕 first, byte-identical image copies hidden unless asked). Hovering a file shows 🗑: it removes the file from the dataset (after a confirm) by moving it and its label to `trash/<date>/` in MinIO (its cached OCR result is dropped). Clicking a file opens a popup (Esc / × closes; drag the bar in the middle to resize) with the file next to its label as editable Published / Planned tables (one cell per field, add / insert / delete rows; Enter moves down a column); the label is still saved as JSON (**{ } JSON** shows it). Making ground truth: **Auto-fill** proposes the rows with **Parser** (OCR + `roster-parser.js` for an image, the PDF parser for a PDF) or **AI model** (chosen in the list next to it), and says how many rows match the saved label; check, fix, save. Ctrl+S saves, Alt+↑/↓ moves between files. `/label?name=<file>` opens one. |
-| `/benchmark` | Two scores against the labels. **1. Text recognition from images (OCR)**: PaddleOCR alone on every labeled image (`npm run ocr:benchmark`): each labeled cell (date, day, duty, dep, begin, end, arr; a day's date/weekday once) is looked for in the OCR lines; cells read exactly and characters right, per field and per image with the misread cells. **2. Reading roster data per file type**: the AI model, read as on /upload (`npm run model:benchmark -- --types=image,pdf,csv,xls,xlsx,txt`), with a score per file type; tick the types to run. A run of only some types of a kind does not overwrite the score /models shows. Each file lists its differences from the label. **Review & fix** on a file opens the /label editor in a popup over the page (`/label?embed=1&review=1&name=<file>`): for an image, the table is the label and cells where the model differs are marked (yellow, model value underneath: click to take it), label rows the model missed are blue, rows only the model has are struck through (**+ label** adds one); a PDF opens without the marks. A saved label shows "✓ label saved": run the benchmark again to update the scores. |
+| `/acars` | **Read an ACARS picture** (public): **Scan** takes a photo (the phone's camera), **Upload a picture** picks one (or drop / paste it). The AI model reads it (OCR + the model's ACARS fields, `POST /api/acars/read`): **Flt No, Date, Dept, Dest, Out, Off, On, In** and **Info** (`[Flight: 02:35] [Block: 02:56]`); **Copy** copies them as text. The picture is only read, never kept. It needs a model version trained with labeled ACARS pictures (/models shows "ACARS" among its training files); an older version answers 409 with what to do. |
+| `/label` | **Correction suggestions** from /upload on top (pending first; *Show handled ones* for the rest): 👁 opens the file, **Label it** adds it to the data (MinIO, deduplicated) and opens it with the rows the model read as a starting point (not saved until Save), **Dismiss** deletes the file and keeps the record. Below: folder tree of `fake-data/` (one folder per extension; unlabeled 🆕 first, byte-identical image copies hidden unless asked). Hovering a file shows 🗑: it removes the file from the dataset (after a confirm) by moving it and its label to `trash/<date>/` in MinIO (its cached OCR result is dropped). Clicking a file opens a popup (Esc / × closes; drag the bar in the middle to resize) with the file next to its label as editable Published / Planned tables (one cell per field, add / insert / delete rows; Enter moves down a column); the label is still saved as JSON (**{ } JSON** shows it). Making ground truth: **Auto-fill** proposes the rows with **Parser** (OCR + `roster-parser.js` for an image, the PDF parser for a PDF) or **AI model** (chosen in the list next to it), and says how many rows match the saved label; check, fix, save. Ctrl+S saves, Alt+↑/↓ moves between files. `/label?name=<file>` opens one. A second folder, **ACARS files**, lists the ACARS pictures (bucket `acars-ocr`): the popup shows the picture next to a form of 9 fields (Flt No, Date, Dept, Dest, Out, Off, On, In, Info; times HH:MM as printed), with the same Auto-fill (**Parser**: label words like OUT / FLT NO / ORIG/DEST and the value under or after them, `src/services/acars.js`; or **AI model**), Save and 🗑. |
+| `/benchmark` | Two scores against the labels. **1. Text recognition from images (OCR)**: PaddleOCR alone on every labeled image (`npm run ocr:benchmark`): each labeled cell (date, day, duty, dep, begin, end, arr; a day's date/weekday once) is looked for in the OCR lines; cells read exactly and characters right, per field and per image with the misread cells. **2. Reading roster data per file type**: the AI model, read as on /upload (`npm run model:benchmark -- --types=image,pdf,csv,xls,xlsx,txt`), with a score per file type; tick the types to run. A run of only some types of a kind does not overwrite the score /models shows. Each file lists its differences from the label. **Review & fix** on a file opens the /label editor in a popup over the page (`/label?embed=1&review=1&name=<file>`): for an image, the table is the label and cells where the model differs are marked (yellow, model value underneath: click to take it), label rows the model missed are blue, rows only the model has are struck through (**+ label** adds one); a PDF opens without the marks. A saved label shows "✓ label saved": run the benchmark again to update the scores. **3. Reading ACARS pictures**: the AI model on every labeled ACARS picture, read as on /acars (`npm run acars:benchmark`): fields right per field (times compared as HH:MM, Info as its two times) and pictures fully right; the score is saved with the model version (/models). |
 | `/calendar` | Month / list calendar of `.ics` files, read in the browser (nothing is uploaded). On `/upload`, **Export .ics** downloads the shown file's rows as iCalendar (Google Calendar, Outlook, Apple Calendar) and **View calendar** opens them here (`src/views/assets/ics.js`: `Z` times are UTC, `L`/`LB`/`B` local times are floating, rows without times are all-day, Planned rows are TENTATIVE; a check-in .. check-out (C/I..C/O, CHECK-IN..CHECK-OUT) is one duty event with its flights / sims / hotel inside it (RELATED-TO), rows without a check-in stand alone; a hotel lasts from the end of the event before it to the start of the event after it, nights in a row at one hotel are one event). Times can be shown in UTC or this computer's zone. |
+| `/route-map` | The flights of the calendars opened on /calendar (its **Route map** button) on a world map (Leaflet + OpenStreetMap), or on a **globe** (**Map | Globe**; MapLibre GL in its globe projection, `/assets/maplibre` from npm maplibre-gl (6.x: its ES module `maplibre-gl.mjs`; 5.x: `maplibre-gl.js`), loaded only when the globe is shown; drag to turn it, the view is remembered): each flight from its departure to its arrival along the great circle, **one colour per roster** (the calendar's colour; click a roster in the legend to hide / show it), line width by how often the route is flown. A month filter, Planned flights on / off, airport codes on / off; a table of the routes (flights, great-circle distance, rosters; click one to zoom to it). A flight is an event `<flight no> DEP → ARR` (ground duties without a number, like `GT LTN → STC`, are left out); airports come from `/api/airports`. Read in the browser from the calendars /calendar keeps (`localStorage`), nothing is uploaded. |
 | `/airport` | Airport lookup by IATA, ICAO, FAA, WMO code or name / city / country: codes, coordinates, elevation, city, country, time zone, a map (Leaflet + OpenStreetMap) and a 7-day forecast (Open-Meteo, no key, cached 30 min by the server). The airport codes in an event's details on `/calendar` link here. Data: `data/airports.json`, rebuilt by `npm run airports:update` (OurAirports + NOAA ISD for WMO station numbers). ICAO is the airport's id; a WMO number belongs to a weather station, not the airport. |
 | `/night-time` | Night time of a flight: departure / arrival (airport code or "lat, lon"), off-block and on-block in UTC. The aircraft flies the great circle at a constant speed; the sun altitude is taken at its position every 30 s with SunCalc and each day/night edge is bisected to the second (`src/views/assets/night.js`). Night = sun below −6° (end of civil twilight: ICAO / EASA / FAA) or below −0.833° (sunset to sunrise). Shows night / day / block time, take-off and landing by day or night, the route on a map coloured by night and day with the points where night starts and ends, and the sun altitude over the flight. Flights with UTC times on `/calendar` link here. |
 | `/media` | Admin. The roster files as **MinIO** keeps them: the list (filter by type and labeled / not labeled) and a preview of the one clicked. **Delete** moves a file and its label to `trash/<date>/` in MinIO; **Delete all unlabeled** does that for every file without a label (of the type chosen). `/storage` redirects here. |
-| `/api-docs` | Public API reference for other apps (Swagger UI over `docs/openapi.json`, also served as `/api/openapi.json`): read a roster of any type, image, PDF, CSV, Excel or TXT (`POST /api/roster/upload`, field `file`), suggest a correction (`POST /api/roster/suggestions`), roster rows to .ics (`POST /api/calendar/export`), airports and weather (`GET /api/airports...`), night time (`POST /api/night-time/calc`). The last two tools run the same code as the pages (`src/routes/tools-api.js`). |
+| `/api-docs` | Public API reference for other apps (Swagger UI over `docs/openapi.json`, also served as `/api/openapi.json`): read a roster of any type, image, PDF, CSV, Excel or TXT (`POST /api/roster/upload`, field `file`), read an ACARS picture (`POST /api/acars/read`), suggest a correction (`POST /api/roster/suggestions`), roster rows to .ics (`POST /api/calendar/export`), airports and weather (`GET /api/airports...`), night time (`POST /api/night-time/calc`). The last two tools run the same code as the pages (`src/routes/tools-api.js`). |
 
-**Public and admin.** The topnav and the home page keep the public tools (Upload, Calendar, Airport, Night Time, API Docs) apart from **Admin** (Label, Benchmark, AI Models). Admin is only separated for now: there are no accounts yet, so its pages and APIs are still open; protect them before exposing the app.
+**Public and admin.** The topnav and the home page keep the public tools (Upload, ACARS, Calendar, Airport, Night Time, API Docs) apart from **Admin** (Label, Benchmark, AI Models). Admin is only separated for now: there are no accounts yet, so its pages and APIs are still open; protect them before exposing the app.
+
+**Phones and tablets.** Every page is responsive (`src/views/assets/app.css`): below 1100px the public links fold into a menu under ☰ (`src/views/assets/nav.js`), side-by-side panels stack, wide tables scroll inside their box, and a table marked `stack-sm` (the versions on /models) turns each row into a card on a phone. /acars has **Scan** for the phone's camera.
 
 **Language.** The pages are in English by default; **EN / VI** on the top bar switches to Vietnamese (kept in this browser and in a `lang` cookie, so server messages follow). English text is written in the code; all Vietnamese is in `src/views/assets/i18n/vi.js` (English text → Vietnamese, `{name}` placeholders kept). Page code calls `__("English text", { params })`; static HTML is translated on load when its text, `title`, `placeholder` or `aria-label` is exactly a key (`data-i18n` for a sentence with markup); the server translates with `req.__()` and the JSON `error` / `notices` it sends (`src/utils/i18n.js`). `tests/i18n.test.js` checks the placeholders and that no Vietnamese is left in the page code.
 
@@ -303,6 +314,8 @@ is written only when a person presses **Save as Label**.
 | Route | Description |
 |---|---|
 | `POST /api/roster/upload` | public: multipart field `file`, any roster type (image, PDF, CSV, XLS, XLSX, TXT); the server picks the reader (`src/routes/roster-api.js`) and answers one shape (`readMode`, `source`, `period`, `notices`, both tables; `?preview=1` adds `previewHtml` for CSV / Excel / TXT); no label information; the file is not kept |
+| `POST /api/acars/read` | public: multipart field `file` (JPG, PNG, BMP, JFIF) -> `{ fields: { flt, dept, dest, out, off, on, in, info }, timings, model, ms }`, read by the AI model (`src/routes/acars-api.js`); 409 when the model in use was not trained on ACARS pictures; the picture is not kept |
+| `GET /api/acars/files`, `GET /api/acars/raw?name=`, `GET`/`POST /api/acars/labels?name=`, `GET /api/acars/parse?name=&engine=parser\|model`, `DELETE /api/acars/files?name=` | admin (/label ACARS files): the pictures, their labels, Auto-fill, delete to the trash |
 | `POST /api/roster/suggestions` | public: multipart `file`, `note?`, `rows?` (JSON) -> `201 { id }`; the only way an uploaded roster is kept |
 | `GET /api/media/status`, `GET /api/media/items`, `GET`/`DELETE /api/media/file?name=`, `POST /api/media/delete-unlabeled` | admin (/media): MinIO, the files, deleting to the trash (`src/routes/media-api.js`) |
 | `GET /api/suggestions?status=pending\|accepted\|dismissed\|all`, `GET /api/suggestions/:id[/file]`, `POST /api/suggestions/:id/accept\|dismiss` | admin (/label): list, view, accept into the data (MinIO, deduplicated) or dismiss (`src/routes/suggestions-api.js`) |
@@ -313,8 +326,8 @@ is written only when a person presses **Save as Label**.
 | `GET /api/labels`, `POST /api/labels` | read / save a label |
 | `GET /api/files`, `GET /api/raw` | list images / serve an image |
 | `DELETE /api/files?name=...` | remove an image or PDF from the dataset: file and label move to `trash/<date>/` in MinIO, the cached result is dropped |
-| `GET /api/benchmark/model/stream?types=image,pdf,csv,...`, `GET /api/benchmark/ocr/stream`, `POST /api/benchmark/stop` | AI model benchmark per file type, OCR benchmark on images (server-sent events) |
-| `GET /api/benchmark/types` | labeled files per type |
+| `GET /api/benchmark/model/stream?types=image,pdf,csv,...`, `GET /api/benchmark/ocr/stream`, `GET /api/benchmark/acars/stream`, `POST /api/benchmark/stop` | AI model benchmark per file type, OCR benchmark on images, AI model on the ACARS pictures (server-sent events) |
+| `GET /api/benchmark/types` | labeled files per type, and labeled ACARS pictures |
 | `/api/models` | model versions per family: list, train, activate, delete (`/models`) |
 
 ## PDF duty plans (NetLine/Crew)
@@ -431,10 +444,11 @@ enough to read the others.
 | `src/services/pdf-label-align.js` | training tags from a label alone: which words hold each row's values (so files the parser misreads still teach the model) |
 | `src/scripts/build-pdf-token-data.mjs` | tags of every labeled PDF -> `<work>/exports/pdf-tokens/` (the parser's trace where it equals the label, else the label alignment) |
 | `src/services/ocr-tokens.js`, `src/scripts/build-image-token-data.mjs` | OCR lines of a labeled image -> words with positions, tagged from its label -> `<work>/exports/image-tokens/` |
-| `src/scripts/pdf_tagger.py`, `src/scripts/train_pdf_tagger.py` | the word tagger (scikit-learn, two stages: word + column-header features, then the neighbours' fields); every layout weighs the same in training |
+| `src/services/acars.js`, `src/scripts/build-acars-token-data.mjs` | OCR lines of a labeled ACARS picture (glue undone: `0UT23:30`, `EDDH/LSZH`, `1 5 1 2`) -> words tagged from its label (`flt, adate, dept, dest, out, off, on, in, block, flight`; a value OCR misread is left out, not taught as O) -> `<work>/exports/acars-tokens/` |
+| `src/scripts/pdf_tagger.py`, `src/scripts/train_pdf_tagger.py` | the word tagger (scikit-learn, two stages: word + column-header features, then the neighbours' fields); every layout weighs the same in training. CPU only (scikit-learn has no GPU): one binary LinearSVC per field, trained 3 at a time in threads (`PDF_TAGGER_JOBS`; each copy of the data takes ~0.4 GB of RAM); field weights "balanced" but capped at 100 (`PDF_TAGGER_WEIGHT_CAP`), which only touches the rare ACARS fields and keeps training fast |
 | `src/services/pdf-row-assembler.js` | tagged words -> rows (blocks, dates, C/I-C/O, hotels, time zones, legend; how `[Block: 3:25]` is written is learned from the labels) |
 | `src/scripts/model-train.mjs` | the whole retrain -> a new version `models/ai/<id>/` in MinIO, activated (earlier ones kept; /models switches or deletes them) |
-| `src/services/pdf-ai-extract.js` | the app side: runs `src/scripts/pdf_tagger_predict.py` (~3-4 s per file) and assembles the rows (`extractWithModel` for PDFs, `extractImageWithModel` for images) |
+| `src/services/pdf-ai-extract.js` | the app side: runs `src/scripts/pdf_tagger_predict.py` (~3-4 s per file) and assembles the rows (`extractWithModel` for PDFs, `extractImageWithModel` for images), or the fields of an ACARS picture (`extractAcarsWithModel`, `src/services/acars-read.js`) |
 
 Measured on the 44 labeled PDFs (rows with all 12 fields right, each file read
 by a model that never saw it): layouts already labeled 92.6%; a new layout after
@@ -443,8 +457,15 @@ trained with the images read 86.8% of rows when it had not seen the image
 (images it trained on: 88.2%; the image parser: 97.0%). The parser stays the
 better tool for making labels of the layouts it knows.
 
+**ACARS pictures** are learned by the same model: their words get features of their own (the label word over
+or left of a value: OUT, OFF, FLT NO, ORIG/DEST...) and only ever the ACARS fields, while a roster's words never
+get them (`predict_masked` in `src/scripts/pdf_tagger.py`): an ACARS field never shows up in a roster, and the other way round.
+The model's tags become one value per field (`assembleAcars`). OCR is the limit: on the 28 distinct labeled
+pictures, 196 of the 251 label values are among the OCR words at all (the others are misread), so no model can
+read more than those until OCR reads these screens better.
+
 ```powershell
-npm run model:train                                   # retrain from every label (images + pdf, csv, xls, xlsx, txt)
+npm run model:train                                   # retrain from every label (images + pdf, csv, xls, xlsx, txt + ACARS pictures)
 npm run model:eval-assembler                              # assembler on the true tags
 .venv/Scripts/python src/scripts/train_pdf_tagger.py --predict one   # tags for "one labeled file" ...
 npm run model:eval-assembler -- --pred <work>/exports/pdf-tokens-pred/one     # ... and their rows
@@ -479,6 +500,8 @@ MINIO_USE_SSL=false
 MINIO_ACCESS_KEY=...
 MINIO_SECRET_KEY=...
 MINIO_BUCKET=roster-ocr                 # created on first use
+# ACARS_BUCKET=acars-ocr                # the ACARS pictures (files/<name>, labels/<name>.json)
+# ACARS_CACHE_DIR=                      # their local mirror (default: <ROSTER_WORK_DIR>/acars)
 ```
 
 Restart `ocr-server` and the app after changing `.env`.
@@ -509,6 +532,7 @@ These need labeled rosters in MinIO (see [Data](#5-data-minio-not-in-git)); the 
 
 ```powershell
 npm run model:benchmark                                 # AI model vs every label (as /benchmark)
+npm run acars:benchmark -- --files                      # AI model vs the ACARS labels, field by field
 npm run ocr:benchmark                                   # PaddleOCR alone on the labeled images
 node src/scripts/eval-parser-cached.mjs                     # parser only, from cached OCR lines (seconds)
 node --env-file=.env src/scripts/diagnose-errors.mjs        # which pipeline stage each wrong field came from
@@ -528,6 +552,8 @@ Since 2026-10-19 every version is in **MinIO**, `models/rec/vN/`: `infer/` (load
 (and `checkpoint/` when kept). `models/rec/stock` is the unmodified PaddleOCR model.
 `models/rec/active.json` names the one in use; /models and `npm run ocr:use-model` switch it.
 Nothing of them is in git or in the project (only `models/rec/train-template.yml`, the training recipe).
+
+**ACARS pictures train the recognizer too** (`npm run ocr:train`): after the roster cells, `src/scripts/ocr-acars-crops.mjs` crops every OCR line of a labeled ACARS picture whose true text is known from its label (`acarsLineTruths` in `src/services/acars.js`: values in their printed form, `1223` -> `1229`, `0UT23:30` -> `OUT 23:30`; lines with a word not known for sure are left out), each listed 5 times (`--acars-repeat=N`). About a quarter of the ACARS pictures the deployed model never saw are kept out and score both models (label values found among the OCR words). A run starts with 5+ new rosters or 4+ new ACARS pictures (`--min-new`, `--min-new-acars`); with too few new rosters all rosters are trained on and scored as a regression check. The verdict: worse if the rosters are read worse or ACARS lose 2+ values, better if the rosters gain or ACARS gain 2+ values.
 
 - **The OCR server** (`src/scripts/ocr_server.py` + `src/scripts/rec_model.py`) reads `active.json` at start (or
   `OCR_REC_VERSION`), downloads that version's `infer/` into `<work>/models/rec/<ver>/infer` (only the files that
@@ -562,6 +588,8 @@ curl -L -o en_PP-OCRv3_rec_train.tar https://paddleocr.bj.bcebos.com/PP-OCRv3/en
 mkdir $env:TEMP\roster-ocr-work\pretrained
 tar -xf en_PP-OCRv3_rec_train.tar -C $env:TEMP\roster-ocr-work\pretrained    # -> <work>/pretrained/en_PP-OCRv3_rec_train/best_accuracy.*
 ```
+
+Once downloaded, keep a copy in MinIO (`npm run models:archive -- push <work>/pretrained/en_PP-OCRv3_rec_train models/pretrained/en_PP-OCRv3_rec_train/`, done 2026-10-20): `ocr:train` gets it back from there by itself when the work folder was cleared.
 
 It also needs labeled rosters in MinIO.
 
@@ -603,6 +631,7 @@ src/                             all the code
   services/roster-parser.js      OCR lines -> table rows
   services/pdf-*.js              PDF duty plans: text + positions, parser, row comparison
   services/benchmark.js          scoring
+  services/acars*.js             ACARS pictures: OCR words, parser, training tags, the model's fields, benchmark
   services/storage/              the storage library: MinIO (or a folder) for files, labels, suggestions, models
   services/media-client.js       the app's use of it + local mirror (syncMedia, localFile, saveLabel, ...)
   services/ai-models.js          AI model versions in MinIO (syncModels, publishModel, activateModel, ...)
@@ -621,6 +650,7 @@ docker/, Dockerfile, docker-compose*.yml   images (see Docker)
 
 not in git:
 MinIO bucket roster-ocr     roster files, labels, suggestions (personal data)
+MinIO bucket acars-ocr      ACARS pictures and their labels
 MinIO models/               trained models: OCR recognition (models/rec/), AI roster model (models/ai/), checkpoints
 <ROSTER_WORK_DIR>/           everything made while running: mirrors, caches, datasets, uploads, pretrained/
 ```

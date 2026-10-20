@@ -21,7 +21,8 @@
 
     .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 12px 14px; }
     .conn { display: flex; gap: 8px; align-items: center; font-size: 13px; }
-    .conn code { font-size: 12px; }
+    .conn code { font-size: 12px; overflow-wrap: anywhere; }
+    .conn { min-width: 0; flex-wrap: wrap; }
     .dot { width: 10px; height: 10px; border-radius: 50%; background: #bbb; flex: none; }
     .dot.ok { background: #2e7d32; }
     .dot.bad { background: #c62828; }

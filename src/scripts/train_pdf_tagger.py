@@ -26,12 +26,12 @@ from sklearn.metrics import classification_report
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from pdf_tagger import HEADER_WORDS, doc_features, fit, use_learned_header_words  # noqa: E402
 
-# Training words: PDFs (build-pdf-token-data.mjs) and roster images (build-image-token-data.mjs).
-# --pdf-only: the PDFs alone.
+# Training words: PDFs (build-pdf-token-data.mjs), roster images (build-image-token-data.mjs) and
+# ACARS pictures (build-acars-token-data.mjs). --pdf-only: the PDFs alone.
 # Where the app keeps its work files (utils/paths.js): the Node callers pass ROSTER_WORK_DIR down.
 WORK = os.environ.get('ROSTER_WORK_DIR') or os.path.join(tempfile.gettempdir(), 'roster-ocr-work')
 EXPORTS = os.path.join(WORK, 'exports')
-DATA = [os.path.join(EXPORTS, 'pdf-tokens')] + ([] if '--pdf-only' in sys.argv else [os.path.join(EXPORTS, 'image-tokens')])
+DATA = [os.path.join(EXPORTS, 'pdf-tokens')] + ([] if '--pdf-only' in sys.argv else [os.path.join(EXPORTS, 'image-tokens'), os.path.join(EXPORTS, 'acars-tokens')])
 
 
 def family(doc):
@@ -39,6 +39,8 @@ def family(doc):
     words = {t['t'] for p in doc['pages'] for t in p['tokens']}
     if doc.get('kind') == 'image':
         return 'image-roster'
+    if doc.get('kind') == 'acars':
+        return 'acars'
     if doc.get('format') in (None, 'unknown'):
         return 'file:' + doc['file']  # a format the parser does not read: known only from its label
     if doc['format'] != 'netline-duty-plan':

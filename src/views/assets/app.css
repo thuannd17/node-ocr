@@ -89,6 +89,50 @@ body {
   .topnav { gap: 12px; padding: 0 12px; }
   .topnav .brand { font-size: 14px; }
   .page { padding: 16px 12px 32px; }
+  .page-header h1 { font-size: 19px; }
+  .card { padding: 14px; }
+}
+
+/* ---- Phones and tablets: the public links fold into a menu under ☰ (views/assets/nav.js) ---- */
+.topnav .nav-toggle { display: none; }
+@media (max-width: 1100px) {
+  .topnav .nav-toggle {
+    display: inline-flex; align-items: center; justify-content: center; flex: none;
+    width: 38px; height: 38px; margin-left: -6px; border: none; border-radius: 6px;
+    background: transparent; color: var(--nav-fg); font-size: 18px; cursor: pointer;
+  }
+  .topnav .nav-toggle:hover, .topnav.open .nav-toggle { background: rgba(255, 255, 255, 0.12); }
+  .topnav .menu {
+    display: none; position: absolute; left: 0; right: 0; top: var(--nav-h);
+    flex-direction: column; gap: 2px; padding: 8px; background: var(--nav-bg);
+    box-shadow: 0 8px 18px rgba(0, 0, 0, 0.25); max-height: calc(100vh - var(--nav-h)); overflow-y: auto;
+  }
+  .topnav.open .menu { display: flex; }
+  .topnav .menu a { padding: 11px 12px; font-size: 15px; display: flex; gap: 10px; align-items: center; }
+  .topnav .menu a i { width: 18px; text-align: center; }
+}
+
+/* table.stack-sm: on a phone each row becomes a card of "column: value" lines (td data-label="Column") */
+@media (max-width: 700px) {
+  table.stack-sm, table.stack-sm tbody, table.stack-sm tr, table.stack-sm td { display: block; width: 100%; }
+  table.stack-sm thead { display: none; }
+  table.stack-sm tr { padding: 8px 0; border-top: 1px solid var(--border); }
+  table.stack-sm td { position: relative; border: none !important; padding: 4px 12px !important; text-align: left !important; overflow-wrap: anywhere; }
+  table.stack-sm td[data-label] { padding-left: 112px !important; min-height: 26px; }
+  table.stack-sm td[data-label]::before { content: attr(data-label); position: absolute; left: 12px; top: 5px; width: 92px; font-size: 12px; font-weight: 600; color: var(--muted); }
+  table.stack-sm td:empty { display: none; }
+}
+
+/* Phones: form fields at 16px (iOS zooms the page into smaller ones); long code and paths wrap */
+@media (max-width: 700px) {
+  input:not([type=checkbox]):not([type=radio]), select, textarea { font-size: 16px; }
+  code { overflow-wrap: anywhere; }
+}
+
+/* Wide content (tables, code) scrolls inside its box instead of widening the page */
+img, video, iframe { max-width: 100%; }
+@media (max-width: 700px) {
+  .table-scroll, .table-container { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 }
 
 /* ---- Language switch (topnav, right) ---- */

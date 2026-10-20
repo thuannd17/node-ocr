@@ -25,6 +25,10 @@ import { WORK_DIR } from './paths.js';
 export const MEDIA_CACHE_DIR = path.resolve(process.env.MEDIA_CACHE_DIR || path.join(WORK_DIR, 'media'));
 export const DATA_ROOT = path.join(MEDIA_CACHE_DIR, 'files');
 export const LABELS_ROOT = path.join(MEDIA_CACHE_DIR, 'labels');
+/** The ACARS pictures' mirror (services/media-client.js `acars`): <cache>/files/<ext>/<name>, <cache>/labels/<ext>/<name>.json */
+export const ACARS_CACHE_DIR = path.resolve(process.env.ACARS_CACHE_DIR || path.join(WORK_DIR, 'acars'));
+export const ACARS_DATA_ROOT = path.join(ACARS_CACHE_DIR, 'files');
+export const ACARS_LABELS_ROOT = path.join(ACARS_CACHE_DIR, 'labels');
 
 export const IMAGE_EXTS = ['jpg', 'jpeg', 'png', 'jfif', 'bmp'];
 // Kind 'pdf' = a file read from its text, not by OCR: PDFs and rosters exported as

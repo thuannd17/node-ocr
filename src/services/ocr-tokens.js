@@ -3,7 +3,10 @@
  * PDF's words (services/pdf-tokens.js), so the learned extractor reads images
  * and PDFs alike.
  *
- *   ocrWordPages(lines, width, height) -> [{ width, height, tokens: [{ t, x, y, w, h }] }]
+ *   ocrWordPages(lines, width, height, { unglue = true }) -> [{ width, height, tokens: [{ t, x, y, w, h }] }]
+
+ *     keepBox: each token also gets box = the index of its OCR line (scripts/ocr-acars-crops.mjs)
+ *     unglue: false keeps each word as given (ACARS pictures undo OCR glue their own way, services/acars.js)
  *
  * - Pixels are scaled so text is about as tall as in a PDF (8 units), which the
  *   tagger's distance features expect.
@@ -27,11 +30,11 @@ const unglue = s => s
   .replace(new RegExp(`(${MONTH})(\\d)`, 'g'), '$1 $2')
   .replace(/(^|\s)(\d{1,4})(?=[A-Z]{2,}|A\/L)/g, '$1$2 ');
 
-export function ocrWordPages(lines, width, height) {
-  const boxes = lines.map((l) => {
+export function ocrWordPages(lines, width, height, { unglue: split = true, keepBox = false } = {}) {
+  const boxes = lines.map((l, i) => {
     const xs = l.box.map(p => p[0]), ys = l.box.map(p => p[1]);
     const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
-    return { text: unglue(String(l.text || '').trim()), x: x0, w: x1 - x0, y: y0, h: y1 - y0 };
+    return { i, text: (split ? unglue : (t) => t)(String(l.text || '').trim()), x: x0, w: x1 - x0, y: y0, h: y1 - y0 };
   }).filter(b => b.text && b.h > 0);
   const hs = boxes.map(b => b.h).sort((a, b) => a - b);
   const medianH = hs[Math.floor(hs.length / 2)] || TEXT_HEIGHT;
@@ -58,6 +61,7 @@ export function ocrWordPages(lines, width, height) {
           y: +y.toFixed(1),
           w: +(m[0].length * charW * s).toFixed(1),
           h: +(b.h * s).toFixed(1),
+          ...(keepBox ? { box: b.i } : {}),
         });
       }
     }

@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Route Map</title>
+  <script src="/assets/i18n/vi.js"></script>
+  <script src="/assets/i18n.js"></script>
+  <link rel="stylesheet" href="/assets/app.css">
+  <link rel="stylesheet" href="/assets/fontawesome/css/all.min.css">
+  <link rel="stylesheet" href="/assets/leaflet/leaflet.css">
+  <style>
+    .btn { background: var(--primary); color: #fff; border: none; padding: 7px 12px; border-radius: 6px; cursor: pointer; font-size: 13px; display: inline-flex; gap: 6px; align-items: center; text-decoration: none; white-space: nowrap; }
+    .btn.secondary { background: #fff; color: var(--text); border: 1px solid var(--border); }
+    .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 12px 14px; }
+    .toolbar select { padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px; }
+    .toolbar label { font-size: 13px; display: inline-flex; gap: 6px; align-items: center; color: var(--muted); }
+    .legend { display: flex; gap: 6px; flex-wrap: wrap; flex-basis: 100%; }
+    .leg { display: inline-flex; gap: 7px; align-items: center; font-size: 13px; padding: 4px 10px; border-radius: 14px; border: 1px solid var(--border); background: #fff; cursor: pointer; user-select: none; }
+    .leg .dot { width: 12px; height: 12px; border-radius: 50%; flex: none; }
+    .leg small { color: var(--muted); }
+    .leg.off { opacity: .45; }
+    .leg.off .dot { background: #bbb !important; }
+    .stats { display: flex; gap: 18px; flex-wrap: wrap; font-size: 13px; color: var(--muted); padding: 0 2px 10px; }
+    .stats b { color: var(--text); font-size: 15px; }
+    #map, #globe { height: calc(100vh - 290px); min-height: 380px; border-radius: var(--radius); box-shadow: var(--shadow); background: #aad3df; overflow: hidden; }
+    #globe { background: radial-gradient(circle at 50% 45%, #1b2a4a 0%, #070b16 75%); }
+    @media (max-width: 700px) { #map, #globe { height: 62vh; min-height: 320px; } }
+    .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: #fff; }
+    .seg button { border: none; background: none; padding: 7px 12px; cursor: pointer; font-size: 13px; color: var(--text); display: inline-flex; gap: 6px; align-items: center; }
+    .seg button + button { border-left: 1px solid var(--border); }
+    .seg button.on { background: var(--nav-bg); color: #fff; }
+    .gl-label { font-size: 11px; font-weight: 700; color: #1d2433; text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 0 3px #fff; pointer-events: none; white-space: nowrap; }
+    .maplibregl-popup-content { font-size: 13px; }
+    .routes { margin-top: 16px; padding: 0; overflow: hidden; }
+    .routes h2 { font-size: 15px; margin: 0; padding: 12px 14px; border-bottom: 1px solid var(--border); color: var(--nav-bg); }
+    .routes table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .routes th, .routes td { padding: 7px 12px; border-bottom: 1px solid #f0f1f4; text-align: left; }
+    .routes th { background: #f7f8fa; color: var(--muted); font-weight: 600; }
+    .routes tr[data-route] { cursor: pointer; }
+    .routes tr[data-route]:hover { background: #f3f7fd; }
+    .routes .num { text-align: right; font-variant-numeric: tabular-nums; }
+    .routes .dots span { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 3px; }
+    .note { font-size: 12px; color: var(--muted); padding: 8px 14px; }
+    .empty { color: var(--muted); padding: 40px 20px; text-align: center; background: var(--card); border-radius: var(--radius); border: 1px dashed var(--border); }
+    .empty i { font-size: 36px; color: #c3c9d4; display: block; margin-bottom: 12px; }
+    .apt-label { background: transparent; border: none; box-shadow: none; font-size: 11px; font-weight: 700; color: #1d2433; text-shadow: 0 0 3px #fff, 0 0 3px #fff; padding: 0; }
+    .apt-label::before { display: none; }
+  </style>
+</head>
+<body>
+  <script src="/assets/nav.js"></script>
+  <main class="page">
+    <div class="page-header">
+      <h1><i class="fa-solid fa-route" aria-hidden="true"></i> Route Map</h1>
+      <p class="subtitle" data-i18n>The flights of the calendars opened on /calendar on a world map, from each flight's departure to its arrival along the great circle. Each roster has its own colour.</p>
+    </div>
+
+    <div id="content" style="display:none">
+      <div class="card toolbar">
+        <a class="btn secondary" href="/calendar"><i class="fa-solid fa-calendar-days" aria-hidden="true"></i> <span>Back to the calendar</span></a>
+        <span class="seg" id="viewSeg" role="group" aria-label="View">
+          <button type="button" data-view="map" class="on"><i class="fa-solid fa-map" aria-hidden="true"></i> <span>Map</span></button>
+          <button type="button" data-view="globe"><i class="fa-solid fa-earth-americas" aria-hidden="true"></i> <span>Globe</span></button>
+        </span>
+        <select id="monthSel" aria-label="Month"></select>
+        <label><input type="checkbox" id="plannedChk" checked> <span>Planned flights too</span></label>
+        <label><input type="checkbox" id="labelsChk" checked> <span>Airport codes</span></label>
+        <div class="legend" id="legend"></div>
+      </div>
+      <div class="stats" id="stats"></div>
+      <div id="map"></div>
+      <div id="globe" style="display:none"></div>
+      <div class="card routes">
+        <h2><i class="fa-solid fa-list" aria-hidden="true"></i> <span>Routes</span></h2>
+        <div style="overflow-x:auto"><table>
+          <thead><tr><th>Route</th><th class="num">Flights</th><th class="num">Distance</th><th>Rosters</th></tr></thead>
+          <tbody id="routesBody"></tbody>
+        </table></div>
+        <div class="note" id="unknownNote"></div>
+      </div>
+    </div>
+
+    <div class="empty" id="empty" style="display:none">
+      <i class="fa-solid fa-route" aria-hidden="true"></i>
+      <span data-i18n>No flights to show. Open a roster on <a href="/calendar">/calendar</a> (an .ics file, or <b>View calendar</b> on /upload), then click <b>Route map</b> there.</span>
+    </div>
+  </main>
+
+  <script src="/assets/leaflet/leaflet.js"></script>
+  <script src="/assets/ics.js"></script>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const escapeHtml = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[c]));
+    const STORE_KEY = 'roster-calendar:cals'; // the calendars /calendar keeps in this browser
+    const COLORS = ['#4a90e2', '#e67e22', '#27ae60', '#8e44ad', '#c0392b', '#16a085', '#d35400', '#2c3e50'];
+    const ROUTE_RE = /\b([A-Z]{3,4})\s*→\s*([A-Z]{3,4})\b/;
+    const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+    // ---- the calendars and their flights ----
+    function loadCalendars() {
+      let stored = [];
+      try { stored = JSON.parse(localStorage.getItem(STORE_KEY) || '[]'); } catch { /* storage blocked */ }
+      return stored.map((c, i) => {
+        let events = [];
+        try { events = RosterIcs.parseIcs(c.text).events; } catch { /* not readable: no flights */ }
+        // a flight: X-ROSTER-KIND flight, or any event whose title holds "DEP → ARR"
+        const flights = events.map((e) => {
+          const m = ROUTE_RE.exec(e.summary || '');
+          if (!m || m[1] === m[2] || !(e.kind === 'flight' || !e.kind || e.kind === 'event')) return null;
+          // a flight number before the route ("WAZ7015 AUH → GYD"); ground duties ("GT LTN → STC", "TAXI") are not flights
+          const duty = (e.summary || '').slice(0, m.index).trim();
+          if (duty && !/\d/.test(duty)) return null;
+          return { dep: m[1], arr: m[2], summary: e.summary, start: e.start, planned: e.status === 'TENTATIVE' || /planned/i.test(e.categories || '') };
+        }).filter(Boolean);
+        return { name: c.name, color: c.color || COLORS[i % COLORS.length], on: c.on !== false, flights };
+      }).filter(c => c.flights.length);
+    }
+
+    // ---- geometry ----
+    const toRad = (d) => d * Math.PI / 180, toDeg = (r) => r * 180 / Math.PI;
+    function distanceKm(a, b) {
+      const [p1, p2, dl] = [toRad(a.lat), toRad(b.lat), toRad(b.lon - a.lon)];
+      const h = Math.sin((p2 - p1) / 2) ** 2 + Math.cos(p1) * Math.cos(p2) * Math.sin(dl / 2) ** 2;
+      return 2 * 6371 * Math.asin(Math.min(1, Math.sqrt(h)));
+    }
+    /** Points along the great circle from a to b; longitudes kept continuous so a route over the 180° line draws as one line. */
+    function greatCircle(a, b, n = 64) {
+      const [lat1, lon1, lat2, lon2] = [toRad(a.lat), toRad(a.lon), toRad(b.lat), toRad(b.lon)];
+      const d = 2 * Math.asin(Math.sqrt(Math.sin((lat2 - lat1) / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin((lon2 - lon1) / 2) ** 2));
+      if (!d) return [[a.lat, a.lon], [b.lat, b.lon]];
+      const pts = [];
+      for (let i = 0; i <= n; i++) {
+        const f = i / n, A = Math.sin((1 - f) * d) / Math.sin(d), B = Math.sin(f * d) / Math.sin(d);
+        const x = A * Math.cos(lat1) * Math.cos(lon1) + B * Math.cos(lat2) * Math.cos(lon2);
+        const y = A * Math.cos(lat1) * Math.sin(lon1) + B * Math.cos(lat2) * Math.sin(lon2);
+        const z = A * Math.sin(lat1) + B * Math.sin(lat2);
+        let lon = toDeg(Math.atan2(y, x));
+        if (pts.length) { const prev = pts[pts.length - 1][1]; while (lon - prev > 180) lon -= 360; while (lon - prev < -180) lon += 360; }
+        pts.push([toDeg(Math.atan2(z, Math.sqrt(x * x + y * y))), lon]);
+      }
+      return pts;
+    }
+
+    // ---- page ----
+    let cals = [], airports = {}, map = null, layer = null;
+    const fmtKm = (km) => `${Math.round(km).toLocaleString()} km`;
+    const monthKey = (t) => (t ? `${t.y}-${String(t.mo).padStart(2, '0')}` : '');
+
+    async function init() {
+      cals = loadCalendars();
+      if (!cals.length) { $('empty').style.display = ''; return; }
+      $('content').style.display = '';
+      const codes = [...new Set(cals.flatMap(c => c.flights.flatMap(f => [f.dep, f.arr])))];
+      // /api/airports takes up to 50 codes at a time
+      airports = {};
+      for (let i = 0; i < codes.length; i += 50) {
+        try { Object.assign(airports, await (await fetch(`/api/airports?codes=${codes.slice(i, i + 50).join(',')}`)).json()); } catch { /* left off the map */ }
+      }
+      const months = [...new Set(cals.flatMap(c => c.flights.map(f => monthKey(f.start))).filter(Boolean))].sort();
+      $('monthSel').innerHTML = `<option value="">${__('All months')}</option>` + months.map(m => `<option value="${m}">${__(MONTH_NAMES[+m.slice(5) - 1])} ${m.slice(0, 4)}</option>`).join('');
+      map = L.map('map', { worldCopyJump: true, minZoom: 1 }).setView([30, 20], 2);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 12, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+      }).addTo(map);
+      layer = L.layerGroup().addTo(map);
+      let saved = null;
+      try { saved = localStorage.getItem('route-map:view'); } catch { /* storage blocked */ }
+      if (saved === 'globe') $('viewSeg').querySelector('[data-view="globe"]').click();
+      else render(true);
+    }
+
+    function render(fit = false) {
+      const month = $('monthSel').value, planned = $('plannedChk').checked;
+      // legend: one chip per roster, click to hide / show it
+      $('legend').innerHTML = cals.map((c, i) => `<span class="leg${c.on ? '' : ' off'}" data-cal="${i}" title="${__('Click to hide / show')}"><span class="dot" style="background:${c.color}"></span>${escapeHtml(c.name)} <small>${c.flights.length}</small></span>`).join('');
+      // routes: one per airport pair and roster (both directions together)
+      const routes = new Map(), unknown = new Set(), used = new Set();
+      let flights = 0, km = 0;
+      cals.forEach((c, ci) => {
+        if (!c.on) return;
+        for (const f of c.flights) {
+          if ((month && monthKey(f.start) !== month) || (!planned && f.planned)) continue;
+          const a = airports[f.dep], b = airports[f.arr];
+          if (!a || !b) { if (!a) unknown.add(f.dep); if (!b) unknown.add(f.arr); continue; }
+          const pair = [f.dep, f.arr].sort().join('-');
+          const key = `${pair}|${ci}`;
+          if (!routes.has(key)) routes.set(key, { pair, ci, a: f.dep < f.arr ? f.dep : f.arr, b: f.dep < f.arr ? f.arr : f.dep, n: 0, km: distanceKm(a, b), dirs: new Set() });
+          const r = routes.get(key);
+          r.n++; r.dirs.add(`${f.dep}-${f.arr}`);
+          flights++; km += r.km;
+          used.add(f.dep); used.add(f.arr);
+        }
+      });
+      const drawn = [...routes.values()].map((r) => ({
+        ...r, color: cals[r.ci].color, width: Math.min(2 + r.n * 0.7, 7), pts: greatCircle(airports[r.a], airports[r.b]),
+        tip: `${escapeHtml(r.a)} ${r.dirs.size > 1 ? '⇄' : '→'} ${escapeHtml(r.b)} · ${__('{n} flights', { n: r.n })} · ${fmtKm(r.km)}<br>${escapeHtml(cals[r.ci].name)}`,
+      }));
+      const airportTip = (code) => { const a = airports[code]; return `<b>${escapeHtml(code)}</b> ${escapeHtml(a.name)}<br>${escapeHtml([a.city, a.country].filter(Boolean).join(', '))}<br><a href="/airport?code=${encodeURIComponent(code)}" target="_blank" rel="noopener">${__('Airport details')}</a>`; };
+      lastDrawn = { drawn, used: [...used], airportTip, fit };
+      if (view === 'globe') drawGlobe(lastDrawn); else drawMap(lastDrawn);
+      $('stats').innerHTML = [
+        `<span><b>${flights}</b> ${__('flights')}</span>`,
+        `<span><b>${new Set([...routes.values()].map(r => r.pair)).size}</b> ${__('routes')}</span>`,
+        `<span><b>${used.size}</b> ${__('airports')}</span>`,
+        `<span><b>${fmtKm(km)}</b> ${__('flown (great circle)')}</span>`,
+      ].join('');
+      // the table: busiest routes first
+      const rows = [...new Map([...routes.values()].map(r => [r.pair, r])).keys()].map((pair) => {
+        const rs = [...routes.values()].filter(r => r.pair === pair);
+        return { pair, a: rs[0].a, b: rs[0].b, n: rs.reduce((s, r) => s + r.n, 0), km: rs[0].km, colors: rs.map(r => cals[r.ci].color) };
+      }).sort((x, y) => y.n - x.n || y.km - x.km);
+      $('routesBody').innerHTML = rows.map(r => `<tr data-route="${r.pair}"><td><b>${r.a}</b> – <b>${r.b}</b> <small style="color:var(--muted)">${escapeHtml(airports[r.a]?.city || '')} – ${escapeHtml(airports[r.b]?.city || '')}</small></td>
+        <td class="num">${r.n}</td><td class="num">${fmtKm(r.km)}</td><td class="dots">${r.colors.map(c => `<span style="background:${c}"></span>`).join('')}</td></tr>`).join('')
+        || `<tr><td colspan="4" style="color:var(--muted)">${__('No flights in this selection.')}</td></tr>`;
+      $('unknownNote').textContent = unknown.size ? __('Not on the map (airport code not found): {codes}', { codes: [...unknown].sort().join(', ') }) : '';
+    }
+
+    // ---- the flat map (Leaflet) ----
+    function drawMap({ drawn, used, airportTip, fit }) {
+      layer.clearLayers();
+      const bounds = [];
+      for (const r of drawn) {
+        bounds.push(...r.pts);
+        L.polyline(r.pts, { color: r.color, weight: r.width, opacity: 0.85 }).bindTooltip(r.tip, { sticky: true }).addTo(layer);
+      }
+      for (const code of used) {
+        const a = airports[code];
+        const m = L.circleMarker([a.lat, a.lon], { radius: 4, color: '#1d2433', weight: 1, fillColor: '#fff', fillOpacity: 1 }).bindPopup(airportTip(code)).addTo(layer);
+        if ($('labelsChk').checked) m.bindTooltip(code, { permanent: true, direction: 'right', className: 'apt-label', offset: [4, 0] });
+      }
+      if (fit && bounds.length) map.fitBounds(bounds, { padding: [30, 30], maxZoom: 6 });
+    }
+
+    // ---- the globe (MapLibre GL, loaded the first time it is shown) ----
+    let globe = null, globeLabels = [], globeReady = null, maplibregl = null;
+    // the zoom at which the whole globe takes ~85% of the box's short side (its diameter is 512 * 2^zoom / π px)
+    const globeZoom = () => { const el = $('globe'); return Math.log2((0.85 * Math.min(el.clientWidth || 600, el.clientHeight || 600) * Math.PI) / 512); };
+    const loadOnce = (tag, attrs) => new Promise((resolve, reject) => {
+      const el = Object.assign(document.createElement(tag), attrs);
+      el.onload = resolve; el.onerror = () => reject(new Error(`could not load ${attrs.src || attrs.href}`));
+      document.head.appendChild(el);
+    });
+    function ensureGlobe() {
+      return (globeReady ||= (async () => {
+        await loadOnce('link', { rel: 'stylesheet', href: '/assets/maplibre/maplibre-gl.css' });
+        // maplibre-gl 6 ships an ES module only (its worker is found next to it); 5 a script (window.maplibregl)
+        try { maplibregl = await import('/assets/maplibre/maplibre-gl.mjs'); } catch {
+          await loadOnce('script', { src: '/assets/maplibre/maplibre-gl.js' });
+          maplibregl = window.maplibregl;
+        }
+        globe = new maplibregl.Map({
+          container: 'globe',
+          style: {
+            version: 8,
+            projection: { type: 'globe' },
+            sky: { 'atmosphere-blend': ['interpolate', ['linear'], ['zoom'], 0, 1, 5, 1, 7, 0] },
+            sources: {
+              osm: {
+                type: 'raster', tileSize: 256, maxzoom: 12,
+                tiles: ['https://a.tile.openstreetmap.org/{z}/{x}/{y}.png', 'https://b.tile.openstreetmap.org/{z}/{x}/{y}.png', 'https://c.tile.openstreetmap.org/{z}/{x}/{y}.png'],
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+              },
+            },
+            layers: [{ id: 'osm', type: 'raster', source: 'osm' }],
+          },
+          center: [40, 25], zoom: globeZoom(), attributionControl: { compact: true },
+        });
+        globe.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-left');
+        await new Promise(r => globe.once('load', r));
+        const empty = { type: 'FeatureCollection', features: [] };
+        globe.addSource('routes', { type: 'geojson', data: empty });
+        globe.addSource('airports', { type: 'geojson', data: empty });
+        globe.addLayer({ id: 'routes', type: 'line', source: 'routes', layout: { 'line-cap': 'round', 'line-join': 'round' },
+          paint: { 'line-color': ['get', 'color'], 'line-width': ['get', 'width'], 'line-opacity': 0.9 } });
+        globe.addLayer({ id: 'airports', type: 'circle', source: 'airports',
+          paint: { 'circle-radius': 4, 'circle-color': '#fff', 'circle-stroke-color': '#1d2433', 'circle-stroke-width': 1 } });
+        for (const id of ['routes', 'airports']) {
+          globe.on('mouseenter', id, () => { globe.getCanvas().style.cursor = 'pointer'; });
+          globe.on('mouseleave', id, () => { globe.getCanvas().style.cursor = ''; });
+          globe.on('click', id, (e) => new maplibregl.Popup({ maxWidth: '280px' }).setLngLat(e.lngLat).setHTML(e.features[0].properties.tip).addTo(globe));
+        }
+        return globe;
+      })());
+    }
+    async function drawGlobe({ drawn, used, airportTip, fit }) {
+      try { await ensureGlobe(); } catch (err) { $('globe').innerHTML = `<div class="empty">${escapeHtml(err.message)}</div>`; return; }
+      globe.resize();
+      globe.getSource('routes').setData({ type: 'FeatureCollection', features: drawn.map(r => ({
+        type: 'Feature', properties: { color: r.color, width: r.width, tip: r.tip }, geometry: { type: 'LineString', coordinates: r.pts.map(([lat, lon]) => [lon, lat]) },
+      })) });
+      globe.getSource('airports').setData({ type: 'FeatureCollection', features: used.map(code => ({
+        type: 'Feature', properties: { tip: airportTip(code) }, geometry: { type: 'Point', coordinates: [airports[code].lon, airports[code].lat] },
+      })) });
+      for (const m of globeLabels) m.remove();
+      globeLabels = $('labelsChk').checked ? used.map((code) => {
+        const el = Object.assign(document.createElement('div'), { className: 'gl-label', textContent: code });
+        return new maplibregl.Marker({ element: el, anchor: 'left', offset: [7, 0], opacityWhenCovered: '0' }).setLngLat([airports[code].lon, airports[code].lat]).addTo(globe);
+      }) : [];
+      if (fit && used.length) {
+        // turn the globe to the middle of the airports (a box would split over the 180° line)
+        const v = used.map(c => airports[c]).reduce((s, a) => { const la = toRad(a.lat), lo = toRad(a.lon); return [s[0] + Math.cos(la) * Math.cos(lo), s[1] + Math.cos(la) * Math.sin(lo), s[2] + Math.sin(la)]; }, [0, 0, 0]);
+        globe.easeTo({ center: [toDeg(Math.atan2(v[1], v[0])), toDeg(Math.atan2(v[2], Math.hypot(v[0], v[1])))], zoom: globeZoom(), duration: 800 });
+      }
+    }
+
+    let view = 'map', lastDrawn = null;
+    $('viewSeg').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-view]');
+      if (!b || b.dataset.view === view) return;
+      view = b.dataset.view;
+      $('viewSeg').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
+      $('map').style.display = view === 'map' ? '' : 'none';
+      $('globe').style.display = view === 'globe' ? '' : 'none';
+      try { localStorage.setItem('route-map:view', view); } catch { /* storage blocked */ }
+      if (view === 'map') map.invalidateSize();
+      render(true);
+    });
+
+    $('legend').addEventListener('click', (e) => {
+      const chip = e.target.closest('[data-cal]');
+      if (!chip) return;
+      const c = cals[+chip.dataset.cal];
+      c.on = !c.on;
+      render();
+    });
+    for (const id of ['monthSel', 'plannedChk']) $(id).addEventListener('change', () => render(true));
+    $('labelsChk').addEventListener('change', () => render());
+    $('routesBody').addEventListener('click', (e) => {
+      const tr = e.target.closest('[data-route]');
+      if (!tr) return;
+      const [a, b] = tr.dataset.route.split('-').map(c => airports[c]);
+      const pts = greatCircle(a, b);
+      if (view === 'globe' && globe) {
+        const mid = pts[Math.floor(pts.length / 2)];
+        globe.easeTo({ center: [mid[1], mid[0]], zoom: Math.max(globeZoom() + 0.5, Math.min(5, 7.5 - Math.log2(Math.max(distanceKm(a, b), 50) / 50))), duration: 900 });
+      } else map.fitBounds(pts, { padding: [40, 40], maxZoom: 7 });
+      $(view).scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+
+    init();
+  </script>
+</body>
+</html>

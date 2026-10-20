@@ -10,6 +10,7 @@
   const PUBLIC = [
     { href: '/', icon: 'fa-house', label: 'Home' },
     { href: '/upload', icon: 'fa-upload', label: 'Upload Roster' },
+    { href: '/acars', icon: 'fa-satellite-dish', label: 'ACARS' },
     { href: '/calendar', icon: 'fa-calendar-days', label: 'Calendar' },
     { href: '/airport', icon: 'fa-plane-departure', label: 'Airport' },
     { href: '/night-time', icon: 'fa-moon', label: 'Night Time' },
@@ -34,7 +35,8 @@
     : '';
   document.currentScript.insertAdjacentHTML(
     'beforebegin',
-    `<nav class="topnav" data-no-i18n><a class="brand" href="/">Roster OCR</a><div class="menu">${PUBLIC.map(link).join('')}</div>`
+    `<nav class="topnav" data-no-i18n><button type="button" class="nav-toggle" aria-expanded="false" aria-controls="navMenu" title="${t('Menu')}" aria-label="${t('Menu')}"><i class="fa-solid fa-bars" aria-hidden="true"></i></button>`
+    + `<a class="brand" href="/">Roster OCR</a><div class="menu" id="navMenu">${PUBLIC.map(link).join('')}</div>`
     + `<div class="nav-right">${admin}${langs}</div></nav>`
   );
   const nav = document.querySelector('.topnav');
@@ -42,6 +44,12 @@
     const b = e.target.closest('[data-lang]');
     if (b) i18n.setLang(b.dataset.lang);
   });
+  // Phones and tablets: the public links fold into a menu under the ☰ button (app.css, max-width 900px).
+  const toggle = nav.querySelector('.nav-toggle');
+  const setOpen = (open) => { nav.classList.toggle('open', open); toggle.setAttribute('aria-expanded', String(open)); };
+  toggle.addEventListener('click', (e) => { e.stopPropagation(); setOpen(!nav.classList.contains('open')); });
+  document.addEventListener('click', (e) => { if (nav.classList.contains('open') && !nav.querySelector('.menu').contains(e.target)) setOpen(false); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && nav.classList.contains('open')) { setOpen(false); toggle.focus(); } });
   // The admin menu closes on a click elsewhere or Esc.
   const menu = nav.querySelector('.admin-menu');
   document.addEventListener('click', (e) => { if (menu.open && !menu.contains(e.target)) menu.open = false; });

@@ -26,7 +26,7 @@ function envValue(key) {
 }
 
 const pct = (m, t) => (t ? `${Math.round((1000 * m) / t) / 10}%` : '–');
-const TYPE_NAMES = { image: 'Images', pdf: 'PDF', csv: 'CSV', xls: 'XLS', xlsx: 'XLSX', txt: 'TXT' };
+const TYPE_NAMES = { image: 'Images', pdf: 'PDF', csv: 'CSV', xls: 'XLS', xlsx: 'XLSX', txt: 'TXT', acars: 'ACARS' };
 
 // Text shown on /models is English here, worded per request with __ (req.__, utils/i18n.js).
 
@@ -39,9 +39,12 @@ const trainedOn = (m, __) => (m.filesByType
 function scoreLines(b, __) {
   const line = (k, s) => `${k} ${pct(s.rowMatches, s.rowTotal)} (${__('{ok}/{total} rows', { ok: s.rowMatches, total: s.rowTotal })})`;
   const parts = b.byType
-    ? [[__('Overall'), b.overall], ...Object.keys(TYPE_NAMES).map(t => [__(TYPE_NAMES[t]), b.byType[t]])]
+    ? [[__('Overall'), b.overall], ...Object.keys(TYPE_NAMES).filter(t => t !== 'acars').map(t => [__(TYPE_NAMES[t]), b.byType[t]])]
     : [[__('Overall'), b.overall], [__('Images'), b.image], [__('Text files (PDF, CSV, XLS…)'), b.pdf]];
-  return parts.filter(([, s]) => s?.rowTotal).map(([k, s]) => line(k, s));
+  const out = parts.filter(([, s]) => s?.rowTotal).map(([k, s]) => line(k, s));
+  // ACARS pictures: fields right (services/acars-benchmark.js)
+  if (b.acars?.fieldTotal) out.push(`ACARS ${pct(b.acars.fieldMatches, b.acars.fieldTotal)} (${__('{ok}/{total} fields, {all}/{n} pictures fully right', { ok: b.acars.fieldMatches, total: b.acars.fieldTotal, all: b.acars.allRight, n: b.acars.pictures })})`);
+  return out;
 }
 
 const REC_STATUS = { deployed: 'in use', candidate: 'candidate', rejected: 'rejected', retired: 'replaced', baseline: 'baseline' };
@@ -53,7 +56,7 @@ const FAMILIES = {
     icon: 'fa-brain',
     description: 'Reads the words (OCR text of an image, or the text layer of a PDF) into roster rows: puts every word in a column (date, duty, dep, begin…), then joins them into rows. Learns from the labels (in MinIO).',
     applyNote: 'Activating takes effect at once on /upload and the AI model benchmark.',
-    trainNote: 'Trains a new version on all image labels + PDF, CSV, XLS, XLSX, TXT (about 10 minutes). When done the new version is activated; the old one stays here.',
+    trainNote: 'Trains a new version on all image labels + PDF, CSV, XLS, XLSX, TXT + ACARS pictures (about 10 minutes). When done the new version is activated; the old one stays here.',
     train: () => ({ args: ['src/scripts/model-train.mjs'] }),
     versions: (__) => listModels().map(m => ({
       id: m.id, active: m.active, createdAt: m.trainedAt, status: m.active ? __('in use') : '',

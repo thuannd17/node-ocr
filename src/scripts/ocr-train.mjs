@@ -7,6 +7,7 @@
  *   npm run ocr:train -- --min-new=3 --epochs=15 --keep-checkpoint
  *   npm run ocr:train -- --restart    # drop an unfinished run instead of resuming it
  *   npm run ocr:train -- --force      # train again even if this exact run was already done
+ *   npm run ocr:train -- --acars-repeat=5   # how many times each ACARS training crop is listed (default 5)
  *
  * Fair comparison, rolling: the test set is every labeled roster the deployed
  * model has NOT seen (neither trained on nor tested on, per its model.json).
@@ -19,6 +20,12 @@
  * model -> current services/roster-parser.js -> rows exactly right vs labels.
  * Nothing is deployed: the result is written to models/rec/vN/model.json and
  * printed; switch with `npm run ocr:use-model -- vN` if you agree.
+ *
+ * ACARS pictures (bucket acars-ocr) are learned too: their OCR lines with a known true text
+ * (scripts/ocr-acars-crops.mjs) join the training crops. About a quarter of the ACARS pictures the
+ * deployed model has not seen are kept out of training and score both models: label values found
+ * among their OCR words. A run also starts when only new ACARS pictures wait (no new roster): the
+ * rosters are then all trained on, and scored on all of them as a check that they are not read worse.
  */
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -27,13 +34,16 @@ import crypto from 'node:crypto';
 import { groupByContent, pickCanonicalLabels } from '../utils/content-groups.js';
 import { parseRoster, cleanExtractionResult } from '../services/roster-parser.js';
 import { compareSection } from '../services/benchmark.js';
-import { listData, dataFile, labelFile, DATA_ROOT, LABELS_ROOT } from '../utils/data-files.js';
-import { syncForScript } from '../services/media-client.js';
+import { listData, listLabels, dataFile, labelFile, DATA_ROOT, LABELS_ROOT, ACARS_DATA_ROOT, ACARS_LABELS_ROOT } from '../utils/data-files.js';
+import { syncForScript, acars, syncPrefix } from '../services/media-client.js';
+import { acarsWordPages, alignAcars } from '../services/acars.js';
+import sharp from 'sharp';
 import { CACHE_DIR, EXPORTS_DIR, PRETRAINED_DIR, TRAIN_DIR, WORK_DIR, ymlPath } from '../utils/paths.js';
 import { REC_DIR, syncRecModels, activeRecId, publishRec } from '../services/rec-models.js';
 
 // The roster data and the OCR models live in MinIO: bring their local mirrors up to date.
 await syncForScript();
+await acars.syncForScript();
 await syncRecModels({ force: true });
 
 const ROOT = process.cwd();
@@ -47,11 +57,13 @@ const TEMPLATE = path.join(ROOT, 'models', 'rec', 'train-template.yml');
 const FAKE_DATA = DATA_ROOT;
 const LABELS = LABELS_ROOT;
 const STOCK_LINES = path.join(CACHE_DIR, 'ocr-det1920-stock'); // dataset builder input (stock recognizer)
+const STOCK_ACARS_LINES = path.join(CACHE_DIR, 'ocr-det1920-stock-acars'); // the same for the ACARS pictures
+const acarsFile = (n) => dataFile(ACARS_DATA_ROOT, n);
 const PORT = Number(process.env.RETRAIN_OCR_PORT || 8506);
 const DET_LIMIT = Number(process.env.OCR_TEXT_DET_LIMIT_SIDE_LEN || 1920);
 
 function parseArgs(argv) {
-	const a = { minNew: 5, epochs: 15, keepCheckpoint: false, status: false };
+	const a = { minNew: 5, minNewAcars: 4, epochs: 15, keepCheckpoint: false, status: false, acarsRepeat: 5 };
 	for (const x of argv) {
 		if (x === '--status') a.status = true;
 		else if (x === '--keep-checkpoint') a.keepCheckpoint = true;
@@ -60,6 +72,8 @@ function parseArgs(argv) {
 		const m = /^--([^=]+)=(.*)$/.exec(x);
 		if (m?.[1] === 'min-new') a.minNew = Number(m[2]);
 		if (m?.[1] === 'epochs') a.epochs = Number(m[2]);
+		if (m?.[1] === 'min-new-acars') a.minNewAcars = Number(m[2]);
+		if (m?.[1] === 'acars-repeat') a.acarsRepeat = Number(m[2]);
 	}
 	return a;
 }
@@ -93,6 +107,45 @@ function labeledRosters() {
 	return { names, canonical };
 }
 
+/** Labeled ACARS pictures, one per distinct content: Map hash -> name (the first name). */
+function labeledAcars() {
+	const out = new Map();
+	for (const n of listLabels(ACARS_LABELS_ROOT, 'image')) {
+		if (!fs.existsSync(acarsFile(n))) continue;
+		const h = md5File(acarsFile(n));
+		if (!out.has(h)) out.set(h, n);
+	}
+	return out;
+}
+
+/** ACARS OCR quality: how many label values are among the OCR words of each picture (services/acars.js alignAcars). */
+async function scoreAcars(linesDir, names, suffix) {
+	const tot = { found: 0, total: 0 };
+	const perImage = {};
+	for (const n of names) {
+		const lines = readJson(path.join(linesDir, `${n}${suffix}`));
+		const { width, height } = await sharp(acarsFile(n)).metadata();
+		const label = readJson(labelFile(ACARS_LABELS_ROOT, n));
+		const st = alignAcars(acarsWordPages(lines, width, height), label);
+		const total = st.found + st.missing.length;
+		perImage[n] = { found: st.found, total };
+		tot.found += st.found; tot.total += total;
+	}
+	return { ...tot, perImage };
+}
+
+/**
+ * The PaddleOCR base model the training starts from (<work>/pretrained): mirrored from MinIO
+ * (models/pretrained/, put there with npm run models:archive -- push), as the work folder can be cleared.
+ */
+async function ensurePretrained() {
+	const need = path.join(PRETRAINED_DIR, 'en_PP-OCRv3_rec_train', 'best_accuracy.pdparams');
+	if (fs.existsSync(need)) return;
+	console.log('Getting the pretrained base model from MinIO (models/pretrained/) ...');
+	try { await syncPrefix('models/pretrained/', PRETRAINED_DIR, { force: true }); } catch (e) { console.log('  ' + e.message); }
+	if (!fs.existsSync(need)) throw new Error('The pretrained model is missing (' + rel(need) + '): see README, Recognition model versions, to download it, then npm run models:archive -- push <folder> models/pretrained/en_PP-OCRv3_rec_train/');
+}
+
 function gpuEnv(extra = {}) {
 	const nvRoot = path.join(ROOT, '.venv', IS_WIN ? 'Lib/site-packages/nvidia' : 'lib/python3.11/site-packages/nvidia');
 	const bins = fs.existsSync(nvRoot)
@@ -120,18 +173,18 @@ function run(cmd, args, { env, logFile } = {}) {
 /** OCR every image in `names` with the model in `inferDir`, caching each
  * result as <outDir>/<name><suffix>; a temporary OCR server is started only
  * if something is missing. */
-async function ocrMissing(inferDir, names, outDir, suffix) {
+async function ocrMissing(inferDir, names, outDir, suffix, fileOf = (n) => dataFile(FAKE_DATA, n)) {
 	fs.mkdirSync(outDir, { recursive: true });
 	const todo = names.filter(n => !fs.existsSync(path.join(outDir, `${n}${suffix}`)));
 	if (!todo.length) return;
 	console.log(`      OCR ${todo.length} image(s) with ${rel(inferDir)} ...`);
 	const prog = { done: 0, serverUp: false };
-	await withStatus(ocrImages(inferDir, todo, outDir, suffix, prog), (ms) => (prog.serverUp
+	await withStatus(ocrImages(inferDir, todo, outDir, suffix, prog, fileOf), (ms) => (prog.serverUp
 		? { fraction: prog.done / todo.length, text: `OCR ${prog.done}/${todo.length} images  (${fmtDur(ms)})` }
 		: { text: `starting OCR server ... (${fmtDur(ms)})` }));
 }
 
-async function ocrImages(inferDir, todo, outDir, suffix, prog) {
+async function ocrImages(inferDir, todo, outDir, suffix, prog, fileOf) {
 	const server = spawn(PY, ['-u', path.join(ROOT, 'src', 'scripts', 'ocr_server.py')], {
 		cwd: ROOT,
 		env: gpuEnv({ OCR_SERVER_PORT: String(PORT), OCR_CUSTOM_REC: inferDir, OCR_TEXT_DET_LIMIT_SIDE_LEN: String(DET_LIMIT), OCR_FAST_MODE: '1', OCR_WORKERS: '1' }),
@@ -149,7 +202,7 @@ async function ocrImages(inferDir, todo, outDir, suffix, prog) {
 		for (const n of todo) {
 			const res = await fetch(`${url}/ocr`, {
 				method: 'POST', headers: { 'content-type': 'application/json' },
-				body: JSON.stringify({ path: dataFile(FAKE_DATA, n) }), signal: AbortSignal.timeout(300000),
+				body: JSON.stringify({ path: fileOf(n) }), signal: AbortSignal.timeout(300000),
 			});
 			const data = await res.json();
 			if (!data?.ok) throw new Error(`OCR failed for ${n}: ${data?.error}`);
@@ -265,22 +318,37 @@ async function main() {
 	const { names: labeledNames, canonical } = labeledRosters();
 	const fresh = [...canonical].filter(([h]) => !seen.has(h)).map(([hash, name]) => ({ hash, name }));
 
+	// ACARS pictures: a quarter of the ones the deployed model never saw test both models, the rest train
+	const acarsAll = labeledAcars();
+	const acarsSeen = new Set([...(curMeta.acarsTrainedOn || []), ...(curMeta.acarsTestedOn || [])].map(x => x.hash));
+	const acarsFresh = [...acarsAll.keys()].filter(h => !acarsSeen.has(h)).sort();
+	let acarsTestHashes = acarsFresh.filter(h => parseInt(h.slice(0, 2), 16) % 4 === 0);
+	if (!acarsTestHashes.length && acarsFresh.length >= args.minNewAcars) acarsTestHashes = acarsFresh.slice(0, Math.ceil(acarsFresh.length / 4));
+	const acarsTest = new Set(acarsFresh.length >= args.minNewAcars ? acarsTestHashes : []);
+	const acarsTrain = [...acarsAll].filter(([h]) => !acarsTest.has(h)).map(([hash, name]) => ({ hash, name }));
+	const acarsTestList = [...acarsAll].filter(([h]) => acarsTest.has(h)).map(([hash, name]) => ({ hash, name }));
+
 	console.log(`Deployed model: ${current} (${curMeta.name || ''}, ${curMeta.createdAt || '?'})`);
 	console.log(`Labeled rosters: ${canonical.size} distinct, ${fresh.length} never seen by ${current}${fresh.length ? ': ' + fresh.map(f => f.name).join(', ') : ''}`);
+	console.log(`Labeled ACARS pictures: ${acarsAll.size} distinct, ${acarsFresh.length} never seen by ${current}`);
 	const unlabeled = listData(FAKE_DATA, 'image').filter(n => !fs.existsSync(labelFile(LABELS, n)));
 	if (unlabeled.length) console.log(`(${unlabeled.length} image(s) in fake-data still have no label — label them in /label to use them)`);
 	if (args.status) return;
-	if (fresh.length < args.minNew) {
-		console.log(`\nNot enough new rosters to test a new version fairly (${fresh.length} < ${args.minNew}). Label more, or pass --min-new=N.`);
+	// rosters: test on the new ones; with too few, train on all and check them all for a regression
+	const rosterMode = fresh.length >= args.minNew ? 'unseen' : 'seen';
+	if (rosterMode === 'seen' && !acarsTest.size) {
+		console.log(`\nNot enough new rosters (${fresh.length} < ${args.minNew}) or new ACARS pictures (${acarsFresh.length} < ${args.minNewAcars}) to test a new version fairly. Label more, or pass --min-new=N / --min-new-acars=N.`);
 		return;
 	}
+	if (rosterMode === 'seen') console.log(`Few new rosters: training on all ${canonical.size}; they are all scored to check the new version reads them no worse.`);
 
 	// Work happens in PENDING (<work>/train/rec-pending); the version number is only assigned
 	// when every step has finished, so an interrupted run never creates a vN.
 	// A rerun resumes the pending run if it is for the same deployed model, the
 	// same test rosters and the same epochs (finished steps are skipped).
-	const testHashes = new Set(fresh.map(f => f.hash));
+	const testHashes = new Set(rosterMode === 'unseen' ? fresh.map(f => f.hash) : []);
 	const trainSet = [...canonical].filter(([h]) => !testHashes.has(h)).map(([hash, name]) => ({ hash, name }));
+	const rosterTest = rosterMode === 'unseen' ? fresh : [...canonical].map(([hash, name]) => ({ hash, name }));
 
 	// Same deployed model, same train and test rosters, same epochs as a finished
 	// version: training again would only repeat it (~1 h): after a rejected vN
@@ -288,7 +356,8 @@ async function main() {
 	const key = (list) => (list || []).map(x => x.hash).sort().join(',');
 	const repeatOf = listVersions().map(v => ({ v, m: fs.existsSync(path.join(REC_DIR, v, 'model.json')) ? readJson(path.join(REC_DIR, v, 'model.json')) : null }))
 		.find(({ m }) => m?.comparison?.against === current && m.recipe?.epochs === args.epochs
-			&& key(m.testedOn) === key(fresh) && key(m.trainedOn) === key(trainSet));
+			&& key(m.testedOn) === key(rosterMode === 'unseen' ? fresh : []) && key(m.trainedOn) === key(trainSet)
+			&& key(m.acarsTestedOn) === key(acarsTestList) && key(m.acarsTrainedOn) === key(acarsTrain));
 	if (repeatOf && !args.force && !fs.existsSync(PENDING)) {
 		const c = repeatOf.m.comparison;
 		console.log(`
@@ -301,10 +370,11 @@ This exact run was already done as ${repeatOf.v} (${repeatOf.m.createdAt}): ${c.
 	const datasetDir = path.join(EXPORTS_DIR, 'recognition-groundtruth', 'rec-pending');
 	const newLines = path.join(CACHE_DIR, 'rec-lines', '_pending');
 	const statePath = path.join(pDir, 'pending.json');
-	const basis = { basedOn: current, testHashes: [...testHashes].sort(), epochs: args.epochs };
+	const basis = { basedOn: current, testHashes: [...testHashes].sort(), acarsTestHashes: [...acarsTest].sort(), epochs: args.epochs };
 	let state = fs.existsSync(statePath) ? readJson(statePath) : null;
 	const sameBasis = state && state.basedOn === basis.basedOn && state.epochs === basis.epochs
-		&& JSON.stringify(state.testHashes) === JSON.stringify(basis.testHashes);
+		&& JSON.stringify(state.testHashes) === JSON.stringify(basis.testHashes)
+		&& JSON.stringify(state.acarsTestHashes || []) === JSON.stringify(basis.acarsTestHashes);
 	if (fs.existsSync(pDir) && (!sameBasis || args.restart)) {
 		console.log(`\nDiscarding unfinished run (${args.restart ? '--restart' : 'it was for a different model / rosters / epochs'}).`);
 		for (const d of [pDir, datasetDir, newLines]) fs.rmSync(d, { recursive: true, force: true });
@@ -320,9 +390,11 @@ This exact run was already done as ${repeatOf.v} (${repeatOf.m.createdAt}): ${c.
 	const foldMapPath = path.join(pDir, 'split.json');
 	const cfg = path.join(pDir, 'train.yml');
 	const inferDir = path.join(pDir, 'infer');
-	const recipe = { template: 'models/rec/train-template.yml', epochs: args.epochs, general: 'table', tightCrops: true, linesDir: rel(STOCK_LINES), exportedCheckpoint: 'latest', evalDuringTraining: false };
+	const recipe = { template: 'models/rec/train-template.yml', epochs: args.epochs, general: 'table', tightCrops: true, linesDir: rel(STOCK_LINES), exportedCheckpoint: 'latest', evalDuringTraining: false,
+		acars: { linesDir: rel(STOCK_ACARS_LINES), repeat: args.acarsRepeat } };
 	const resumed = Object.keys(state.done);
-	console.log(`\n=== New version: train on ${trainSet.length} rosters, test on ${fresh.length} new ones (log: ${rel(log)}) ===`);
+	console.log(`\n=== New version: train on ${trainSet.length} rosters + ${acarsTrain.length} ACARS pictures; `
+		+ `test on ${rosterMode === 'unseen' ? `${fresh.length} new rosters` : `all ${rosterTest.length} rosters (regression check)`} + ${acarsTestList.length} new ACARS pictures (log: ${rel(log)}) ===`);
 	if (resumed.length) console.log(`Resuming unfinished run from ${state.startedAt.slice(0, 16).replace('T', ' ')}; already done: ${resumed.join(', ')}`);
 
 	// 1. Dataset (stock-recognizer OCR lines; test rosters go to the val split).
@@ -331,11 +403,19 @@ This exact run was already done as ${repeatOf.v} (${repeatOf.m.createdAt}): ${c.
 		await ocrMissing(path.join(REC_DIR, 'stock', 'infer'), [...canonical.values()], STOCK_LINES, '.json');
 		writeJson(foldMapPath, Object.fromEntries(labeledNames.map(n => [n, testHashes.has(md5File(dataFile(FAKE_DATA, n))) ? 1 : 0])));
 		await withStatus(run('node', [path.join(ROOT, 'src', 'scripts', 'ocr-groundtruth.mjs'), `--id=${path.basename(datasetDir)}`, '--folds=2', '--fold=1',
-			`--fold-map=${foldMapPath}`, `--general=${recipe.general}`, '--tight-crops', `--lines-dir=${recipe.linesDir}`], { logFile: log }),
+			`--fold-map=${foldMapPath}`, `--general=${recipe.general}`, '--tight-crops', `--lines-dir=${STOCK_LINES}`], { logFile: log }),
 		(ms) => ({ text: `cropping labeled rows into training images ... (${fmtDur(ms)})` }));
+		// ACARS: OCR lines with the stock recognizer too, then crops of the lines whose true text is known
+		await ocrMissing(path.join(REC_DIR, 'stock', 'infer'), [...acarsAll.values()], STOCK_ACARS_LINES, '.json', acarsFile);
+		const acarsTestFile = path.join(pDir, 'acars-test.json');
+		writeJson(acarsTestFile, [...acarsTest]);
+		await withStatus(run('node', [path.join(ROOT, 'src', 'scripts', 'ocr-acars-crops.mjs'), `--dataset=${datasetDir}`, `--lines-dir=${STOCK_ACARS_LINES}`,
+			`--test=${acarsTestFile}`, `--repeat=${args.acarsRepeat}`], { logFile: log }),
+		(ms) => ({ text: `cropping ACARS lines into training images ... (${fmtDur(ms)})` }));
 		markDone('dataset');
 	} else console.log('[1/4] Dataset: done earlier');
 
+	await ensurePretrained();
 	// 2. Train with the deployed model's recipe.
 	if (!state.done.train) {
 		// No evaluation during training: its only output is best_accuracy, which is
@@ -372,13 +452,18 @@ This exact run was already done as ${repeatOf.v} (${repeatOf.m.createdAt}): ${c.
 	} else console.log('[3/4] Export: done earlier');
 
 	// 4. Score both models on the new rosters.
-	console.log(`[4/4] Scoring ${current} and the new model on the ${fresh.length} new rosters ...`);
-	const testNames = fresh.map(f => f.name);
+	console.log(`[4/4] Scoring ${current} and the new model on ${rosterTest.length} rosters and ${acarsTestList.length} ACARS pictures ...`);
+	const testNames = rosterTest.map(f => f.name);
 	const curLines = path.join(CACHE_DIR, 'rec-lines', current);
 	await ocrMissing(path.join(curDir, 'infer'), testNames, curLines, '.lines.json');
 	await ocrMissing(inferDir, testNames, newLines, '.lines.json');
 	const a = score(curLines, testNames);
 	const b = score(newLines, testNames);
+	const acarsNames = acarsTestList.map(f => f.name);
+	await ocrMissing(path.join(curDir, 'infer'), acarsNames, curLines, '.acars.lines.json', acarsFile);
+	await ocrMissing(inferDir, acarsNames, newLines, '.acars.lines.json', acarsFile);
+	const ac = await scoreAcars(curLines, acarsNames, '.acars.lines.json');
+	const bc = await scoreAcars(newLines, acarsNames, '.acars.lines.json');
 
 	// Every step finished: only now does the run become the next version.
 	const next = `v${Math.max(...listVersions().map(v => Number(v.slice(1)))) + 1}`;
@@ -410,16 +495,24 @@ This exact run was already done as ${repeatOf.v} (${repeatOf.m.createdAt}): ${c.
 
 	const diff = b.ok - a.ok;
 	const margin = Math.max(3, Math.round(0.005 * a.total));
-	const verdict = diff >= margin ? 'better' : diff <= -margin ? 'worse' : 'tie';
+	const rosterVerdict = diff >= margin ? 'better' : diff <= -margin ? 'worse' : 'tie';
+	const acarsDiff = bc.found - ac.found;
+	// rosters first: never better if they are read worse; ACARS decide when the rosters tie (or were only a regression check)
+	const verdict = rosterVerdict === 'worse' || acarsDiff < -1 ? 'worse'
+		: rosterVerdict === 'better' || acarsDiff >= 2 ? 'better' : 'tie';
 	const wins = testNames.filter(n => b.perImage[n].ok > a.perImage[n].ok).length;
 	const losses = testNames.filter(n => b.perImage[n].ok < a.perImage[n].ok).length;
 	const meta = {
 		version: next, createdAt: new Date().toISOString().slice(0, 10), status: verdict === 'better' ? 'candidate' : 'rejected',
 		recipe, dataset: rel(finalDataset), split: `models/rec/${next}/split.json`,
 		trainedOn: trainSet.sort((x, y) => x.name.localeCompare(y.name)),
-		testedOn: fresh.sort((x, y) => x.name.localeCompare(y.name)),
+		testedOn: (rosterMode === 'unseen' ? fresh : []).sort((x, y) => x.name.localeCompare(y.name)),
+		acarsTrainedOn: acarsTrain.sort((x, y) => x.name.localeCompare(y.name)),
+		acarsTestedOn: acarsTestList.sort((x, y) => x.name.localeCompare(y.name)),
 		comparison: {
-			against: current, rosters: fresh.length, verdict, margin,
+			against: current, rosters: rosterTest.length, rosterMode, rosterVerdict, verdict, margin,
+			acars: { pictures: acarsNames.length, [current]: { found: ac.found, total: ac.total }, [next]: { found: bc.found, total: bc.total },
+				perImage: Object.fromEntries(acarsNames.map(n => [n, { [current]: ac.perImage[n].found, [next]: bc.perImage[n].found, total: ac.perImage[n].total }])) },
 			[current]: { rowsCorrect: a.ok, rows: a.total, published: a.published, planned: a.planned },
 			[next]: { rowsCorrect: b.ok, rows: b.total, published: b.published, planned: b.planned },
 			perImage: Object.fromEntries(testNames.map(n => [n, { [current]: a.perImage[n].ok, [next]: b.perImage[n].ok, rows: a.perImage[n].total }])),
@@ -429,13 +522,14 @@ This exact run was already done as ${repeatOf.v} (${repeatOf.m.createdAt}): ${c.
 	const uploaded = await publishRec(next, { withCheckpoint: args.keepCheckpoint }); // MinIO models/rec/<next>/
 	console.log(`Uploaded ${next} to MinIO (${uploaded} files${args.keepCheckpoint ? ', with its checkpoint' : ''}).`);
 
-	console.log(`\n=== Result on ${fresh.length} rosters neither model trained on ===`);
+	console.log(`\n=== Result on ${rosterTest.length} rosters ${rosterMode === 'unseen' ? 'neither model trained on' : '(both models trained on them: a regression check)'} ===`);
 	console.log(`               ${current.padEnd(10)} ${next}`);
 	console.log(`rows correct   ${`${a.ok}/${a.total}`.padEnd(10)} ${b.ok}/${b.total}   (${pct(a.ok, a.total)} -> ${pct(b.ok, b.total)})`);
 	console.log(`published      ${pct(...a.published).padEnd(10)} ${pct(...b.published)}`);
 	console.log(`planned        ${pct(...a.planned).padEnd(10)} ${pct(...b.planned)}`);
-	console.log(`per roster: ${next} better on ${wins}, worse on ${losses}, same on ${fresh.length - wins - losses}`);
-	console.log(`\nVerdict: ${next} is ${verdict.toUpperCase()} (${diff >= 0 ? '+' : ''}${diff} rows; needs >= ${margin} to count)`);
+	console.log(`per roster: ${next} better on ${wins}, worse on ${losses}, same on ${testNames.length - wins - losses}`);
+	console.log(`ACARS values read (${acarsNames.length} pictures neither model trained on): ${current} ${ac.found}/${ac.total} (${pct(ac.found, ac.total)}) -> ${next} ${bc.found}/${bc.total} (${pct(bc.found, bc.total)})`);
+	console.log(`\nVerdict: ${next} is ${verdict.toUpperCase()} (rosters ${diff >= 0 ? '+' : ''}${diff} rows, needs >= ${margin} to count; ACARS ${acarsDiff >= 0 ? '+' : ''}${acarsDiff} values)`);
 	if (verdict === 'better') console.log(`Switch with:  npm run ocr:use-model -- ${next}   (then restart npm run ocr:server)`);
 	else console.log(`Keep ${current}. ${next} stays in MinIO (models/rec/${next}/) for the record.`);
 	console.log(`Saved: models/rec/${next}/model.json in MinIO (mirror: ${rel(path.join(vDir, 'model.json'))})`);

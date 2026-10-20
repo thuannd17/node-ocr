@@ -11,6 +11,7 @@
   <style>
     .controls {
       display: flex;
+      flex-wrap: wrap;
       gap: 12px;
       align-items: center;
       margin-bottom: 24px;
@@ -51,6 +52,14 @@
       min-width: 140px;
     }
     .stat-value { font-size: 26px; font-weight: bold; color: #1976d2; }
+    @media (max-width: 700px) {
+      .stat-card { flex: 1 1 140px; min-width: 0; padding: 12px; }
+      .stat-value { font-size: 22px; }
+      .bench-heading { font-size: 17px; }
+      .bench-heading small { display: block; margin-top: 4px; }
+      section table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+      th, td { padding: 8px; }
+    }
     .stat-label { font-size: 12px; color: #666; margin-top: 4px; }
     table {
       width: 100%;
@@ -85,7 +94,7 @@
   <main class="page">
   <div class="page-header">
     <h1><i class="fa-solid fa-chart-column" aria-hidden="true"></i> Benchmark Accuracy</h1>
-    <p class="subtitle" data-i18n>Scores on the labeled files (<code>labels/&lt;ext&gt;/</code>): (1) OCR text recognition from images, (2) the AI model reading roster data, per file type</p>
+    <p class="subtitle" data-i18n>Scores on the labeled files (<code>labels/&lt;ext&gt;/</code>): (1) OCR text recognition from images, (2) the AI model reading roster data, per file type, (3) the AI model reading ACARS pictures</p>
   </div>
 
   <section class="ocr-section">
@@ -115,6 +124,21 @@
     <div id="modelError" class="error"></div>
     <div id="modelResult">
       <div class="empty" data-i18n>Pick the file types, then click <b>Run roster benchmark</b> to measure what % of rows the AI model reads right against the labels, per file type.</div>
+    </div>
+  </section>
+
+  <section class="acars-section" style="margin-top:32px">
+    <h2 class="bench-heading"><i class="fa-solid fa-satellite-dish" aria-hidden="true"></i> <span data-i18n>3. Reading ACARS pictures <small>the AI model reads like on /acars, compared with the labels field by field</small></span></h2>
+    <div class="controls">
+      <b>ACARS</b>
+      <span id="acarsCount" style="font-size:12px;color:#666"></span>
+      <span style="font-size:12px;color:#666">Needs the OCR server running</span>
+      <button id="acarsRunBtn"><i class="fa-solid fa-play" aria-hidden="true"></i> Run ACARS benchmark</button>
+      <span id="acarsStatus" style="color:#888;font-size:13px"></span>
+    </div>
+    <div id="acarsError" class="error"></div>
+    <div id="acarsResult">
+      <div class="empty" data-i18n>Click <b>Run ACARS benchmark</b> to measure what % of the fields (Flt No, Date, Dept, Dest, Out, Off, On, In, Info) the AI model reads right on the labeled ACARS pictures.</div>
     </div>
   </section>
 
@@ -262,7 +286,8 @@
     // every picture is 'image'; a text file is its extension (services/model-benchmark.js typeOf)
     const typeOfFile = (name) => { const ext = name.split('.').pop().toLowerCase(); return ext in TYPE_NAMES ? ext : 'image'; };
 
-    fetch('/api/benchmark/types').then(r => r.json()).then(({ types, counts }) => {
+    fetch('/api/benchmark/types').then(r => r.json()).then(({ types, counts, acars }) => {
+      $('acarsCount').textContent = __('{n} labeled ACARS pictures', { n: acars || 0 });
       $('typeChoices').innerHTML = types.map(t => `<label title="${__('{n} labeled files', { n: counts[t] || 0 })}"><input type="checkbox" value="${t}" ${counts[t] ? 'checked' : 'disabled'}>
         <i class="fa-solid ${TYPE_ICONS[t]}" aria-hidden="true"></i> ${TYPE_NAMES[t] || t} <small style="color:#888">(${counts[t] || 0})</small></label>`).join('');
       $('ocrCount').textContent = __('{n} labeled images', { n: counts.image || 0 });
@@ -316,6 +341,45 @@
         return __('so far {pct}% of rows right', { pct: t ? (100 * m / t).toFixed(1) : 0 });
       },
       render: renderModel,
+    });
+
+
+    // ---- 3. ACARS pictures (/api/benchmark/acars/stream) ----
+    const ACARS_COLS = [['flt', 'Flt No'], ['date', 'Date'], ['dept', 'Dept'], ['dest', 'Dest'], ['out', 'Out'], ['off', 'Off'], ['on', 'On'], ['in', 'In'], ['info', 'Info']];
+    function renderAcars(r) {
+      const cards = `<div class="summary">
+        ${card(r.fieldPct != null ? `${r.fieldPct}%` : '–', __('<b>Fields right</b>: {ok}/{total}', { ok: r.fieldMatches, total: r.fieldTotal }))}
+        ${card(r.allRightPct != null ? `${r.allRightPct}%` : '–', __('pictures fully right: {ok}/{n}', { ok: r.allRight, n: r.pictures }))}
+        ${card(r.errors, __('pictures that failed'))}
+      </div>`;
+      const trained = r.model?.trainedAt ? new Date(r.model.trainedAt).toLocaleString() : '?';
+      const note = `<p style="font-size:13px;color:#666">${__('Model trained <b>{time}</b> on {n} ACARS pictures. The model learned from these very labels, so the score is on pictures it has seen', { time: escapeHtml(trained), n: r.model?.acars ?? '?' })}${r.labelsAfterTraining ? `; ${__('{n} labels were made or changed after training (click Train on /models so the model learns them)', { n: r.labelsAfterTraining })}` : ''}.
+        ${r.stopped ? `<b>${__('Stopped part way: the score only counts the files already run.')}</b>` : ''}</p>`;
+      const cell = (v) => (v && v.total ? `${v.pct}%<br/><small>${v.matches}/${v.total}</small>` : '–');
+      const fields = `<h3 class="section-title">${__('By field')}</h3><div style="overflow-x:auto"><table>
+        <tr>${ACARS_COLS.map(([, t]) => `<th>${__(t)}</th>`).join('')}</tr>
+        <tr>${ACARS_COLS.map(([k]) => `<td>${cell(r.perField[k])}</td>`).join('')}</tr></table></div>
+        <p style="font-size:12px;color:#888">${__('Times are compared as HH:MM, Info as its flight and block times; a field the picture does not show must stay empty.')}</p>`;
+      const files = (r.files || []).slice().sort((a, b) => (a.error ? -1 : b.error ? 1 : (a.fieldsRight ?? 0) - (b.fieldsRight ?? 0))).map((f) => {
+        const score = f.error ? `<span style="color:#d32f2f">${escapeHtml(f.error)}</span>` : `${f.fieldsRight}/${f.fieldTotal}`;
+        const diff = f.diffCount
+          ? `<details><summary style="font-size:12px">${__('{n} differences', { n: f.diffCount })}</summary><ul class="diff">${f.diffs.map(e => `<li><b>${escapeHtml(e.field)}</b>: <code>${escapeHtml(e.pred) || '∅'}</code> (${__('label')} <code>${escapeHtml(e.exp) || '∅'}</code>)</li>`).join('')}</ul></details>`
+          : '';
+        const tag = f.afterTraining ? `<span style="font-size:12px;color:#888" title="${__('Label made or changed after the last model training')}">${__('new label')}</span>` : '';
+        return `<tr><td>${escapeHtml(f.file)}</td><td>${score}</td><td>${tag}</td><td>${reviewLink(f.file, false)}${diff}</td></tr>`;
+      }).join('');
+      $('acarsResult').innerHTML = cards + note + fields + `<h3 class="section-title">${__('Per picture')} <small style="font-weight:normal;color:#888">${__('(worst first)')}</small></h3>
+        <table><tr><th>File</th><th>${__('Fields right')}</th><th></th><th></th></tr>${files}</table>`;
+    }
+
+    streamRunner({
+      btn: $('acarsRunBtn'), status: $('acarsStatus'), error: $('acarsError'), label: __('Run ACARS benchmark'),
+      url: () => '/api/benchmark/acars/stream',
+      progress: (seen) => {
+        const m = seen.reduce((a, f) => a + (f.fieldsRight || 0), 0), t = seen.reduce((a, f) => a + (f.fieldTotal || 0), 0);
+        return __('so far {pct}% of fields right', { pct: t ? (100 * m / t).toFixed(1) : 0 });
+      },
+      render: renderAcars,
     });
 
   </script>

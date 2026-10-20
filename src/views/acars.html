@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ACARS</title>
+  <script src="/assets/i18n/vi.js"></script>
+  <script src="/assets/i18n.js"></script>
+  <link rel="stylesheet" href="/assets/app.css">
+  <link rel="stylesheet" href="/assets/fontawesome/css/all.min.css">
+  <style>
+    .btn { background: var(--primary); color: #fff; border: none; padding: 9px 16px; border-radius: 6px; cursor: pointer; font-size: 14px; display: inline-flex; gap: 8px; align-items: center; white-space: nowrap; }
+    .btn:hover:not(:disabled) { background: var(--primary-dark); }
+    .btn:disabled { background: #ccc; cursor: not-allowed; }
+    .btn.secondary { background: #fff; color: var(--primary); border: 1px solid var(--primary); }
+    .btn.secondary:hover:not(:disabled) { background: #eef4ff; }
+    .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 12px 16px; }
+    .toolbar .hint { font-size: 13px; color: var(--muted); }
+    body.dragover .toolbar { outline: 2px dashed var(--primary); outline-offset: 2px; }
+    input[type=file] { display: none; }
+
+    .msg { display: none; margin: 12px 0; padding: 10px 14px; border-radius: 6px; font-size: 14px; }
+    .msg.visible { display: block; }
+    .msg.err { background: #fdecea; color: #b71c1c; }
+    .msg.busy { background: #e3f2fd; color: #0d47a1; }
+
+    .layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 420px); gap: 16px; margin-top: 16px; align-items: start; }
+    @media (max-width: 860px) { .layout { grid-template-columns: 1fr; } }
+    .picture { padding: 12px; }
+    .picture img { display: block; max-width: 100%; max-height: 70vh; margin: 0 auto; border-radius: 6px; }
+    .empty { padding: 32px 16px; text-align: center; color: var(--muted); font-size: 14px; }
+    .result { padding: 16px; }
+    .result h2 { margin: 0 0 12px; font-size: 16px; display: flex; gap: 8px; align-items: center; }
+    .fields { display: grid; grid-template-columns: max-content 1fr; gap: 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+    .fields dt, .fields dd { margin: 0; padding: 9px 12px; border-bottom: 1px solid #eef0f3; font-size: 14px; }
+    .fields dt { background: #f5f7fa; font-weight: 600; color: #445; }
+    .fields dd { font-family: Consolas, monospace; font-size: 15px; overflow-wrap: anywhere; }
+    .fields dd.none { color: #aab; font-family: inherit; font-size: 13px; }
+    .fields dt:nth-last-of-type(1), .fields dd:nth-last-of-type(1) { border-bottom: none; }
+    .meta { font-size: 12px; color: var(--muted); margin-top: 10px; }
+    .actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+  </style>
+</head>
+<body>
+  <script src="/assets/nav.js"></script>
+  <main class="page">
+    <div class="page-header">
+      <h1><i class="fa-solid fa-satellite-dish" aria-hidden="true"></i> ACARS</h1>
+      <p class="subtitle" data-i18n>Take a picture of the cockpit's ACARS / AOC OOOI page, or upload one: the AI model reads the flight number, the date, the airports and the OUT, OFF, ON, IN times. The picture is only read, never kept.</p>
+    </div>
+
+    <div class="card toolbar">
+      <button class="btn" id="scanBtn"><i class="fa-solid fa-camera" aria-hidden="true"></i> <span>Scan</span></button>
+      <button class="btn secondary" id="pickBtn"><i class="fa-solid fa-upload" aria-hidden="true"></i> <span>Upload a picture</span></button>
+      <span class="hint" data-i18n>JPG, PNG, BMP or JFIF, up to 10 MB. You can also drop a picture on the page.</span>
+      <input type="file" id="cameraInput" accept="image/*" capture="environment">
+      <input type="file" id="fileInput" accept=".jpg,.jpeg,.png,.bmp,.jfif,image/jpeg,image/png,image/bmp">
+    </div>
+    <div id="msg" class="msg"></div>
+
+    <div class="layout">
+      <div class="card picture" id="picture"><div class="empty">No picture yet.</div></div>
+      <div class="card result" id="result">
+        <h2><i class="fa-solid fa-plane" aria-hidden="true"></i> <span>Flight</span></h2>
+        <div id="fields"><div class="empty">Scan or upload an ACARS picture to read it.</div></div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const escapeHtml = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[c]));
+    const FIELDS = [['flt', 'Flt No'], ['date', 'Date'], ['dept', 'Dept'], ['dest', 'Dest'], ['out', 'Out'], ['off', 'Off'], ['on', 'On'], ['in', 'In'], ['info', 'Info']];
+    let last = null, busy = false;
+
+    function showMsg(text, kind) {
+      const m = $('msg');
+      m.className = `msg visible ${kind}`;
+      m.textContent = text;
+    }
+    const hideMsg = () => $('msg').classList.remove('visible');
+
+    function renderFields(fields, meta) {
+      $('fields').innerHTML = `<dl class="fields">${FIELDS.map(([k, label]) => `<dt>${__(label)}</dt>${
+        fields[k] ? `<dd>${escapeHtml(fields[k])}</dd>` : `<dd class="none">${__('not read')}</dd>`}`).join('')}</dl>
+        <div class="meta">${escapeHtml(meta)}</div>
+        <div class="actions"><button class="btn secondary" id="copyBtn"><i class="fa-regular fa-copy" aria-hidden="true"></i> <span>${__('Copy')}</span></button></div>`;
+      $('copyBtn').addEventListener('click', async () => {
+        const text = FIELDS.map(([k, label]) => `${label}: ${fields[k] || '-'}`).join('\n');
+        try { await navigator.clipboard.writeText(text); $('copyBtn').querySelector('span').textContent = __('Copied'); } catch { /* no clipboard: nothing */ }
+      });
+    }
+
+    async function read(file) {
+      if (!file || busy) return;
+      if (!/\.(jpe?g|png|bmp|jfif)$/i.test(file.name) && !/^image\/(jpeg|png|bmp)$/.test(file.type)) {
+        showMsg(__('Only JPG, PNG, BMP or JFIF pictures are accepted.'), 'err');
+        return;
+      }
+      busy = true;
+      $('scanBtn').disabled = $('pickBtn').disabled = true;
+      if (last) URL.revokeObjectURL(last);
+      last = URL.createObjectURL(file);
+      $('picture').innerHTML = `<img src="${last}" alt="${escapeHtml(file.name)}">`;
+      $('fields').innerHTML = `<div class="empty"><i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i> ${__('Reading the picture…')}</div>`;
+      hideMsg();
+      try {
+        const body = new FormData();
+        // a camera picture may come without a usable name: give it one the server accepts
+        body.append('file', file, /\.(jpe?g|png|bmp|jfif)$/i.test(file.name) ? file.name : 'acars.jpg');
+        const res = await fetch('/api/acars/read', { method: 'POST', body });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+        const secs = ((data.ms || 0) / 1000).toFixed(1);
+        renderFields(data.fields || {}, __('Read in {s} s by the AI model (trained {when}).', { s: secs, when: data.model?.trainedAt ? new Date(data.model.trainedAt).toLocaleString() : '?' }));
+      } catch (err) {
+        $('fields').innerHTML = `<div class="empty">${__('Nothing read.')}</div>`;
+        showMsg(__(err.message), 'err');
+      } finally {
+        busy = false;
+        $('scanBtn').disabled = $('pickBtn').disabled = false;
+      }
+    }
+
+    $('scanBtn').addEventListener('click', () => $('cameraInput').click());
+    $('pickBtn').addEventListener('click', () => $('fileInput').click());
+    for (const id of ['cameraInput', 'fileInput']) {
+      $(id).addEventListener('change', (e) => { read(e.target.files[0]); e.target.value = ''; });
+    }
+    document.addEventListener('dragover', (e) => { e.preventDefault(); document.body.classList.add('dragover'); });
+    document.addEventListener('dragleave', (e) => { if (!e.relatedTarget) document.body.classList.remove('dragover'); });
+    document.addEventListener('drop', (e) => {
+      e.preventDefault();
+      document.body.classList.remove('dragover');
+      read(e.dataTransfer.files[0]);
+    });
+    document.addEventListener('paste', (e) => {
+      const f = [...(e.clipboardData?.files || [])].find(x => x.type.startsWith('image/'));
+      if (f) read(f);
+    });
+  </script>
+</body>
+</html>
