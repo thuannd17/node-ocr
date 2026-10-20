@@ -37,12 +37,13 @@ const minutes = (ms) => Math.round(ms / 60000);
 const hm = (min) => `${Math.floor(min / 60)}:${String(min % 60).padStart(2, '0')}`;
 
 /**
- * POST /api/night-time/calc  { dep: "VIE", arr: "HAN", off: "2025-03-11T13:00Z", on: "2025-03-11T23:50Z", rule?: "civil"|"sunset", track?: true }
+ * POST /api/night-time/calc  { dep: "VIE", arr: "HAN", off: "2025-03-11T13:00Z", on: "2025-03-11T23:50Z", rule?: "civil"|"nautical"|"sunset"|"fixed",
+ *   sunrise?: "06:00", sunset?: "18:00" (rule fixed: local time at the aircraft), track?: true }
  * dep / arr: an airport code (IATA, ICAO, FAA, ...) or "lat,lon"; off / on: ISO 8601 times (UTC with Z).
  */
 router.post('/night-time/calc', (req, res) => {
   const body = req.body || {};
-  const { dep, arr, off, on, rule = 'civil' } = body;
+  const { dep, arr, off, on, rule = 'civil', sunrise = '06:00', sunset = '18:00' } = body;
   if (!dep || !arr || !off || !on) return bad(res, 'dep, arr, off and on are required');
   if (!RULES[rule]) return bad(res, `rule must be one of: ${Object.keys(RULES).join(', ')}`);
   const from = placeOf(dep), to = placeOf(arr);
@@ -52,11 +53,13 @@ router.post('/night-time/calc', (req, res) => {
   if (Number.isNaN(+t0) || Number.isNaN(+t1)) return bad(res, 'off and on must be ISO 8601 times, e.g. 2025-03-11T13:00Z');
   if (t1 <= t0) return bad(res, 'On-block must be after off-block.');
   if (t1 - t0 > 24 * 3600000) return bad(res, 'Block time over 24 hours.');
-  const r = compute({ from, to, off: t0, on: t1, rule });
+  if (rule === 'fixed' && (!/^\d{1,2}:\d{2}$/.test(String(sunrise)) || !/^\d{1,2}:\d{2}$/.test(String(sunset)))) return bad(res, 'sunrise and sunset must be times HH:MM, e.g. 06:00 and 18:00');
+  let r;
+  try { r = compute({ from, to, off: t0, on: t1, rule, sunrise, sunset }); } catch (e) { return bad(res, e.message); }
   const pos = (p) => ({ lat: round(p.lat, 5), lon: round(((p.lon + 540) % 360) - 180, 5) });
   const block = minutes(r.totalMs), night = minutes(r.nightMs);
   res.json({
-    rule, sunAltitudeLimit: r.limit,
+    rule, sunAltitudeLimit: r.limit, ...(rule === 'fixed' ? { sunrise: r.sunrise, sunset: r.sunset } : {}),
     departure: from, arrival: to,
     offBlock: t0.toISOString(), onBlock: t1.toISOString(),
     blockMinutes: block, nightMinutes: night, dayMinutes: block - night,

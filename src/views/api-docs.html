@@ -21,6 +21,18 @@
     .note { font-size: 13px; color: var(--muted); margin-top: 12px; }
     .btn { background: var(--primary); color: #fff; border: none; padding: 8px 14px; border-radius: 6px; font-size: 14px; display: inline-flex; gap: 6px; align-items: center; text-decoration: none; }
     .btn.secondary { background: #fff; color: var(--text); border: 1px solid var(--border); }
+    .btn { cursor: pointer; white-space: nowrap; font-size: 13px; padding: 7px 12px; }
+    .btn:hover { background: var(--primary-dark); }
+    .btn.outline { background: #fff; color: var(--primary); border: 1px solid var(--primary); }
+    .btn.outline:hover { background: #eef4ff; }
+    .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 12px 14px; }
+    .toolbar .base { font-size: 13px; color: var(--muted); display: inline-flex; gap: 6px; align-items: center; min-width: 0; }
+    .toolbar .base code { overflow-wrap: anywhere; }
+    .toolbar input[type=search] { flex: 1 1 220px; max-width: 360px; padding: 7px 9px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px; }
+    .toolbar .right { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
+    .quick a.hide, #swagger .opblock.hide, #swagger .opblock-tag-section.hide { display: none; }
+    .nomatch { font-size: 13px; color: var(--muted); padding: 4px 0 12px; }
+    @media (max-width: 700px) { .toolbar input[type=search] { max-width: none; } .toolbar .right { margin-left: 0; } }
     /* Swagger UI inside the page card */
     #swagger .swagger-ui .information-container { display: none; } /* the intro above replaces it */
     #swagger .swagger-ui .wrapper { padding: 0; max-width: none; }
@@ -35,8 +47,16 @@
     <div class="page-header">
       <h1><i class="fa-solid fa-book" aria-hidden="true"></i> API Documentation</h1>
       <p class="subtitle">The public API of RosterParser, for other apps: read rosters, export calendars, look up airports and weather, compute night time.</p>
-      <div class="header-extra">
-        <a class="btn secondary" href="/api/openapi.json" target="_blank" rel="noopener"><i class="fa-solid fa-file-code" aria-hidden="true"></i> OpenAPI JSON</a>
+    </div>
+
+    <!-- Toolbar (as on the other pages): the base URL, find an endpoint, open or close them all, the raw spec -->
+    <div class="card toolbar">
+      <span class="base"><i class="fa-solid fa-server" aria-hidden="true"></i> <code id="baseUrlTop"></code></span>
+      <input type="search" id="apiSearch" placeholder="Find an endpoint (path or name)…" aria-label="Find an endpoint (path or name)">
+      <div class="right">
+        <button class="btn outline" id="expandAll" type="button"><i class="fa-solid fa-angles-down" aria-hidden="true"></i> <span>Expand all</span></button>
+        <button class="btn outline" id="collapseAll" type="button"><i class="fa-solid fa-angles-up" aria-hidden="true"></i> <span>Collapse all</span></button>
+        <a class="btn" href="/api/openapi.json" target="_blank" rel="noopener"><i class="fa-solid fa-file-code" aria-hidden="true"></i> OpenAPI JSON</a>
       </div>
     </div>
 
@@ -47,6 +67,7 @@
         <a href="#/Roster/suggestCorrection"><i class="fa-solid fa-comment-medical" aria-hidden="true"></i><span><b>Suggest a correction</b><code>POST /api/roster/suggestions</code></span></a>
         <a href="#/Calendar/exportCalendar"><i class="fa-solid fa-calendar-days" aria-hidden="true"></i><span><b>Roster rows to .ics</b><code>POST /api/calendar/export</code></span></a>
         <a href="#/ACARS/readAcars"><i class="fa-solid fa-satellite-dish" aria-hidden="true"></i><span><b>Read an ACARS picture</b><code>POST /api/acars/read</code></span></a>
+        <a href="#/ACARS/suggestAcarsCorrection"><i class="fa-solid fa-comment-medical" aria-hidden="true"></i><span><b>Suggest a correction (ACARS)</b><code>POST /api/acars/suggestions</code></span></a>
         <a href="#/Route%20map/routeMap"><i class="fa-solid fa-route" aria-hidden="true"></i><span><b>Routes of rosters on a world map</b><code>POST /api/route-map</code></span></a>
         <a href="#/Airports/searchAirports"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i><span><b>Search airports</b><code>GET /api/airports</code></span></a>
         <a href="#/Airports/getAirport"><i class="fa-solid fa-plane-departure" aria-hidden="true"></i><span><b>One airport</b><code>GET /api/airports/{code}</code></span></a>
@@ -54,7 +75,6 @@
         <a href="#/Night%20time/calcNightTime"><i class="fa-solid fa-moon" aria-hidden="true"></i><span><b>Night time of a flight</b><code>POST /api/night-time/calc</code></span></a>
       </div>
       <div class="facts">
-        <span class="k">Base URL</span><span><code id="baseUrl"></code></span>
         <span class="k">Authentication</span><span>None for now</span>
         <span class="k">Format</span><span data-i18n>JSON (UTF-8); uploads as <code>multipart/form-data</code>; times in ISO 8601</span>
         <span class="k">Errors</span><span data-i18n>HTTP status 4xx / 5xx with <code>{ "error": "message" }</code>; send the cookie <code>lang=vi</code> for Vietnamese messages</span>
@@ -68,7 +88,45 @@
 
   <script src="/assets/swagger-ui/swagger-ui-bundle.js"></script>
   <script>
-    document.getElementById('baseUrl').textContent = location.origin;
+    document.getElementById('baseUrlTop').textContent = location.origin;
+
+    // ---- toolbar: find an endpoint (quick links + the reference), open or close every operation ----
+    const norm = (t) => String(t || '').toLowerCase();
+    function applySearch() {
+      const q = norm(document.getElementById('apiSearch').value.trim());
+      document.querySelectorAll('.quick a').forEach(a => a.classList.toggle('hide', !!q && !norm(a.textContent).includes(q)));
+      let shown = 0;
+      document.querySelectorAll('#swagger .opblock-tag-section').forEach(sec => {
+        let any = false;
+        sec.querySelectorAll('.opblock').forEach(op => {
+          const text = norm(op.querySelector('.opblock-summary')?.textContent) + ' ' + norm(sec.querySelector('.opblock-tag')?.textContent);
+          const hit = !q || text.includes(q);
+          op.classList.toggle('hide', !hit);
+          if (hit) { any = true; shown += 1; }
+        });
+        sec.classList.toggle('hide', !any);
+        // a search opens the tags so the operations it found are visible
+        if (q && any && !sec.classList.contains('is-open')) sec.querySelector('.opblock-tag')?.click();
+      });
+      let none = document.getElementById('noMatch');
+      if (q && !shown) {
+        if (!none) document.getElementById('swagger').insertAdjacentHTML('afterbegin', `<div class="nomatch" id="noMatch">${__('No endpoint matches.')}</div>`);
+      } else none?.remove();
+    }
+    document.getElementById('apiSearch').addEventListener('input', applySearch);
+    function setAll(open) {
+      document.querySelectorAll('#swagger .opblock-tag-section').forEach(sec => {
+        if (sec.classList.contains('hide')) return;
+        if (open !== sec.classList.contains('is-open')) sec.querySelector('.opblock-tag')?.click();
+      });
+      setTimeout(() => {
+        document.querySelectorAll('#swagger .opblock:not(.hide)').forEach(op => {
+          if (open !== op.classList.contains('is-open')) op.querySelector('.opblock-summary-control, .opblock-summary')?.click();
+        });
+      }, 50);
+    }
+    document.getElementById('expandAll').addEventListener('click', () => setAll(true));
+    document.getElementById('collapseAll').addEventListener('click', () => setAll(false));
     if (!window.SwaggerUIBundle) {
       document.getElementById('swagger').innerHTML = `<div class="msg error">${__('Could not load Swagger UI.')} <a href="/api/openapi.json">OpenAPI JSON</a></div>`;
     } else {

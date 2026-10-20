@@ -811,7 +811,7 @@
           "Night time"
         ],
         "summary": "Night time of a flight",
-        "description": "The aircraft flies the great circle from `dep` to `arr` at a constant speed between off-block and on-block; the sun's altitude is taken at its position (SunCalc), and each day / night edge is found to the second. Night = the sun below −6° (`civil`: end of evening to beginning of morning civil twilight, ICAO Annex 1 / EASA / FAA) or below −0.833° (`sunset`: sunset to sunrise). Minutes are rounded; `nightMinutes + dayMinutes = blockMinutes`.",
+        "description": "The aircraft flies the great circle from `dep` to `arr` at a constant speed between off-block and on-block; the sun's altitude is taken at its position (SunCalc), and each day / night edge is found to the second. Night = the sun below −6° (`civil`: end of evening to beginning of morning civil twilight, ICAO Annex 1 / EASA / FAA) below −0.833° (`sunset`: sunset to sunrise) or below −12° (`nautical`: end of evening to beginning of morning nautical twilight), or by fixed hours (`fixed`: before `sunrise` and from `sunset` on, default 06:00 / 18:00 local time at the aircraft, i.e. the mean solar time of its longitude). Minutes are rounded; `nightMinutes + dayMinutes = blockMinutes`.",
         "operationId": "calcNightTime",
         "responses": {
           "200": {
@@ -1412,12 +1412,15 @@
             "type": "string",
             "enum": [
               "civil",
-              "sunset"
+              "nautical",
+              "sunset",
+              "fixed"
             ]
           },
           "sunAltitudeLimit": {
             "type": "number",
-            "description": "Degrees: night when the sun is below this"
+            "description": "The sun altitude night starts below; null with rule fixed",
+            "nullable": true
           },
           "departure": {
             "$ref": "#/components/schemas/Place"
@@ -1524,6 +1527,14 @@
                 }
               }
             }
+          },
+          "sunrise": {
+            "type": "string",
+            "description": "rule fixed only: the sunrise used, HH:MM local"
+          },
+          "sunset": {
+            "type": "string",
+            "description": "rule fixed only: the sunset used, HH:MM local"
           }
         }
       },
@@ -1657,14 +1668,29 @@
             "type": "string",
             "enum": [
               "civil",
-              "sunset"
+              "nautical",
+              "sunset",
+              "fixed"
             ],
-            "default": "civil"
+            "default": "civil",
+            "description": "civil: sun below −6°; nautical: below −12°; sunset: below −0.833°; fixed: night outside sunrise..sunset local time at the aircraft (local mean time of its longitude: UTC + 4 min per degree east)"
           },
           "track": {
             "type": "boolean",
             "default": false,
             "description": "true adds the flight track (about 300 points) with the sun altitude at each"
+          },
+          "sunrise": {
+            "type": "string",
+            "pattern": "^\\d{1,2}:\\d{2}$",
+            "default": "06:00",
+            "description": "rule fixed: local time the day starts"
+          },
+          "sunset": {
+            "type": "string",
+            "pattern": "^\\d{1,2}:\\d{2}$",
+            "default": "18:00",
+            "description": "rule fixed: local time the night starts"
           }
         }
       },

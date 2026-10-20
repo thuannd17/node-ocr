@@ -7,15 +7,18 @@
 //   GET  /api/media/file?name=      the file, read from MinIO (CSV / Excel / TXT as an HTML table)
 //   DELETE /api/media/file?name=    move the file (and its label) to trash/<date>/ in MinIO
 //   POST /api/media/delete-unlabeled  { kind?: 'image'|'pdf' } move every file without a label to the trash
+//   POST /api/media/upload          multipart files (up to 20) + target: roster (default) | acars -> stored as
+//                                   <uuid>.<ext>, or the file already there with the same content; label them on /label
 import { Router } from 'express';
 import fs from 'node:fs';
+import multer from 'multer';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { isDataName, extOf, kindOf, dataFile, DATA_ROOT, IMAGE_EXTS } from '../utils/data-files.js';
 import { previewHtml } from '../services/table-text.js';
-import { mediaHealth, mediaIndex, mirrorState, fileBytes, deleteFile, mediaErrorStatus } from '../services/media-client.js';
-import { CACHE_DIR } from '../utils/paths.js';
+import { mediaHealth, mediaIndex, mirrorState, fileBytes, deleteFile, storeFile, acars, mediaErrorStatus } from '../services/media-client.js';
+import { CACHE_DIR, UPLOADS_DIR } from '../utils/paths.js';
 
 const router = Router();
 const fail = (res, e) => {
@@ -100,6 +103,45 @@ router.post('/media/delete-unlabeled', async (req, res) => {
     }
     res.json({ ok: true, deleted: names.length - failed.length, failed });
   } catch (e) { fail(res, e); }
+});
+
+// ---- an admin adds files to the data (as an accepted suggestion would), to label them on /label ----
+const upload = multer({ dest: UPLOADS_DIR, limits: { fileSize: 10 * 1024 * 1024, files: 20 } });
+const uploadFiles = (req, res, next) => upload.array('files', 20)(req, res, (err) => {
+  if (!err) return next();
+  const msg = { LIMIT_FILE_SIZE: 'A file is larger than 10 MB', LIMIT_FILE_COUNT: 'At most 20 files at a time', LIMIT_UNEXPECTED_FILE: 'At most 20 files at a time' }[err.code];
+  res.status(err.code === 'LIMIT_FILE_SIZE' ? 413 : 400).json({ error: msg || err.message });
+});
+
+router.post('/media/upload', uploadFiles, async (req, res) => {
+  const files = req.files || [];
+  const target = String(req.body?.target || 'roster');
+  try {
+    if (!['roster', 'acars'].includes(target)) return res.status(400).json({ error: 'target must be roster or acars' });
+    if (!files.length) return res.status(400).json({ error: 'Send the files in the multipart field "files"' });
+    const items = [];
+    for (const f of files) {
+      const original = path.basename(f.originalname);
+      const kind = kindOf(original);
+      if (target === 'acars' ? kind !== 'image' : !kind) {
+        items.push({ original, error: target === 'acars' ? 'Not a picture (JPG, PNG, BMP, JFIF)' : 'Not a roster file type' });
+        continue;
+      }
+      try {
+        const buf = fs.readFileSync(f.path);
+        const { name, isNew } = target === 'acars' ? await acars.storeFile(buf, original) : await storeFile(buf, original);
+        items.push({ original, name, isNew, target });
+      } catch (e) {
+        if (e.code === 'MEDIA_DOWN') throw e;
+        items.push({ original, error: e.message });
+      }
+    }
+    res.json({ ok: true, target, items });
+  } catch (e) {
+    fail(res, e);
+  } finally {
+    for (const f of files) fs.rm(f.path, { force: true }, () => {});
+  }
 });
 
 export default router;

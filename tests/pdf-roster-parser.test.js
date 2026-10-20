@@ -560,3 +560,99 @@ test('compact plan "date duty dep arr AC": period after the name, LB times, crew
     ['6 Sep 26', 'Sun', 'C/O', '', '', '23:20 LB', 'BKK', '', '', ''],
   ]);
 });
+
+// ---- 2026-10-20 layouts (synthetic pages with the samples' coordinates; names and numbers made up) ----
+const iw = (text, x, y, w) => ({ text, x, y, w, h: 5 });
+
+test('activity list (Azul style): C/I once per duty, legs, C/O after the last leg, Portuguese months, split times', () => {
+  const head = [iw('Activity', 21, 60, 26), iw('Checkin', 68, 60, 29), iw('Start', 146, 60, 18), iw('Dep', 224, 60, 14), iw('Arr', 256, 60, 11),
+    iw('End', 285, 60, 13), iw('Checkout', 363, 60, 34), iw('AcVer', 441, 60, 20), iw('DD', 481, 60, 11), iw('CAT', 509, 60, 15), iw('Crew', 542, 60, 19)];
+  // the checkin / checkout repeated on both legs, times cut into "15" ":" "00"
+  const t = (date, hh, mm, x, y) => [iw(`${date} ${hh}`, x, y, 44), iw(':', x + 44, y, 2), iw(mm, x + 46, y, 10)];
+  const leg = (y, no, start, dep, arr, end) => [iw(no, 21, y, 29), ...t('01AGO22', '15', '00', 68, y), ...t(...start, 146, y), iw(dep, 224, y, 15), iw(arr, 256, y, 15),
+    ...t(...end, 285, y), ...t('01AGO22', '23', '27', 363, y), iw('EJF', 441, y, 13), iw('-', 481, y, 4), iw('FO', 509, y, 11), iw('-', 542, y, 4)];
+  const pages = [
+    { page: 1, width: 595, height: 842, items: [iw('12345 - JOAO TESTE (01/08/2022 - 31/08/2022)', 21, 40, 200), ...head,
+      ...leg(80, 'AD2020', ['01AGO22', '15', '40'], 'VCP', 'BEL', ['01AGO22', '19', '04']),
+      ...leg(90, 'AD2021', ['01AGO22', '21', '51'], 'BEL', 'MAO', ['02AGO22', '00', '57'])] },
+    // the next page goes on without the header line
+    { page: 2, width: 595, height: 842, items: [iw('FR', 21, 40, 11), iw('-', 68, 40, 4), ...t('04AGO22', '08', '25', 146, 40), iw('VCP', 224, 40, 15), iw('VCP', 256, 40, 15),
+      ...t('05AGO22', '08', '25', 285, 40), iw('-', 363, 40, 4), iw('-', 441, 40, 4), iw('-', 481, 40, 4), iw('FO', 509, 40, 11), iw('-', 542, 40, 4)] },
+  ];
+  const r = parseNetlinePdf(pages);
+  assert.equal(r.format, 'activity-list');
+  assert.equal(r.period, '01Aug22 - 05Aug22');
+  assert.deepEqual(r.published.map(x => [x.date, x.day, x.dc, x.duty, x.dep, x.begin, x.end, x.arr, x.ac]), [
+    ['1 Aug 22', 'Mon', '', 'C/I', 'VCP', '15:00 Z', '', '', ''],
+    ['1 Aug 22', 'Mon', 'FO', 'AD2020', 'VCP', '15:40 Z', '19:04 Z', 'BEL', 'EJF'],
+    ['1 Aug 22', 'Mon', 'FO', 'AD2021', 'BEL', '21:51 Z', '00:57 Z +1', 'MAO', 'EJF'],
+    ['1 Aug 22', 'Mon', '', 'C/O', '', '', '23:27 Z', 'MAO', ''],
+    ['4 Aug 22', 'Thu', 'FO', 'FR', 'VCP', '08:25 Z', '08:25 Z +1', 'VCP', ''],
+  ]);
+});
+
+test('Log Book Report by Crew Members: one duty per CheckIn (C/I, legs, C/O at Rest After), OFF, HOTAC, rail', () => {
+  const head = [
+    iw('Log Book Report by Crew Members on period [01/04/2024-30/04/2024]', 23, 22, 300), iw('Schedule in UTC', 23, 45, 60),
+    iw('Activity', 79, 98, 30), iw('Begin', 131, 98, 20), iw('End', 161, 98, 15), iw('Description', 241, 98, 40), iw('Role', 386, 98, 15), iw('Before', 520, 98, 25), iw('After', 625, 98, 20), iw('Night', 737, 98, 20),
+    iw('Date', 27, 93, 15), iw('Type', 315, 93, 15), iw('Registr.', 347, 93, 30), iw('CheckIn', 573, 93, 30),
+    iw('Departure', 27, 103, 40), iw('Arrival', 191, 103, 30), iw('Dep', 422, 103, 15), iw('Arr', 457, 103, 15), iw('Rot.', 491, 103, 15), iw('Block', 677, 103, 20), iw('Flight', 707, 103, 20), iw('Simu', 767, 103, 20),
+  ];
+  const act = (y, [d1, d2, d3], main, [t1, t2, t3]) => [
+    iw(d1, 523, y - 5, 40), iw(d2, 576, y - 5, 40), iw(d3, 628, y - 5, 40),
+    ...main.map(([text, x]) => iw(text, x, y, text.length * 4)),
+    iw(t1, 533, y + 5, 20), iw(t2, 586, y + 5, 20), iw(t3, 638, y + 5, 20),
+  ];
+  const items = [...head,
+    ...act(126, ['01/04/2024', '01/04/2024', '02/04/2024'], [['01/04/2024', 29], ['OFF', 79], ['22:00', 133], ['21:59', 163], ['02/04/2024', 193], ['ORY', 422], ['ORY', 457], ['00:00', 680]], ['22:00', '22:00', '21:59']),
+    ...act(150, ['07/04/2024', '07/04/2024', '07/04/2024'], [['07/04/2024', 29], ['Flight', 79], ['05:45', 133], ['08:15', 163], ['07/04/2024', 193], ['TO1234', 241], ['73H', 315], ['FABCD', 342], ['ORY', 422], ['CZL', 457], ['1', 500], ['02:30', 680], ['02:15', 710], ['00:05', 740]], ['04:30', '04:30', '11:50']),
+    ...act(174, ['07/04/2024', '07/04/2024', '07/04/2024'], [['07/04/2024', 29], ['Flight', 79], ['09:25', 133], ['11:20', 163], ['07/04/2024', 193], ['TO1235', 241], ['73H', 315], ['FABCD', 342], ['CZL', 422], ['LYS', 457], ['1', 500], ['01:55', 680], ['01:40', 710], ['00:00', 740]], ['04:30', '04:30', '11:50']),
+    ...act(198, ['07/04/2024', '07/04/2024', '08/04/2024'], [['07/04/2024', 29], ['HOTAC', 79], ['12:10', 133], ['03:50', 163], ['08/04/2024', 193], ['LYS', 422], ['LYS', 457]], ['12:10', '12:10', '03:50']),
+    ...act(222, ['08/04/2024', '08/04/2024', '08/04/2024'], [['08/04/2024', 29], ['Rail', 79], ['04:56', 133], ['06:46', 163], ['08/04/2024', 193], ['TGV1111', 241], ['LYS', 422], ['GPL', 457]], ['04:41', '04:41', '07:16']),
+  ];
+  const r = parseNetlinePdf([{ page: 1, width: 842, height: 595, items }]);
+  assert.equal(r.format, 'logbook-report');
+  assert.equal(r.period, '01Apr24 - 30Apr24');
+  assert.deepEqual(r.published.map(x => [x.date, x.dc, x.duty, x.registration, x.dep, x.begin, x.end, x.arr, x.ac, x.info]), [
+    ['1 Apr 24', '', 'OFF', '', 'ORY', '22:00 Z', '21:59 Z +1', 'ORY', '', ''],
+    ['7 Apr 24', '', 'C/I', '', 'ORY', '04:30 Z', '', '', '', ''],
+    ['7 Apr 24', '', 'TO1234', 'FABCD', 'ORY', '05:45 Z', '08:15 Z', 'CZL', '73H', '[Block: 02:30] [Flight: 02:15]'],
+    ['7 Apr 24', '', 'TO1235', 'FABCD', 'CZL', '09:25 Z', '11:20 Z', 'LYS', '73H', '[Block: 01:55] [Flight: 01:40]'],
+    ['7 Apr 24', '', 'C/O', '', '', '', '11:50 Z', 'LYS', '', ''],
+    ['7 Apr 24', '', 'HT', '', 'LYS', '12:10 Z', '03:50 Z +1', '', '', ''],
+    ['8 Apr 24', '', 'C/I', '', 'LYS', '04:41 Z', '', '', '', ''],
+    ['8 Apr 24', '', 'TGV1111', '', 'LYS', '04:56 Z', '06:46 Z', 'GPL', '', '[Rail]'],
+    ['8 Apr 24', '', 'C/O', '', '', '', '07:16 Z', 'GPL', '', ''],
+  ]);
+});
+
+test('day blocks (Air Nostrum style): days in columns, Firma -> C/I, flights, positioning, all-day codes, next year', () => {
+  const col = (x0, y) => [iw('Descr. Código', x0, y, 40), iw('Vuelo', x0 + 42, y, 15), iw('ORI-DES', x0 + 72, y, 25), iw('STD - STA', x0 + 101, y, 28), iw('Tripulación', x0 + 132, y, 35)];
+  const items = [
+    iw('Periodo 01/12/2021 - 01/01/2022 - Tiempos UTC', 341, 52, 150),
+    ...col(14, 106), ...col(218, 106), ...col(420, 106),
+    // column 1
+    iw('Fecha:', 14, 113, 14), iw('mi. 01 dic.', 28, 113, 30),
+    iw('Vacaciones voluntarias', 14, 120, 40), iw('VV', 56, 120, 8), iw('-', 94, 120, 3), iw('0:00 -', 115, 120, 12), iw('0:00', 129, 120, 10),
+    iw('Totales : Blq', 14, 127, 22), iw('0:00:00', 37, 127, 12),
+    // column 2: a duty with a positioning flight
+    iw('Fecha:', 217, 113, 14), iw('mi. 29 dic.', 230, 113, 30), iw('Firma:', 295, 113, 14), iw('7:50', 309, 113, 10),
+    iw('CRK', 239, 120, 12), iw('IB1001', 259, 120, 20), iw('VLC-MAD', 289, 120, 25), iw('8:35 -', 318, 120, 12), iw('9:40', 331, 120, 10), iw('Situación', 349, 120, 25),
+    iw('ATX', 239, 127, 12), iw('IB1002', 259, 127, 20), iw('MAD-MLN', 289, 127, 25), iw('10:35 - 12:25', 315, 127, 30), iw('(d) PEREZ(D)', 349, 127, 35),
+    iw('Totales : Blq', 217, 134, 22), iw('3:00:00', 239, 134, 12),
+    iw('Fecha:', 217, 141, 14), iw('sá. 01 ene.', 230, 141, 30),
+    iw('Licencia Funciones Sindi', 217, 148, 40), iw('LCA8', 259, 148, 15), iw('-', 297, 148, 3), iw('7:30 - 15:30', 317, 148, 30),
+    // the legend column: no "Fecha:", nothing read
+    iw('A = Entrenamiento', 425, 120, 60),
+  ];
+  const r = parseNetlinePdf([{ page: 1, width: 841, height: 595, items }]);
+  assert.equal(r.format, 'day-blocks');
+  assert.equal(r.period, '01Dec21 - 01Jan22');
+  assert.deepEqual(r.published.map(x => [x.date, x.day, x.dc, x.duty, x.dep, x.begin, x.end, x.arr, x.ac, x.crew]), [
+    ['1 Dec 21', 'Wed', '', 'VV', '', '', '', '', '', ''],
+    ['29 Dec 21', 'Wed', '', 'C/I', 'VLC', '07:50 Z', '', '', '', ''],
+    ['29 Dec 21', 'Wed', 'DHD', 'IB1001', 'VLC', '08:35 Z', '09:40 Z', 'MAD', 'CRK', ''],
+    ['29 Dec 21', 'Wed', '', 'IB1002', 'MAD', '10:35 Z', '12:25 Z', 'MLN', 'ATX', '(d) PEREZ(D)'],
+    ['1 Jan 22', 'Sat', '', 'LCA8', '', '07:30 Z', '15:30 Z', '', '', ''],
+  ]);
+});

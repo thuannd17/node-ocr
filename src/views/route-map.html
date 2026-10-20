@@ -33,6 +33,21 @@
     .gl-label { font-size: 11px; font-weight: 700; color: #1d2433; text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 0 3px #fff; pointer-events: none; white-space: nowrap; }
     .maplibregl-popup-content { font-size: 13px; }
     .routes { margin-top: 16px; padding: 0; overflow: hidden; }
+    /* wide screens: map | routes on one row, the same height; the routes scroll inside their card */
+    .map-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; height: calc(100vh - 330px); min-height: 380px; }
+    .map-col { min-width: 0; height: 100%; }
+    .map-row #map, .map-row #globe { height: 100%; min-height: 0; }
+    .map-row .routes { margin: 0; display: flex; flex-direction: column; min-height: 0; }
+    .routes-scroll { overflow: auto; flex: 1 1 auto; min-height: 0; }
+    .routes thead th { position: sticky; top: 0; z-index: 1; }
+    .routes .note:empty { display: none; }
+    html.no-table .map-row, html.embed .map-row { grid-template-columns: 1fr; }
+    @media (max-width: 900px) {
+      .map-row { display: block; height: auto; min-height: 0; }
+      .map-row #map, .map-row #globe { height: 62vh; min-height: 320px; }
+      .map-row .routes { margin-top: 16px; }
+      .routes-scroll { overflow-x: auto; }
+    }
     .routes h2 { font-size: 15px; margin: 0; padding: 12px 14px; border-bottom: 1px solid var(--border); color: var(--nav-bg); }
     .routes table { width: 100%; border-collapse: collapse; font-size: 13px; }
     .routes th, .routes td { padding: 7px 12px; border-bottom: 1px solid #f0f1f4; text-align: left; }
@@ -50,6 +65,7 @@
     html.embed .topnav, html.embed .page-header, html.embed #backLink, html.embed .routes { display: none !important; }
     html.embed .page { padding: 8px; }
     html.embed #map, html.embed #globe { height: calc(100vh - 150px); }
+    html.embed .map-row { height: auto; }
     html.no-table .routes { display: none; }
   </style>
 </head>
@@ -74,15 +90,20 @@
         <div class="legend" id="legend"></div>
       </div>
       <div class="stats" id="stats"></div>
+      <!-- the map (or globe) and the routes side by side, as tall as each other -->
+      <div class="map-row">
+      <div class="map-col">
       <div id="map"></div>
       <div id="globe" style="display:none"></div>
+      </div>
       <div class="card routes">
         <h2><i class="fa-solid fa-list" aria-hidden="true"></i> <span>Routes</span></h2>
-        <div style="overflow-x:auto"><table>
+        <div class="routes-scroll"><table>
           <thead><tr><th>Route</th><th class="num">Flights</th><th class="num">Distance</th><th>Rosters</th></tr></thead>
           <tbody id="routesBody"></tbody>
         </table></div>
         <div class="note" id="unknownNote"></div>
+      </div>
       </div>
     </div>
 

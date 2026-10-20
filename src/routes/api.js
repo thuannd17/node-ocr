@@ -13,7 +13,7 @@ import { runAcarsBenchmark, labeledAcars } from '../services/acars-benchmark.js'
 import { ocrLines, extractWithPaddleOCR } from '../services/paddle-ocr.js';
 import { extractImageWithModel, modelInfo } from '../services/pdf-ai-extract.js';
 import { saveLabelResult, savePredictedResult } from '../services/result-cache.js';
-import { syncMedia, localFile, readLabel, saveLabel, deleteFile, mediaErrorStatus, acars } from '../services/media-client.js';
+import { syncMedia, localFile, readLabel, saveLabel, deleteFile, mediaIndex, mediaErrorStatus, acars } from '../services/media-client.js';
 import sharp from 'sharp';
 import { isDataName, kindOf, extOf } from '../utils/data-files.js';
 import { UPLOADS_DIR, CACHE_DIR } from '../utils/paths.js';
@@ -229,6 +229,59 @@ router.delete('/files', async (req, res) => {
   } catch (e) {
     mediaFail(res, e, 'DELETE /api/files');
   }
+});
+
+/**
+ * Byte-identical copies in the data (roster files and ACARS pictures): of each group of copies one stays (the one
+ * whose label was saved last, else the first by name), the others and their labels go to trash/<date>/.
+ *   GET  /api/files/duplicates          what would go: { roster: [{ name, keep, labeled }], acars: [...], labelsDiffer: n }
+ *   POST /api/files/delete-duplicates   { dry?: true } -> the same plus { deleted, failed: [{ name, error }] }
+ * `labelsDiffer`: groups whose copies' labels differ in their rows (not only in "_reviewedAt" and such);
+ * the kept copy's label wins, the others stay in the trash.
+ */
+const labelRows = (label) => JSON.stringify(label, (k, v) => (k.startsWith('_') ? undefined : v));
+async function duplicatePlan() {
+  const plan = { roster: [], acars: [], labelsDiffer: 0 };
+  for (const [key, index, read] of [['roster', await mediaIndex(true), readLabel], ['acars', await acars.mediaIndex(true), acars.readLabel]]) {
+    const labelAt = new Map(index.labels.map(l => [l.name, new Date(l.lastModified || 0).getTime()]));
+    const groups = new Map();
+    for (const f of [...index.files].sort((a, b) => a.name.localeCompare(b.name))) {
+      if (!f.md5) continue;
+      (groups.get(f.md5) || groups.set(f.md5, []).get(f.md5)).push(f.name);
+    }
+    for (const names of groups.values()) {
+      if (names.length < 2) continue;
+      const labeled = names.filter(n => labelAt.has(n));
+      const keep = labeled.sort((a, b) => labelAt.get(b) - labelAt.get(a) || a.localeCompare(b))[0] || names[0];
+      if (labeled.length > 1) {
+        const rows = new Set();
+        for (const n of labeled) rows.add(labelRows(await read(n)));
+        if (rows.size > 1) plan.labelsDiffer += 1;
+      }
+      for (const name of names) if (name !== keep) plan[key].push({ name, keep, labeled: labelAt.has(name) });
+    }
+  }
+  return plan;
+}
+
+router.get('/files/duplicates', async (req, res) => {
+  try { res.json(await duplicatePlan()); } catch (e) { mediaFail(res, e, 'GET /api/files/duplicates'); }
+});
+
+router.post('/files/delete-duplicates', async (req, res) => {
+  try {
+    const plan = await duplicatePlan();
+    if (req.body?.dry) return res.json({ ...plan, deleted: 0, failed: [] });
+    let deleted = 0;
+    const failed = [];
+    for (const { name } of plan.roster) {
+      try { await deleteFile(name); fs.rmSync(path.join(CACHE_DIR, 'parsed', `${name}.json`), { force: true }); deleted += 1; } catch (e) { failed.push({ name, error: e.message }); }
+    }
+    for (const { name } of plan.acars) {
+      try { await acars.deleteFile(name); deleted += 1; } catch (e) { failed.push({ name, error: e.message }); }
+    }
+    res.json({ ...plan, deleted, failed });
+  } catch (e) { mediaFail(res, e, 'POST /api/files/delete-duplicates'); }
 });
 
 // Serve raw image file (dùng cho <img src="/api/raw?name=...">)

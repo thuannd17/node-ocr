@@ -171,3 +171,68 @@ test('OCR models: versions in the store, active.json, statuses, delete to the tr
     delete process.env.OCR_REC_VERSION;
   }
 });
+
+test('/media upload: an admin adds roster files or ACARS pictures (deduplicated), wrong types are reported', async () => {
+  const { default: express } = await import('express');
+  const { default: mediaApi } = await import('../src/routes/media-api.js');
+  const server = express().use(express.json()).use('/api', mediaApi).listen(0);
+  const base = `http://localhost:${server.address().port}/api`;
+  try {
+    const pdf = crypto.randomBytes(300), pic = crypto.randomBytes(400);
+    const form = (target, files) => {
+      const f = new FormData();
+      f.append('target', target);
+      for (const [buf, name] of files) f.append('files', new Blob([buf]), name);
+      return { method: 'POST', body: f };
+    };
+    const r = await (await fetch(`${base}/media/upload`, form('roster', [[pdf, 'plan.pdf'], [pdf, 'same.pdf'], [pdf, 'notes.exe']]))).json();
+    assert.equal(r.items[0].isNew, true);
+    assert.match(r.items[0].name, /^[0-9a-f-]{36}\.pdf$/);
+    assert.deepEqual([r.items[1].name, r.items[1].isNew], [r.items[0].name, false]); // the same content once
+    assert.ok(r.items[2].error);
+    assert.deepEqual(await media.fileBytes(r.items[0].name), pdf);
+
+    const a = await (await fetch(`${base}/media/upload`, form('acars', [[pic, 'cockpit.jpg'], [pdf, 'plan.pdf']]))).json();
+    assert.match(a.items[0].name, /^[0-9a-f-]{36}\.jpg$/);
+    assert.ok(a.items[1].error); // ACARS: pictures only
+    assert.deepEqual(await media.acars.fileBytes(a.items[0].name), pic);
+    assert.equal(await media.fileBytes(a.items[0].name), null); // not among the roster files
+
+    assert.equal((await fetch(`${base}/media/upload`, form('nope', [[pic, 'x.jpg']]))).status, 400);
+    assert.equal((await fetch(`${base}/media/upload`, form('roster', []))).status, 400);
+  } finally {
+    server.close();
+  }
+});
+
+test('delete duplicates: one copy of each content stays (the labeled one first), the others and their labels go to the trash', async () => {
+  const { default: express } = await import('express');
+  const { default: api } = await import('../src/routes/api.js');
+  const server = express().use(express.json()).use('/api', api).listen(0);
+  const base = `http://localhost:${server.address().port}/api`;
+  try {
+    const img = crypto.randomBytes(600);
+    for (const n of ['dup-a.jpg', 'dup-b.jpg', 'dup-c.jpg']) await media.importFile(n, img); // three copies
+    await media.importLabel('dup-b.jpg', Buffer.from(JSON.stringify({ published: [], planned: [] }))); // the labeled one stays
+    const pic = crypto.randomBytes(300);
+    for (const n of ['ac-1.png', 'ac-2.png']) await media.acars.importFile(n, pic);
+
+    const plan = await (await fetch(`${base}/files/duplicates`)).json();
+    assert.deepEqual(plan.roster.filter(x => x.name.startsWith('dup-')).map(x => [x.name, x.keep]).sort(), [['dup-a.jpg', 'dup-b.jpg'], ['dup-c.jpg', 'dup-b.jpg']]);
+    assert.deepEqual(plan.acars.map(x => [x.name, x.keep]), [['ac-2.png', 'ac-1.png']]);
+
+    const dry = await (await fetch(`${base}/files/delete-duplicates`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"dry":true}' })).json();
+    assert.equal(dry.deleted, 0);
+    const r = await (await fetch(`${base}/files/delete-duplicates`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).json();
+    assert.ok(r.deleted >= 3);
+    assert.deepEqual(r.failed, []);
+    assert.equal(await media.fileBytes('dup-a.jpg'), null);
+    assert.equal(await media.fileBytes('dup-c.jpg'), null);
+    assert.deepEqual(await media.fileBytes('dup-b.jpg'), img);
+    assert.equal(await media.acars.fileBytes('ac-2.png'), null);
+    assert.deepEqual(await media.acars.fileBytes('ac-1.png'), pic);
+    assert.deepEqual((await (await fetch(`${base}/files/duplicates`)).json()).roster, []);
+  } finally {
+    server.close();
+  }
+});

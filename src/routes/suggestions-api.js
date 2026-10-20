@@ -8,6 +8,7 @@
 //   GET   /api/suggestions?status=pending|accepted|dismissed|all&ticket=open|in_progress|resolved|closed|all
 //         list (newest first); status = what happened to the file, ticket = the helpdesk's state
 //   GET   /api/suggestions/:id/file                                the file (CSV / Excel / TXT as an HTML table)
+//   GET   /api/suggestions/:id/download   the file as sent, under its original name (after Label it: from the data)
 //   POST  /api/suggestions/:id/accept   add the file to the data (deduplicated) -> { name } to label
 //   POST  /api/suggestions/:id/dismiss  { reason } not used: the file is deleted, the record kept, the ticket resolved
 //   PATCH /api/suggestions/:id         { ticket?, adminNote? } the helpdesk's state and the admins' own note
@@ -29,7 +30,7 @@ import { ACARS_FIELDS } from '../services/acars.js';
 import { extOf, kindOf } from '../utils/data-files.js';
 import {
   listSuggestions, getSuggestion, putSuggestion, patchSuggestion, suggestionFile, deleteSuggestionFile,
-  storeFile, mediaErrorStatus, acars,
+  storeFile, fileBytes, mediaErrorStatus, acars,
 } from '../services/media-client.js';
 
 const ID_RE = /^\d{8}-\d{6}-[0-9a-f]{6}$/;
@@ -131,6 +132,21 @@ router.get('/suggestions/:id/file', async (req, res) => {
     const tmp = path.join(os.tmpdir(), `roster-suggestion-${crypto.randomUUID()}.${meta.fileType}`);
     fs.writeFileSync(tmp, buf);
     try { res.type('html').send(previewHtml(tmp)); } finally { fs.rm(tmp, { force: true }, () => {}); }
+  } catch (e) { fail(res, e); }
+});
+
+// The file as it was sent, to work on it locally (e.g. a developer fixing how it is read). After Label it the
+// suggestion's own copy is gone: it comes from the data (roster files or the ACARS bucket) then.
+router.get('/suggestions/:id/download', async (req, res) => {
+  const meta = req.suggestion;
+  try {
+    let buf = await suggestionFile(meta.id);
+    if (!buf && meta.status === 'accepted' && meta.dataName) {
+      buf = meta.kind === 'acars' ? await acars.fileBytes(meta.dataName) : await fileBytes(meta.dataName);
+    }
+    if (!buf) return res.status(410).json({ error: 'The file of this suggestion was removed' });
+    res.attachment(meta.fileName || `suggestion-${meta.id}.${meta.fileType}`);
+    res.type(MIME[meta.fileType] || 'application/octet-stream').send(buf);
   } catch (e) { fail(res, e); }
 });
 

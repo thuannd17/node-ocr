@@ -52,7 +52,30 @@
     .pin { width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 12px; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.4); }
     .pin.dep { background: #2e7d32; } .pin.arr { background: #c62828; }
     .pin.dusk { background: #1f2a5c; } .pin.dawn { background: #f39c12; }
-    @media (max-width: 1000px) { .cols { grid-template-columns: 1fr; } #map { height: 360px; } }
+    /* Map | Globe switch; the globe with day and night moving over it while the flight plays */
+    .viewbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+    .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+    .seg button { border: none; background: #fff; padding: 6px 12px; font-size: 13px; cursor: pointer; display: inline-flex; gap: 6px; align-items: center; color: var(--text); }
+    .seg button + button { border-left: 1px solid var(--border); }
+    .seg button.on { background: var(--nav-bg); color: #fff; }
+    #globe { height: 460px; border-radius: 8px; border: 1px solid var(--border); background: #0b1020; overflow: hidden; position: relative; }
+    #globe .gl-msg { color: #fff; padding: 20px; font-size: 14px; }
+    .player { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px 12px; align-items: center; margin-top: 10px; }
+    .player .play { width: 38px; height: 38px; border-radius: 50%; border: none; background: var(--primary); color: #fff; cursor: pointer; font-size: 15px; display: inline-flex; align-items: center; justify-content: center; }
+    .player .play:hover { background: var(--primary-dark); }
+    .player input[type=range] { width: 100%; accent-color: var(--nav-bg); }
+    .player select { padding: 5px 6px; border: 1px solid var(--border); border-radius: 6px; font-size: 12px; background: #fff; }
+    .player .now { grid-column: 1 / -1; display: flex; gap: 8px 14px; flex-wrap: wrap; align-items: center; font-size: 13px; }
+    .player .now .clock { font-family: ui-monospace, Consolas, monospace; font-weight: 700; font-size: 15px; color: var(--nav-bg); }
+    .player .now label { display: inline-flex; gap: 5px; align-items: center; color: var(--muted); font-size: 12px; margin-left: auto; }
+    .plane-mk { color: #fff; font-size: 22px; text-shadow: 0 0 4px #000, 0 0 2px #000; pointer-events: none; }
+    .plane-mk.night { color: #ffd54f; }
+    .plane-mk.lf { font-size: 20px; line-height: 1; display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; }
+    /* the route as on the globe: NIGHT_COLOR / DAY_COLOR, airports as dots with their code */
+    .leaflet-tooltip.map-code { background: none; border: none; box-shadow: none; padding: 0 0 0 4px; font: 600 11px ui-monospace, Consolas, monospace; color: #fff; text-shadow: 0 0 3px #000, 0 0 2px #000; }
+    .leaflet-tooltip.map-code::before { display: none; }
+    .gl-code { font: 600 11px ui-monospace, Consolas, monospace; color: #fff; text-shadow: 0 0 3px #000, 0 0 2px #000; pointer-events: none; }
+    @media (max-width: 1000px) { .cols { grid-template-columns: 1fr; } #map, #globe { height: 360px; } }
   </style>
 </head>
 <body>
@@ -88,9 +111,21 @@
         <div class="field">
           <label for="rule">Night mode</label>
           <select id="rule">
-            <option value="civil">Civil twilight (sun below −6°): ICAO / EASA / FAA</option>
             <option value="sunset">Sunset → sunrise (−0.833°)</option>
+            <option value="civil">Civil twilight (sun below −6°): ICAO / EASA / FAA</option>
+            <option value="nautical">Nautical twilight (sun below −12°)</option>
+            <option value="fixed">Fixed hours: sunrise / sunset local time</option>
           </select>
+        </div>
+        <div class="field fixed-field" hidden>
+          <label for="sunrise">Sunrise (L)</label>
+          <input id="sunrise" type="time" step="60" value="06:00" title="Sunrise (local time)">
+          <div class="who">Local time at the aircraft (from its longitude)</div>
+        </div>
+        <div class="field fixed-field" hidden>
+          <label for="sunset">Sunset (L)</label>
+          <input id="sunset" type="time" step="60" value="18:00" title="Sunset (local time)">
+          <div class="who">Night: before sunrise and from sunset on</div>
         </div>
       </div>
       <div class="actions">
@@ -173,9 +208,11 @@
       const problem = !from ? __('Departure airport not found.') : !to ? __('Arrival airport not found.') : !off || !on ? __('Enter the off-block and on-block times.') : on <= off ? __('On-block must be after off-block.') : on - off > 24 * 3600000 ? __('Block time over 24 hours.') : '';
       if (problem) { $('formMsg').innerHTML = `<div class="msg error">${problem}</div>`; return; }
       const rule = $('rule').value;
-      const r = compute({ from, to, off, on, rule });
+      const sunrise = $('sunrise').value || '06:00', sunset = $('sunset').value || '18:00';
+      const r = compute({ from, to, off, on, rule, sunrise, sunset });
       const q = new URLSearchParams({ dep: $('dep').value.trim(), arr: $('arr').value.trim(), off: off.toISOString().slice(0, 16) + 'Z', on: on.toISOString().slice(0, 16) + 'Z' });
       if (rule !== 'civil') q.set('rule', rule);
+      if (rule === 'fixed') { q.set('sunrise', r.sunrise); q.set('sunset', r.sunset); }
       history[pushUrl ? 'pushState' : 'replaceState'](null, '', `/night-time?${q}`);
       document.title = `Night ${hmm(r.nightMs)} · ${from.code} → ${to.code}`;
       render(r, from, to);
@@ -190,7 +227,7 @@
           <td class="mono"><b>${hmm(s.to - s.from)}</b></td></tr>`).join('');
       $('result').innerHTML = `
         <div class="card">
-          <h2 style="margin-top:0;font-size:17px;color:var(--nav-bg)">${escapeHtml(from.code)} → ${escapeHtml(to.code)} <span class="sub">· ${utcText(r.segments[0].from)} → ${utcText(r.segments.at(-1).to)} · ${escapeHtml(__(RULES[r.rule].label))}</span></h2>
+          <h2 style="margin-top:0;font-size:17px;color:var(--nav-bg)">${escapeHtml(from.code)} → ${escapeHtml(to.code)} <span class="sub">· ${utcText(r.segments[0].from)} → ${utcText(r.segments.at(-1).to)} · ${escapeHtml(__(RULES[r.rule].label, { sunrise: r.sunrise, sunset: r.sunset }))}</span></h2>
           <div class="stats">
             <div class="stat night"><div class="k">Night time</div><div class="v">${hmm(r.nightMs)}</div><div class="s">${nightPct}% block time</div></div>
             <div class="stat"><div class="k">Day time</div><div class="v">${hmm(r.dayMs)}</div><div class="s">${100 - nightPct}%</div></div>
@@ -201,9 +238,26 @@
           </div>
           <div class="cols">
             <div>
+              <div class="viewbar">
+                <span class="seg" id="viewSeg" role="group" aria-label="${__('View')}">
+                  <button type="button" data-view="map"><i class="fa-solid fa-map" aria-hidden="true"></i> ${__('Map')}</button>
+                  <button type="button" data-view="globe"><i class="fa-solid fa-earth-americas" aria-hidden="true"></i> ${__('Globe')}</button>
+                </span>
+                <span class="sub" id="viewHint"></span>
+              </div>
               <div id="map" role="img" aria-label="${__('Great circle route {from} → {to}', { from: escapeHtml(from.code), to: escapeHtml(to.code) })}"></div>
-              <div class="legend"><span><span class="ln" style="background:#1f2a5c"></span>${__('Night flying')}</span><span><span class="ln" style="background:#f39c12"></span>${__('Day flying')}</span>
-                <span><i class="fa-solid fa-moon" style="color:#1f2a5c" aria-hidden="true"></i> ${__('night starts')}</span><span><i class="fa-solid fa-sun" style="color:#f39c12" aria-hidden="true"></i> ${__('night ends')}</span>
+              <div id="globe" hidden role="img" aria-label="${__('The flight on a globe, with day and night as they move')}"></div>
+              <div class="player" id="player" hidden>
+                <button type="button" class="play" id="playBtn" title="${__('Play')}" aria-label="${__('Play')}"><i class="fa-solid fa-play" aria-hidden="true"></i></button>
+                <input type="range" id="timeRange" min="0" max="1000" step="1" value="0" aria-label="${__('Time')}">
+                <select id="speedSel" aria-label="${__('Speed')}" title="${__('Flight minutes played per second')}">
+                  ${[5, 15, 30].map(m => `<option value="${m}"${m === 15 ? ' selected' : ''}>${__('{n} min / s', { n: m })}</option>`).join('')}
+                </select>
+                <div class="now"><span class="clock" id="nowClock"></span><span id="nowTag"></span><span class="sub" id="nowInfo"></span>
+                  <label><input type="checkbox" id="followChk" checked> ${__('Follow the aircraft')}</label></div>
+              </div>
+              <div class="legend"><span><span class="ln" style="background:${NIGHT_COLOR}"></span>${__('Night flying')}</span><span><span class="ln" style="background:${DAY_COLOR}"></span>${__('Day flying')}</span>
+                <span><i class="fa-solid fa-circle" style="color:${NIGHT_COLOR};font-size:9px" aria-hidden="true"></i> ${__('night starts')}</span><span><i class="fa-solid fa-circle" style="color:${DAY_COLOR};font-size:9px" aria-hidden="true"></i> ${__('night ends')}</span>
                 <span>${__('Initial course {deg}°', { deg: Math.round(r.courseDeg) })}</span></div>
             </div>
             <div>
@@ -215,36 +269,249 @@
         </div>`;
       drawMap(r, from, to);
       drawChart(r);
+      setupViews(r, from, to);
       $('result').scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 
+    // the same colours on the map, the globe and the legend
+    const NIGHT_COLOR = '#3d5afe', DAY_COLOR = '#f39c12';
     function drawMap(r, from, to) {
       if (map) { map.remove(); map = null; }
       if (!window.L) { $('map').innerHTML = `<div class="msg error">${__('Could not load the map library.')}</div>`; return; }
       map = L.map('map', { worldCopyJump: false, scrollWheelZoom: false });
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' }).addTo(map);
-      // One polyline per segment, coloured by night / day
+      // the night bands under everything, the flown part (solid) over the whole route (dashed)
+      map.createPane('nightPane').style.zIndex = 350;
+      map.createPane('flownPane').style.zIndex = 420;
       for (const s of r.segments) {
         const pts = r.samples.filter(p => p.t >= +s.from && p.t <= +s.to).map(p => [p.lat, p.lon]);
-        L.polyline(pts, { color: s.night ? '#1f2a5c' : '#f39c12', weight: 5, opacity: 0.95 })
+        L.polyline(pts, { color: s.night ? NIGHT_COLOR : DAY_COLOR, weight: 3, opacity: 0.55, dashArray: '6 6' })
           .bindTooltip(`${s.night ? 'Night' : 'Day'} ${utcText(s.from, false)} – ${utcText(s.to, false)} (${hmm(s.to - s.from)})`, { sticky: true }).addTo(map);
       }
-      const icon = (cls, glyph) => L.divIcon({ className: '', html: `<div class="pin ${cls}"><i class="fa-solid ${glyph}"></i></div>`, iconSize: [26, 26], iconAnchor: [13, 13] });
       const first = r.samples[0], last = r.samples.at(-1);
-      L.marker([first.lat, first.lon], { icon: icon('dep', 'fa-plane-departure'), title: from.code }).addTo(map)
-        .bindPopup(`<b>${escapeHtml(from.code)}</b> ${escapeHtml(from.name)}<br>Off-block ${utcText(r.segments[0].from)}<br>${__('Sun {deg}°', { deg: r.segments[0].fromAlt.toFixed(1) })} · ${r.takeoffNight ? 'night' : 'day'}`);
-      L.marker([last.lat, last.lon], { icon: icon('arr', 'fa-plane-arrival'), title: to.code }).addTo(map)
-        .bindPopup(`<b>${escapeHtml(to.code)}</b> ${escapeHtml(to.name)}<br>On-block ${utcText(r.segments.at(-1).to)}<br>${__('Sun {deg}°', { deg: r.segments.at(-1).toAlt.toFixed(1) })} · ${r.landingNight ? 'night' : 'day'}`);
-      const edges = [];
+      const end = (p, color, ap, html) => L.circleMarker([p.lat, p.lon], { pane: 'flownPane', radius: 6, color: '#fff', weight: 2, fillColor: color, fillOpacity: 1 })
+        .bindTooltip(ap.code, { permanent: true, direction: 'right', offset: [6, 0], className: 'map-code' }).bindPopup(html).addTo(map);
+      end(first, '#2e7d32', from, `<b>${escapeHtml(from.code)}</b> ${escapeHtml(from.name)}<br>Off-block ${utcText(r.segments[0].from)}<br>${__('Sun {deg}°', { deg: r.segments[0].fromAlt.toFixed(1) })} · ${r.takeoffNight ? 'night' : 'day'}`);
+      end(last, '#c62828', to, `<b>${escapeHtml(to.code)}</b> ${escapeHtml(to.name)}<br>On-block ${utcText(r.segments.at(-1).to)}<br>${__('Sun {deg}°', { deg: r.segments.at(-1).toAlt.toFixed(1) })} · ${r.landingNight ? 'night' : 'day'}`);
+      // where night starts / ends: a small dot in that colour
       r.segments.slice(1).forEach((s) => {
-        const m = L.marker([s.fromPos.lat, s.fromPos.lon], { icon: icon(s.night ? 'dusk' : 'dawn', s.night ? 'fa-moon' : 'fa-sun'), zIndexOffset: 500 }).addTo(map)
+        L.circleMarker([s.fromPos.lat, s.fromPos.lon], { pane: 'flownPane', radius: 5, color: '#fff', weight: 2, fillColor: s.night ? NIGHT_COLOR : DAY_COLOR, fillOpacity: 1 }).addTo(map)
           .bindPopup(`<b>${s.night ? __('Night starts') : __('Night ends')}</b><br>${utcText(s.from)}<br>${latLonText(s.fromPos)}<br>${__('Sun {deg}°', { deg: s.fromAlt.toFixed(2) })}<br>${__('{time} after off-block', { time: hmm(s.from - r.segments[0].from) })}`);
-        edges.push(m);
       });
       map.fitBounds(L.latLngBounds(r.samples.map(p => [p.lat, p.lon])), { padding: [30, 30] });
-      if (edges.length) edges[0].openPopup();
       map.on('focus', () => map.scrollWheelZoom.enable());
       map.on('blur', () => map.scrollWheelZoom.disable());
+    }
+
+    // ---- Map | Globe (the choice is kept); the globe plays the flight with day and night moving ----
+    const { nightPolygon, fixedNightPolygon, sunAltitude, courseDeg, pointAt } = window.NightTime;
+    let view = 'map';
+    try { view = localStorage.getItem('night-time:view') === 'globe' ? 'globe' : 'map'; } catch { /* storage blocked */ }
+    let current = null; // { r, from, to }
+    function setupViews(r, from, to) {
+      stopPlay();
+      // a new result rebuilt the page: the globe of the last one is gone with its box
+      if (gl) { gl.remove(); gl = null; glReady = null; planeMk = null; codeMks = []; }
+      mapLayers = null; // drawMap made a new Leaflet map
+      current = { r, from, to };
+      tStart = +r.segments[0].from; tEnd = +r.segments.at(-1).to;
+      // start at the first night edge if there is one, else at off-block
+      tNow = r.segments.length > 1 ? +r.segments[1].from : tStart;
+      $('viewSeg').addEventListener('click', (e) => {
+        const b = e.target.closest('[data-view]');
+        if (b && b.dataset.view !== view) { view = b.dataset.view; try { localStorage.setItem('night-time:view', view); } catch { /* storage blocked */ } showView(); }
+      });
+      $('playBtn').addEventListener('click', () => (playing ? stopPlay() : startPlay()));
+      $('timeRange').addEventListener('input', () => { const t = rangeTime(); stopPlay(); setTime(t, true); });
+      showView();
+    }
+    function showView() {
+      document.querySelectorAll('#viewSeg [data-view]').forEach(b => b.classList.toggle('on', b.dataset.view === view));
+      $('map').hidden = view !== 'map';
+      $('globe').hidden = view !== 'globe';
+      $('player').hidden = false;
+      $('viewHint').textContent = __('Play the flight: day and night move with the time.');
+      if (view === 'map') { if (map) setTimeout(() => { map.invalidateSize(); setTime(tNow, true); }, 0); return; }
+      drawGlobe().catch(err => { $('globe').innerHTML = `<div class="gl-msg">${escapeHtml(err.message)}</div>`; });
+    }
+
+    // MapLibre GL, loaded the first time the globe is shown (as on /route-map)
+    let gl = null, glReady = null, maplibregl = null, planeMk = null, codeMks = [];
+    const loadOnce = (tag, attrs) => new Promise((resolve, reject) => {
+      const el = Object.assign(document.createElement(tag), attrs);
+      el.onload = resolve; el.onerror = () => reject(new Error(`could not load ${attrs.src || attrs.href}`));
+      document.head.appendChild(el);
+    });
+    const glZoom = () => { const el = $('globe'); return Math.log2((0.8 * Math.min(el.clientWidth || 500, el.clientHeight || 460) * Math.PI) / 512); };
+    // the night as four bands, each darker: sun below 0°, -6°, -12°, -18°
+    const BANDS = [0, -6, -12, -18];
+    function ensureGlobe() {
+      return (glReady ||= (async () => {
+        await loadOnce('link', { rel: 'stylesheet', href: '/assets/maplibre/maplibre-gl.css' });
+        try { maplibregl = await import('/assets/maplibre/maplibre-gl.mjs'); } catch {
+          await loadOnce('script', { src: '/assets/maplibre/maplibre-gl.js' });
+          maplibregl = window.maplibregl;
+        }
+        gl = new maplibregl.Map({
+          container: 'globe',
+          style: {
+            version: 8,
+            projection: { type: 'globe' },
+            sky: { 'atmosphere-blend': ['interpolate', ['linear'], ['zoom'], 0, 1, 5, 1, 7, 0] },
+            sources: {
+              osm: {
+                type: 'raster', tileSize: 256, maxzoom: 12,
+                tiles: ['https://a.tile.openstreetmap.org/{z}/{x}/{y}.png', 'https://b.tile.openstreetmap.org/{z}/{x}/{y}.png', 'https://c.tile.openstreetmap.org/{z}/{x}/{y}.png'],
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+              },
+            },
+            layers: [{ id: 'osm', type: 'raster', source: 'osm' }],
+          },
+          center: [0, 20], zoom: glZoom(), attributionControl: { compact: true },
+        });
+        gl.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-left');
+        await new Promise(res => gl.once('load', res));
+        const empty = { type: 'FeatureCollection', features: [] };
+        for (const id of ['night', 'route', 'flown', 'ends']) gl.addSource(id, { type: 'geojson', data: empty });
+        gl.addLayer({ id: 'night', type: 'fill', source: 'night', paint: { 'fill-color': '#06103a', 'fill-opacity': ['get', 'a'], 'fill-antialias': false } });
+        gl.addLayer({ id: 'route', type: 'line', source: 'route', layout: { 'line-cap': 'round', 'line-join': 'round' },
+          paint: { 'line-color': ['get', 'color'], 'line-width': 3, 'line-opacity': 0.55, 'line-dasharray': [2, 1.5] } });
+        gl.addLayer({ id: 'flown', type: 'line', source: 'flown', layout: { 'line-cap': 'round', 'line-join': 'round' },
+          paint: { 'line-color': ['get', 'color'], 'line-width': 5 } });
+        gl.addLayer({ id: 'ends', type: 'circle', source: 'ends', paint: { 'circle-radius': 5, 'circle-color': ['get', 'color'], 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 } });
+        return gl;
+      })());
+    }
+
+    async function drawGlobe() {
+      await ensureGlobe();
+      gl.resize();
+      const { r, from, to } = current;
+      const line = (pts) => pts.map(p => [p.lon, p.lat]);
+      const segFeatures = (upTo) => r.segments.map(sg => {
+        const pts = r.samples.filter(p => p.t >= +sg.from && p.t <= Math.min(+sg.to, upTo));
+        return pts.length > 1 ? { type: 'Feature', properties: { color: sg.night ? NIGHT_COLOR : DAY_COLOR }, geometry: { type: 'LineString', coordinates: line(pts) } } : null;
+      }).filter(Boolean);
+      current.flownFeatures = segFeatures;
+      gl.getSource('route').setData({ type: 'FeatureCollection', features: segFeatures(Infinity) });
+      const a = r.samples[0], b = r.samples.at(-1);
+      gl.getSource('ends').setData({ type: 'FeatureCollection', features: [
+        { type: 'Feature', properties: { color: '#2e7d32' }, geometry: { type: 'Point', coordinates: [a.lon, a.lat] } },
+        { type: 'Feature', properties: { color: '#c62828' }, geometry: { type: 'Point', coordinates: [b.lon, b.lat] } }] });
+      for (const m of codeMks) m.remove();
+      codeMks = [[from, a], [to, b]].map(([ap, p]) => new maplibregl.Marker({ element: Object.assign(document.createElement('div'), { className: 'gl-code', textContent: ap.code }), anchor: 'left', offset: [8, 0], opacityWhenCovered: '0' })
+        .setLngLat([p.lon, p.lat]).addTo(gl));
+      if (!planeMk) {
+        const el = Object.assign(document.createElement('div'), { className: 'plane-mk', innerHTML: '<i class="fa-solid fa-plane" aria-hidden="true"></i>' });
+        planeMk = new maplibregl.Marker({ element: el, rotationAlignment: 'map', pitchAlignment: 'map' }).setLngLat([a.lon, a.lat]).addTo(gl);
+      }
+      setTime(tNow, true);
+      gl.jumpTo({ center: [posAt(tNow).lon, posAt(tNow).lat], zoom: glZoom() });
+    }
+
+    let tStart = 0, tEnd = 0, tNow = 0, playing = false, raf = 0, lastFrame = 0, lastNight = 0, lastFlown = 0;
+    const rangeTime = () => tStart + (Number($('timeRange').value) / 1000) * (tEnd - tStart);
+    const posAt = (t) => {
+      const { r } = current, f = Math.min(1, Math.max(0, (t - tStart) / (tEnd - tStart || 1)));
+      const p = pointAt(r.samples[0], r.samples.at(-1), f);
+      return p;
+    };
+    // Leaflet: the night bands under the route, a light halo under the flown part, the aircraft on top
+    let mapLayers = null;
+    function ensureMapLayers() {
+      if (!map || !window.L) return null;
+      if (mapLayers) return mapLayers;
+      const icon = L.divIcon({ className: '', html: '<div class="plane-mk lf"><i class="fa-solid fa-plane" aria-hidden="true"></i></div>', iconSize: [24, 24], iconAnchor: [12, 12] });
+      mapLayers = {
+        night: L.layerGroup().addTo(map),
+        flown: L.layerGroup().addTo(map),
+        plane: L.marker([0, 0], { icon, interactive: false, keyboard: false, zIndexOffset: 1000 }).addTo(map),
+      };
+      return mapLayers;
+    }
+    // the samples' longitudes are unwrapped (a line across 180° does not jump): the aircraft follows them
+    const unwrapNear = (t, lon) => {
+      const s = current.r.samples, i = Math.round(((t - tStart) / (tEnd - tStart || 1)) * (s.length - 1));
+      const ref = s[Math.min(s.length - 1, Math.max(0, i))].lon;
+      return lon + 360 * Math.round((ref - lon) / 360);
+    };
+
+    function setTime(t, force = false) {
+      if (!current) return;
+      tNow = Math.min(tEnd, Math.max(tStart, t));
+      const { r } = current;
+      $('timeRange').value = String(Math.round(((tNow - tStart) / (tEnd - tStart || 1)) * 1000));
+      const p = posAt(tNow), ahead = posAt(Math.min(tEnd, tNow + 60000)), behind = posAt(Math.max(tStart, tNow - 60000));
+      const course = tNow + 60000 <= tEnd ? courseDeg(p, ahead) : courseDeg(behind, p);
+      const alt = sunAltitude(tNow, p), night = r.isNight(tNow, p);
+      // the aircraft moves every frame (smooth); the flown line and the night bands are redrawn
+      // ~10 and ~8 times a second (they change slowly, and redrawing them each frame would stutter)
+      const nowMs = performance.now();
+      const redrawFlown = force || nowMs - lastFlown > 100, redrawNight = force || nowMs - lastNight > 120;
+      if (redrawFlown) lastFlown = nowMs;
+      if (redrawNight) lastNight = nowMs;
+      const bands = !redrawNight ? null : r.rule === 'fixed'
+        ? [fixedNightPolygon(tNow, r.sunrise, r.sunset)].filter(Boolean).map(g => ({ g, a: 0.45 }))
+        : BANDS.map(h => ({ g: nightPolygon(tNow, h, 144), a: 0.17 }));
+      const follow = $('followChk').checked && playing;
+      if (view === 'globe' && gl && planeMk) {
+        planeMk.setLngLat([p.lon, p.lat]).setRotation(course - 90); // the icon points east
+        planeMk.getElement().classList.toggle('night', night);
+        if (redrawFlown) gl.getSource('flown').setData({ type: 'FeatureCollection', features: current.flownFeatures(tNow) });
+        if (bands) gl.getSource('night').setData({ type: 'FeatureCollection', features: bands.map(({ g, a }) => ({ type: 'Feature', properties: { a }, geometry: g })) });
+        if (follow) gl.jumpTo({ center: [p.lon, p.lat] });
+      } else if (view === 'map' && ensureMapLayers()) {
+        const lon = unwrapNear(tNow, p.lon);
+        mapLayers.plane.setLatLng([p.lat, lon]);
+        const el = mapLayers.plane.getElement()?.querySelector('.plane-mk');
+        if (el) { el.style.transform = `rotate(${course - 90}deg)`; el.classList.toggle('night', night); }
+        if (redrawFlown) {
+          mapLayers.flown.clearLayers();
+          for (const sg of r.segments) {
+            if (+sg.from > tNow) break;
+            const pts = r.samples.filter(q => q.t >= +sg.from && q.t <= Math.min(+sg.to, tNow)).map(q => [q.lat, q.lon]);
+            if (tNow < +sg.to) pts.push([p.lat, lon]);
+            if (pts.length > 1) L.polyline(pts, { pane: 'flownPane', color: sg.night ? NIGHT_COLOR : DAY_COLOR, weight: 5, opacity: 1, lineCap: 'round', interactive: false }).addTo(mapLayers.flown);
+          }
+        }
+        if (bands) {
+          mapLayers.night.clearLayers();
+          // three copies: the route's longitudes may run past ±180
+          for (const { g, a } of bands) for (const shift of [-360, 0, 360]) {
+            L.polygon(g.coordinates[0].map(([x, y]) => [y, x + shift]), { pane: 'nightPane', stroke: false, fillColor: '#06103a', fillOpacity: a, interactive: false }).addTo(mapLayers.night);
+          }
+        }
+        if (follow) map.panTo([p.lat, lon], { animate: false });
+      }
+      const shown = new Date(Math.floor(tNow / 60000) * 60000); // hh:mm, no seconds
+      $('nowClock').textContent = `${pad(shown.getUTCDate())}/${pad(shown.getUTCMonth() + 1)} ${pad(shown.getUTCHours())}:${pad(shown.getUTCMinutes())}Z`;
+      $('nowTag').innerHTML = `<span class="tag ${night ? 'night' : 'day'}"><i class="fa-solid ${night ? 'fa-moon' : 'fa-sun'}" aria-hidden="true"></i> ${night ? __('Night') : __('Day')}</span>`;
+      $('nowInfo').textContent = `${__('sun {deg}°', { deg: alt.toFixed(1) })} · ${latLonText(p)} · ${__('{time} after off-block', { time: hmm(Math.floor((tNow - tStart) / 60000) * 60000) })}`;
+    }
+    function frame(ts) {
+      if (!playing) return;
+      const dt = lastFrame ? ts - lastFrame : 0;
+      lastFrame = ts;
+      const t = tNow + (dt / 1000) * Number($('speedSel').value) * 60000;
+      setTime(t);
+      if (tNow >= tEnd) { stopPlay(); return; }
+      raf = requestAnimationFrame(frame);
+    }
+    function startPlay() {
+      if (!current || (view === 'globe' && !gl)) return;
+      if (tNow >= tEnd) setTime(tStart, true);
+      if (map) map.closePopup(); // the night-edge popup would hide the aircraft
+      playing = true; lastFrame = 0;
+      $('playBtn').innerHTML = '<i class="fa-solid fa-pause" aria-hidden="true"></i>';
+      $('playBtn').title = __('Pause');
+      raf = requestAnimationFrame(frame);
+    }
+    function stopPlay() {
+      playing = false;
+      cancelAnimationFrame(raf);
+      const b = document.getElementById('playBtn');
+      if (b) { b.innerHTML = '<i class="fa-solid fa-play" aria-hidden="true"></i>'; b.title = __('Play'); }
+      if (current && tNow) setTime(tNow, true);
     }
 
     // Sun altitude under the aircraft over the flight, the night limit dashed, night shaded.
@@ -266,8 +533,8 @@
         <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${__('Sun altitude over time')}">
           ${shades}${yTicks.join('')}
           <line x1="${L0}" x2="${W - R0}" y1="${y(0)}" y2="${y(0)}" stroke="#999"/>
-          <line x1="${L0}" x2="${W - R0}" y1="${y(r.limit)}" y2="${y(r.limit)}" stroke="#1f2a5c" stroke-dasharray="5 4"/>
-          <text x="${W - R0 - 2}" y="${y(r.limit) - 4}" text-anchor="end" font-size="10" fill="#1f2a5c">night &lt; ${r.limit}°</text>
+          ${r.limit == null ? '' : `<line x1="${L0}" x2="${W - R0}" y1="${y(r.limit)}" y2="${y(r.limit)}" stroke="#1f2a5c" stroke-dasharray="5 4"/>
+          <text x="${W - R0 - 2}" y="${y(r.limit) - 4}" text-anchor="end" font-size="10" fill="#1f2a5c">night &lt; ${r.limit}°</text>`}
           <path d="${path}" fill="none" stroke="#f39c12" stroke-width="2.5"/>
           <line x1="${L0}" x2="${W - R0}" y1="${H - B0}" y2="${H - B0}" stroke="#999"/>${xTicks.join('')}
         </svg>`;
@@ -281,7 +548,9 @@
       setTimeout(() => { $('copyLinkBtn').innerHTML = '<i class="fa-solid fa-link" aria-hidden="true"></i> Copy link'; }, 1500);
     });
 
-    // /night-time?dep=VIE&arr=PRN&off=2025-03-11T21:45Z&on=2025-03-11T23:20Z[&rule=sunset]  (links from /calendar)
+    // /night-time?dep=VIE&arr=PRN&off=2025-03-11T21:45Z&on=2025-03-11T23:20Z[&rule=sunset|nautical|fixed[&sunrise=06:00&sunset=18:00]]  (links from /calendar)
+    const showFixed = () => document.querySelectorAll('.fixed-field').forEach(f => { f.hidden = $('rule').value !== 'fixed'; });
+    $('rule').addEventListener('change', showFixed);
     function fromUrl() {
       const q = new URLSearchParams(location.search);
       $('dep').value = q.get('dep') || '';
@@ -290,6 +559,10 @@
       $('off').value = iso(q.get('off'));
       $('on').value = iso(q.get('on'));
       $('rule').value = RULES[q.get('rule')] ? q.get('rule') : 'civil';
+      const clock = (v, d) => (/^\d{1,2}:\d{2}$/.test(v || '') ? v.padStart(5, '0') : d);
+      $('sunrise').value = clock(q.get('sunrise'), '06:00');
+      $('sunset').value = clock(q.get('sunset'), '18:00');
+      showFixed();
       showBlock();
       if ($('dep').value && $('arr').value && $('off').value && $('on').value) run(false).catch(err => { $('formMsg').innerHTML = `<div class="msg error">${escapeHtml(err.message)}</div>`; });
       else { showWho('dep'); showWho('arr'); $('dep').focus(); }

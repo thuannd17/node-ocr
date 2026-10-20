@@ -27,6 +27,15 @@
 
     /* File tree: the whole page; a file opens in the viewer popup */
     .tree-tools { display: flex; gap: 8px 16px; align-items: center; flex-wrap: wrap; }
+    .toolbar { padding: 12px 14px; margin-bottom: 16px; }
+    .toolbar .right { margin-left: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    /* toolbar buttons as on /media: outlined; a red outline for deleting */
+    button.tb { display: inline-flex; gap: 6px; align-items: center; padding: 7px 12px; font-size: 13px; white-space: nowrap; }
+    button.tb.outline { background: #fff; color: var(--primary); border: 1px solid var(--primary); }
+    button.tb.outline:hover:not(:disabled) { background: #eef4ff; }
+    button.tb.danger { background: #fff; color: #c62828; border: 1px solid #e5a3a3; }
+    button.tb.danger:hover:not(:disabled) { background: #fdecea; }
+    @media (max-width: 700px) { .toolbar .right { margin-left: 0; } .tree-tools input[type=search] { width: 100%; } }
     .tree-tools input[type=search] { padding: 6px 8px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px; width: 260px; max-width: 100%; }
     .tree-tools label { font-size: 12px; color: var(--muted); display: flex; gap: 6px; align-items: center; }
     .tree-tools .spacer { flex: 1; }
@@ -153,13 +162,19 @@
     <p class="subtitle" data-i18n>Ground truth labels, used to measure accuracy and to train the models. Files and labels are kept in MinIO (see <a href="/media">Media</a>).</p>
   </div>
 
+  <!-- Toolbar (as on /media, /helpdesk): find and filter the files, tidy the data -->
+  <div class="card toolbar tree-tools">
+    <input type="search" id="treeSearch" placeholder="Search by file name…" aria-label="Search by file name" />
+    <label><input type="checkbox" id="onlyTodo" /> Only files without a label</label>
+    <label><input type="checkbox" id="showDups" /> Show duplicate images</label>
+    <div class="right">
+      <button class="tb danger" id="delDups" hidden title="Remove every copy of a file whose content is already in the data, with its label (one of each stays: the one whose label was saved last). They go to trash/&lt;date&gt;/ in MinIO."><i class="fa-solid fa-clone" aria-hidden="true"></i> <span>Delete duplicates</span></button>
+      <button class="tb outline" id="treeRefresh" title="Refresh" aria-label="Refresh"><i class="fa-solid fa-rotate" aria-hidden="true"></i></button>
+    </div>
+  </div>
+
   <!-- File tree: click a file to open it in the viewer -->
   <div class="panel">
-    <div class="tree-tools">
-      <input type="search" id="treeSearch" placeholder="Search by file name…" aria-label="Search by file name" />
-      <label><input type="checkbox" id="onlyTodo" /> Only files without a label</label>
-      <label><input type="checkbox" id="showDups" /> Show duplicate images</label>
-    </div>
     <ul class="tree" id="tree"><li class="empty">Loading…</li></ul>
   </div>
   </main>
@@ -788,6 +803,40 @@
       }
     }
 
+    // ---------- Delete every duplicate (byte-identical copies) and its label: /api/files/delete-duplicates ----------
+    function updateDupButton() {
+      const n = files.filter(f => f.duplicateOf).length;
+      $('delDups').hidden = !n;
+      $('delDups').querySelector('span').textContent = __('Delete duplicates ({n})', { n });
+    }
+    $('delDups').addEventListener('click', async () => {
+      try {
+        const plan = await (await fetch('/api/files/duplicates')).json();
+        if (plan.error) throw new Error(plan.error);
+        const all = [...plan.roster, ...plan.acars];
+        if (!all.length) { await loadFiles(); renderTree(); return; }
+        const labeled = all.filter(x => x.labeled).length;
+        let question = __('Delete {n} duplicate files ({l} of them labeled)? One copy of each stays (the one whose label was saved last).', { n: all.length, l: labeled });
+        if (plan.labelsDiffer) question += `\n\n${__('{n} group(s) have copies with different labels: the kept copy\'s label stays, the others go to the trash too.', { n: plan.labelsDiffer })}`;
+        question += `\n\n${__('They are moved to trash/<date>/ in MinIO (move them back there to restore them).')}`;
+        if (!confirm(question)) return;
+        if (viewerOpen() && current && all.some(x => x.name === current.name)) { if (!confirmLeave()) return; setDirty(false); closeViewer(); current = null; }
+        $('delDups').disabled = true;
+        const res = await fetch('/api/files/delete-duplicates', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+        const r = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(r.error || 'HTTP ' + res.status);
+        await loadFiles();
+        renderTree();
+        alert(r.failed.length
+          ? __('Deleted {n} duplicate files; {f} failed: {list}', { n: r.deleted, f: r.failed.length, list: r.failed.map(x => x.name).join(', ') })
+          : __('Deleted {n} duplicate files (moved to the trash in MinIO).', { n: r.deleted }));
+      } catch (e) {
+        alert(__('Could not remove it: {error}', { error: e.message }));
+      } finally {
+        $('delDups').disabled = false;
+      }
+    });
+
     // ---------- Init ----------
     async function loadFiles() {
       const [img, pdf, ac] = await Promise.all([
@@ -805,6 +854,7 @@
       // roster files, then ACARS; unlabeled first inside each folder, so new uploads are easy to find
       files.sort((a, b) => (a.kind === 'acars') - (b.kind === 'acars') || folderOf(a).localeCompare(folderOf(b)) || (a.done - b.done) || a.name.localeCompare(b.name));
       updateTodo();
+      updateDupButton();
     }
 
     // Remove a file that is wrong or not wanted for training. The server moves the
@@ -847,6 +897,10 @@
     $('treeSearch').addEventListener('input', renderTree);
     $('onlyTodo').addEventListener('change', renderTree);
     $('showDups').addEventListener('change', renderTree);
+    $('treeRefresh').addEventListener('click', async () => {
+      $('treeRefresh').disabled = true;
+      try { await loadFiles(); renderTree(); } catch (e) { alert(__('Could not do it: {error}', { error: e.message })); } finally { $('treeRefresh').disabled = false; }
+    });
     $('prev').onclick = () => step(-1);
     $('next').onclick = () => step(1);
     $('saveBtn').onclick = saveLabel;

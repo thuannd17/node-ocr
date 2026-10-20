@@ -147,3 +147,17 @@ test('an ACARS suggestion: sent from /acars with the fields read; Label it puts 
   assert.ok(fs.existsSync(path.join(tmp, 'store', '_acars-ocr', 'files', acc.name))); // the ACARS bucket, flat
   assert.ok(!fs.existsSync(path.join(tmp, 'store', 'files', 'png', acc.name)));      // not the roster data
 });
+
+test('download a suggestion\'s file under its original name, also after Label it (from the data)', async () => {
+  const text = `download test ${Date.now()} ${Math.random()}`;
+  const { id } = await (await roster(text)).json();
+  const get = () => fetch(`${base}/suggestions/${id}/download`);
+  let res = await get();
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get('content-disposition'), /attachment; filename="my roster\.txt"/);
+  assert.equal(await res.text(), text);
+  await fetch(`${base}/suggestions/${id}/accept`, { method: 'POST' });
+  res = await get();
+  assert.equal(res.status, 200);
+  assert.equal(await res.text(), text);
+});

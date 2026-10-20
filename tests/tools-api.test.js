@@ -21,6 +21,14 @@ test('POST /api/night-time/calc: night, day and block minutes with the day / nig
   assert.equal(b.nightMinutes + b.dayMinutes, b.blockMinutes);
   assert.deepEqual(b.segments.map(s => s.night), [false, true, false]);
   assert.equal(b.track, undefined);
+  const naut = await (await night({ dep: 'VIE', arr: 'HAN', off: '2025-03-11T13:00Z', on: '2025-03-11T23:50Z', rule: 'nautical' })).json();
+  assert.deepEqual([naut.rule, naut.sunAltitudeLimit], ['nautical', -12]);
+  assert.ok(naut.nightMinutes < b.nightMinutes);
+  assert.equal((await night({ dep: 'VIE', arr: 'HAN', off: '2025-03-11T13:00Z', on: '2025-03-11T23:50Z', rule: 'astro' })).status, 400);
+  const fixed = await (await night({ dep: 'VIE', arr: 'HAN', off: '2025-03-11T13:00Z', on: '2025-03-11T23:50Z', rule: 'fixed' })).json();
+  assert.deepEqual([fixed.rule, fixed.sunAltitudeLimit, fixed.sunrise, fixed.sunset], ['fixed', null, '06:00', '18:00']);
+  assert.ok(fixed.nightMinutes > 0 && fixed.nightMinutes < fixed.blockMinutes);
+  assert.equal((await night({ dep: 'VIE', arr: 'HAN', off: '2025-03-11T13:00Z', on: '2025-03-11T23:50Z', rule: 'fixed', sunset: '6pm' })).status, 400);
   const track = await (await night({ dep: '48.11,16.57', arr: 'PRN', off: '2025-03-11T21:45Z', on: '2025-03-11T23:20Z', track: true })).json();
   assert.equal(track.nightMinutes, 95);
   assert.ok(track.track.length > 50);

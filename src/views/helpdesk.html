@@ -34,6 +34,15 @@
 
     .layout { display: grid; grid-template-columns: minmax(280px, 400px) 1fr; gap: 16px; margin-top: 16px; align-items: start; }
     @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
+    /* wide screens: both cards the same height, at least the window's; the list scrolls inside its card
+       (contain: size keeps a long list from making the row taller than the right card) */
+    .layout > .card { margin-bottom: 0; }
+    @media (min-width: 901px) {
+      .layout { align-items: stretch; }
+      .layout > .list-card { contain: size; display: flex; flex-direction: column; }
+      .layout > .list-card .items { flex: 1 1 auto; min-height: 0; max-height: none; }
+      .layout > .detail { min-height: calc(100vh - 250px); }
+    }
     .list-card { padding: 0; overflow: hidden; }
     .list-tools { display: flex; gap: 8px; padding: 10px; border-bottom: 1px solid var(--border); }
     .list-tools input { flex: 1; min-width: 0; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px; }
@@ -239,7 +248,8 @@
         <h2>${i.email ? `<a href="mailto:${esc(i.email)}">${esc(i.email)}</a>` : `<span style="color:var(--muted)">${esc(__('no email'))}</span>`} ${tk(i.ticket)}</h2>
         <div class="when">${esc(__('Sent {when}', { when: when(i.createdAt) }))}${i.lang ? ` · ${esc(__('language'))} ${esc(i.lang.toUpperCase())}` : ''}</div>
         <dl class="facts">
-          <dt>${esc(__('File'))}</dt><dd>${fileLink} <span style="color:var(--muted)">${esc(fmtSize(i.size))}</span></dd>
+          <dt>${esc(__('File'))}</dt><dd>${fileLink} <span style="color:var(--muted)">${esc(fmtSize(i.size))}</span>
+            ${i.status !== 'dismissed' ? ` · <a href="/api/suggestions/${encodeURIComponent(i.id)}/download" download title="${esc(__('Download the file as it was sent, to work on it locally'))}"><i class="fa-solid fa-download" aria-hidden="true"></i> ${esc(__('Download'))}</a>` : ''}</dd>
           <dt>${esc(__('The file'))}</dt><dd>${esc(__(FILE_STATE[i.status] || i.status))}${labelLink}</dd>
           <dt>${esc(__('Type'))}</dt><dd>${i.kind === 'acars' ? esc(__('ACARS picture')) : esc(__('Roster'))}</dd>
           ${i.kind === 'acars'
