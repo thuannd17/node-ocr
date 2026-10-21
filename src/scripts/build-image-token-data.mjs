@@ -23,7 +23,7 @@ import sharp from 'sharp';
 import { ocrLines } from '../services/paddle-ocr.js';
 import { ocrWordPages } from '../services/ocr-tokens.js';
 import { alignLabel } from '../services/pdf-label-align.js';
-import { listLabels, dataFile, labelFile, kindOf, DATA_ROOT, LABELS_ROOT } from '../utils/data-files.js';
+import { listReviewedLabels, dataFile, labelFile, kindOf, DATA_ROOT, LABELS_ROOT } from '../utils/data-files.js';
 import { readPdfText, hasTextLayer } from '../services/pdf-text.js';
 import { parseNetlinePdf } from '../services/pdf-roster-parser.js';
 import { ocrPdfPages, ocrPdfAsImage } from '../services/pdf-ocr.js';
@@ -44,7 +44,7 @@ fs.mkdirSync(outDir, { recursive: true });
 
 const seen = new Set();
 const summary = { files: [], skipped: [], tokens: 0, tagged: 0, unsure: 0, byField: {}, rows: 0, anchored: 0, missing: {} };
-const names = [...listLabels(labelsDir, 'image'), ...listLabels(labelsDir, 'pdf')].filter(n => fs.existsSync(dataFile(imgDir, n)));
+const names = [...listReviewedLabels(labelsDir, 'image'), ...listReviewedLabels(labelsDir, 'pdf')].filter(n => fs.existsSync(dataFile(imgDir, n)));
 const isPdf = (name) => kindOf(name) === 'pdf'; // also CSV / Excel / TXT: read as text, never a picture
 
 /** OCR lines of a file as one roster picture; null for a PDF that is not one (text layer, or a duty plan). */

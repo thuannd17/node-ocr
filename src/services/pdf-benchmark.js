@@ -10,7 +10,7 @@ import { parseNetlinePdf } from './pdf-roster-parser.js';
 import { ocrPdfPages, ocrPdfAsImage } from './pdf-ocr.js';
 import { parseRoster, cleanExtractionResult } from './roster-parser.js';
 
-export const PDF_FIELDS = ['date', 'day', 'dc', 'duty', 'registration', 'dep', 'begin', 'end', 'arr', 'ac', 'crew', 'info'];
+export const PDF_FIELDS = ['date', 'day', 'dc', 'duty', 'registration', 'dep', 'begin', 'takeoff', 'landing', 'end', 'arr', 'ac', 'crew', 'info'];
 
 const norm = (v) => String(v ?? '').trim().replace(/\s+/g, ' ');
 

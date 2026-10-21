@@ -1,5 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { readPdfText } from '../src/services/pdf-text.js';
 import { parseNetlinePdf, formatTime } from '../src/services/pdf-roster-parser.js';
 
 // Synthetic page with the NetLine/Crew coordinates (block 1 only); the real
@@ -654,5 +658,119 @@ test('day blocks (Air Nostrum style): days in columns, Firma -> C/I, flights, po
     ['29 Dec 21', 'Wed', 'DHD', 'IB1001', 'VLC', '08:35 Z', '09:40 Z', 'MAD', 'CRK', ''],
     ['29 Dec 21', 'Wed', '', 'IB1002', 'MAD', '10:35 Z', '12:25 Z', 'MLN', 'ATX', '(d) PEREZ(D)'],
     ['1 Jan 22', 'Sat', '', 'LCA8', '', '07:30 Z', '15:30 Z', '', '', ''],
+  ]);
+});
+
+test('Trip Information: duties with C/I and C/O (UTC), legs "Z / L" by their weekday, DH as dc, Duty Summary on the C/O, the trip\'s crew on flights', () => {
+  const row = (y, cells) => cells.map(([text, x]) => iw(text, x, y, text.length * 4));
+  const items = [
+    ...row(34, [['Trip Information', 44]]), ...row(54, [['Date:', 44], ['13Aug2026', 94]]),
+    ...row(95, [['Operates: Only on Sun 16Aug2026', 44], ['Duty Summary', 396], ['Trip Summary', 479]]),
+    ...row(110, [['Day', 44], ['Flight', 74], ['Departure-Arrival', 125], ['Start(LT)', 197], ['End(LT)', 234], ['Start', 267], ['End', 293], ['Block', 319], ['A/C', 346], ['Cnx', 369]]),
+    ...row(122, [['Duty start', 74], ['03:30', 267], ['Duty', 396], ['01:45', 454], ['Crew: 1CP', 479]]),
+    ...row(134, [['Sun', 44], ['DH XX1582', 74], ['AAA-BBB', 125], ['21:30', 197], ['22:11', 234], ['03:30', 267], ['05:11', 293], ['-', 321], ['00:04', 369], ['Block', 396], ['00:00', 454]]),
+    ...row(158, [['16Aug', 44], ['Duty end', 74], ['05:15', 293], ['Rest', 396], ['10:00', 454]]),
+    ...row(183, [['Duty start', 74], ['15:15', 267], ['Duty', 396], ['18:45', 454]]),
+    ...row(195, [['Sun', 44], ['484', 74], ['BBB-CCC', 125], ['11:45', 197], ['22:30', 234], ['18:45', 267], ['01:00', 293], ['06:15', 319], ['74Y', 346], ['Block', 396], ['06:15', 454]]),
+    ...row(220, [['16Aug', 44], ['Duty end', 74], ['01:30', 293], ['Rest', 396], ['-', 454]]),
+  ];
+  const crew = [...row(34, [['Trip Information', 44]]), ...row(97, [['Pos', 44], ['Crew ID', 87], ['Name', 146]]), ...row(109, [['CP', 44], ['2465', 87], ['Ann Smith', 146]])];
+  const r = parseNetlinePdf([{ page: 1, width: 595, height: 842, items }, { page: 2, width: 595, height: 842, items: crew }]);
+  assert.equal(r.format, 'trip-information');
+  assert.equal(r.period, '16Aug26 - 16Aug26');
+  assert.deepEqual(r.published.map(x => [x.date, x.day, x.dc, x.duty, x.dep, x.begin, x.end, x.arr, x.ac, x.crew, x.info]), [
+    ['16 Aug 26', 'Sun', '', 'C/I', 'AAA', '03:30 Z', '', '', '', '', ''],
+    ['16 Aug 26', 'Sun', 'DH', 'XX1582', 'AAA', '03:30 Z / 21:30 L -1', '05:11 Z / 22:11 L -1', 'BBB', '', '', '[Cnx: 00:04]'],
+    ['16 Aug 26', 'Sun', '', 'C/O', '', '', '05:15 Z', 'BBB', '', '', '[Duty: 01:45] [Block: 00:00] [Rest: 10:00]'],
+    ['16 Aug 26', 'Sun', '', 'C/I', 'BBB', '15:15 Z', '', '', '', '', ''],
+    ['16 Aug 26', 'Sun', '', '484', 'BBB', '18:45 Z / 11:45 L', '01:00 Z +1 / 22:30 L', 'CCC', '74Y', '[CP - 2465 - Ann Smith]', '[Block: 06:15]'],
+    ['16 Aug 26', 'Sun', '', 'C/O', '', '', '01:30 Z +1', 'CCC', '', '', '[Duty: 18:45] [Block: 06:15]'],
+  ]);
+});
+
+test('Crew Roster Report with the local times too (C/I (L) | C/I (Z) ... STD (L) | STD (Z)): "11:15 Z / 13:15 L", airports apart from the times', () => {
+  const row = (y, cells) => cells.map(([text, x]) => iw(text, x, y, text.length * 4));
+  const items = [
+    ...row(24, [['Crew Roster Report', 255]]), ...row(139, [['Period: 25Jun24 - 12Jul24', 228]]),
+    ...row(167, [['Date', 38], ['DC', 79], ['C/I (L)', 97], ['C/I (Z)', 128], ['C/O (L)', 159], ['C/O (Z)', 195], ['Activity', 231], ['From', 271], ['STD (L)', 299], ['STD (Z)', 337],
+      ['To', 376], ['STA (L)', 402], ['STA (Z)', 440], ['AC/Hotel', 478], ['Blk Hrs', 523]]),
+    ...row(180, [['25Jun24', 43], ['DO', 231], ['AAA', 271], ['0000', 299], ['2200-1', 337], ['AAA', 376], ['2359', 402], ['2159', 440]]),
+    ...row(193, [['26Jun24', 43], ['1315', 97], ['1115', 128], ['XX143', 231], ['AAA', 271], ['1400', 299], ['1200', 337], ['BBB', 376], ['1520', 402], ['1320', 440], ['AT7', 478], ['1:20', 541]]),
+    ...row(205, [['I*', 79], ['2255', 159], ['2055', 195], ['XX160', 231], ['BBB', 271], ['2120', 299], ['1920', 337], ['AAA', 376], ['2240', 402], ['2040', 440], ['AT7', 478]]),
+  ];
+  const r = parseNetlinePdf([{ page: 1, width: 595, height: 842, items }]);
+  assert.equal(r.format, 'crew-roster-report');
+  assert.deepEqual(r.published.map(x => [x.date, x.dc, x.duty, x.dep, x.begin, x.end, x.arr, x.ac, x.info]), [
+    ['25 Jun 24', '', 'DO', 'AAA', '22:00 Z -1 / 00:00 L', '21:59 Z / 23:59 L', 'AAA', '', ''],
+    ['26 Jun 24', '', 'C/I', 'AAA', '11:15 Z / 13:15 L', '', '', '', ''],
+    ['26 Jun 24', '', 'XX143', 'AAA', '12:00 Z / 14:00 L', '13:20 Z / 15:20 L', 'BBB', 'AT7', '[Block: 1:20]'],
+    ['26 Jun 24', 'I*', 'XX160', 'BBB', '19:20 Z / 21:20 L', '20:40 Z / 22:40 L', 'AAA', 'AT7', ''],
+    ['26 Jun 24', '', 'C/O', '', '', '20:55 Z / 22:55 L', 'AAA', '', ''],
+  ]);
+});
+
+async function parseTxt(text) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'roster-txt-test-'));
+  const file = path.join(dir, 'roster.txt');
+  try {
+    fs.writeFileSync(file, text);
+    return parseNetlinePdf(await readPdfText(file));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test('LOT logbook as text (fixed width): flights, a passenger leg, a simulator session, the other pilots as crew', async () => {
+  const r = await parseTxt([
+    'Okres:20240501-20240531;70000001;SMITH ANN;',
+    '--------.-------------.-------------.-----.---.-----.-----------.-------.-------------------------------------------------',
+    'CZYNNOSC.ODKOLOWANIE  .WYL.SILNIKOW .NALOT.NOC.SAM  .REJS       .TRASA . IL.LAD.   KM          .(K) - kapitan (P) - II pilot',
+    '--------.-------------.-------------.-----.---.-----.-----------.-------.-------------------------------------------------',
+    'Lot      20240501 2313 20240502 0032 0119      SPABC XX 460      AAA BBB 1        832             (K)J.Doe(P)K.Roe',
+    'Pax      20240505 1412 20240505 1502           SPABD XX 3807     BBB CCC 0          0',
+    'Sym      20240506                    0400      EM7      0                0          0',
+    '.',
+    'Razem godz.na "Sym" jako instruktor:000:00',
+  ].join('\r\n'));
+  assert.equal(r.format, 'lot-logbook');
+  assert.equal(r.period, '01May24 - 31May24');
+  assert.deepEqual(r.published.map(x => [x.date, x.dc, x.duty, x.registration, x.dep, x.begin, x.end, x.arr, x.ac, x.crew, x.info]), [
+    ['1 May 24', '', 'XX 460', 'SPABC', 'AAA', '23:13 Z', '00:32 Z +1', 'BBB', '', '[K - J.Doe][P - K.Roe]', '[Flight: 01:19] [Landing Day/Night: 1] [KM: 832]'],
+    ['5 May 24', 'Pax', 'XX 3807', 'SPABD', 'BBB', '14:12 Z', '15:02 Z', 'CCC', '', '', ''],
+    ['6 May 24', '', 'Sym', '', '', '', '', '', 'EM7', '', '[Sim: 04:00]'],
+  ]);
+});
+
+test('FLICA schedule as text: pairing with BSE REPT, legs, D-END with the duty totals, the layover hotel, PAY legs, activities', async () => {
+  const T = '\t';
+  const r = await parseTxt([
+    'FLICA', '', 'June Schedule', '', 'Last Updated Jul 15, 2022 00:32:42 EDT',
+    ` WE ${T}08 ${T}B5282C${T}CLE`,
+    `B5282C : 08JUN${T}ONLY ON WED${T}BSE REPT: 1636L${T}Operates: Jun 8 Only`,
+    `DY${T}DD${T}DH${T}C${T}FLTNO${T}DPS-ARS${T}DEPL${T}ARRL${T}BLKT${T}GRNT${T}OA${T}    ${T}TBLK${T}TDHD${T} ${T}TCRD${T}TDUTY/FDP${T}LAYOVER  `,
+    `WE${T}08${T} ${T} ${T}641${T}AAA-BBB${T}2332${T}0147${T} 0215${T} ${T}${T} ${T}0215${T}        ${T}        ${T}0215${T}0326/0311${T}BBB 1347`,
+    ` ${T}D-END: 0202L REPT: 1549L${T}Hotel One${T}(216)575-1234`,
+    `TH${T}09${T} ${T} ${T}1032${T}BBB-AAA${T}1657${T}1759${T} 0000${T}PAY ${T}${T} `,
+    `TH${T}09${T} ${T} ${T}1033${T}BBB-AAA${T}1657${T}1759${T} 0102${T} ${T}${T} ${T}0102${T}        ${T}        ${T}0130${T}0210/0200${T} `,
+    ` ${T}D-END: 1814L    T.A.F.B.: 2538    TRIP RIG: 0023   ${T}${T} `,
+    `Crew:${T} `,
+    `    ${T}CA ${T} 4992${T}  DOE, BOB ${T}    ${T}FO ${T} 45831${T}  SMITH, ANN `,
+    'HST : 22JUN',
+    `Activity${T}Start Date${T}Start Time${T}End Date${T}End Time${T}Credit`,
+    `HST${T}22JUN${T}09:00${T}22JUN${T}17:00${T}0400`,
+  ].join('\n'));
+  assert.equal(r.format, 'flica-schedule');
+  assert.equal(r.period, '01Jun22 - 30Jun22');
+  const crew = '[CA - 4992 - DOE, BOB][FO - 45831 - SMITH, ANN]';
+  assert.deepEqual(r.published.map(x => [x.date, x.duty, x.dep, x.begin, x.end, x.arr, x.crew, x.info]), [
+    ['8 Jun 22', 'C/I', 'AAA', '16:36 L', '', '', '', ''],
+    ['8 Jun 22', '641', 'AAA', '23:32 L', '01:47 L +1', 'BBB', crew, '[Block: 02:15]'],
+    ['8 Jun 22', 'C/O', '', '', '02:02 L +1', 'BBB', '', '[Block: 02:15] [Credit: 02:15] [Duty: 03:26] [FDP: 03:11]'],
+    ['8 Jun 22', 'HT', 'BBB', '', '', '', '', 'Hotel One (216)575-1234 [Layover: 13:47]'],
+    ['9 Jun 22', 'C/I', 'BBB', '15:49 L', '', '', '', ''],
+    ['9 Jun 22', '1032', 'BBB', '16:57 L', '17:59 L', 'AAA', '', '[PAY]'],
+    ['9 Jun 22', '1033', 'BBB', '16:57 L', '17:59 L', 'AAA', crew, '[Block: 01:02]'],
+    ['9 Jun 22', 'C/O', '', '', '18:14 L', 'AAA', '', '[Block: 01:02] [Credit: 01:30] [Duty: 02:10] [FDP: 02:00] [TAFB: 25:38] [Trip rig: 00:23]'],
+    ['22 Jun 22', 'HST', '', '09:00 L', '17:00 L', '', '', '[Credit: 04:00]'],
   ]);
 });

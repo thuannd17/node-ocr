@@ -28,6 +28,6 @@ test('an OCR page is repaired and parsed like a text PDF', () => {
   assert.equal(r.period, '27Jun26 - 27Jun26');
   assert.deepEqual(r.published.map(x => [x.date, x.day, x.duty, x.dep, x.begin, x.end, x.arr, x.ac, x.info]), [
     ['27 Jun 26', 'Sat', 'Pick Up', '', '03:25 Z', '', '', '', ''],
-    ['27 Jun 26', 'Sat', 'EW 762', 'CGN', '05:15 Z', '06:15 Z', 'ZRH', '320', 'Landing [DT 12:41] [FDT 11:13] [xFDP 00:00]'],
+    ['27 Jun 26', 'Sat', 'EW 762', 'CGN', '05:15 Z', '06:15 Z', 'ZRH', '320', '[Landing Day/Night: 1] [DT 12:41] [FDT 11:13] [xFDP 00:00]'],
   ]);
 });

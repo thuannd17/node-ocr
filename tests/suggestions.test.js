@@ -161,3 +161,56 @@ test('download a suggestion\'s file under its original name, also after Label it
   assert.equal(res.status, 200);
   assert.equal(await res.text(), text);
 });
+
+test('a correction from /roster: the file joins the data with the user\'s rows as a label waiting for review, out of training', async () => {
+  const { reviewOf, listReviewedLabels, listLabels, LABELS_ROOT } = await import('../src/utils/data-files.js');
+  const text = `correction test ${Date.now()} ${Math.random()}`;
+  const send = (rows, period) => {
+    const form = new FormData();
+    form.append('file', new Blob([text]), 'my roster.txt');
+    form.append('rows', JSON.stringify(rows));
+    if (period) form.append('period', period);
+    return fetch(`${base}/roster/corrections`, { method: 'POST', body: form });
+  };
+  assert.equal((await send({ published: [], planned: [] })).status, 400); // nothing to submit
+  const res = await send({ published: [{ date: '1 Mar 25', duty: 'OFF', bogus: 'x' }], planned: [] }, '01Mar25 - 31Mar25');
+  assert.equal(res.status, 201);
+  const { id, review } = await res.json();
+  assert.equal(review, true);
+  const meta = await (await fetch(`${base}/suggestions/${id}`)).json();
+  assert.deepEqual([meta.status, meta.ticket, meta.correction, meta.hasFile], ['accepted', 'open', true, false]);
+  const name = meta.dataName;
+  assert.equal(fs.readFileSync(path.join(tmp, 'store', 'files', 'txt', name), 'utf8'), text);
+  const label = JSON.parse(fs.readFileSync(path.join(tmp, 'store', 'labels', 'txt', `${name}.json`), 'utf8'));
+  assert.equal(label.period, '01Mar25 - 31Mar25');
+  assert.equal(label.published[0].duty, 'OFF');
+  assert.equal(label.published[0].bogus, undefined);
+  assert.deepEqual([label._review.by, label._review.suggestion], ['user', id]);
+  assert.equal(reviewOf(LABELS_ROOT, name)?.by, 'user');
+  assert.ok(listLabels(LABELS_ROOT, 'pdf').includes(name));
+  assert.ok(!listReviewedLabels(LABELS_ROOT, 'pdf').includes(name)); // not for training yet
+
+  // a file whose label was reviewed keeps it: the user's rows wait in _review.proposed
+  fs.writeFileSync(path.join(tmp, 'store', 'labels', 'txt', `${name}.json`), JSON.stringify({ period: null, published: [{ date: '1 Mar 25', duty: 'SBY' }], planned: [] }));
+  const again = await (await send({ published: [{ date: '1 Mar 25', duty: 'DO' }], planned: [] })).json();
+  const kept = JSON.parse(fs.readFileSync(path.join(tmp, 'store', 'labels', 'txt', `${name}.json`), 'utf8'));
+  assert.equal(kept.published[0].duty, 'SBY');
+  assert.equal(kept._review.suggestion, again.id);
+  assert.equal(kept._review.proposed.published[0].duty, 'DO');
+});
+
+test('a correction from /acars: the picture joins the ACARS data with the fields, waiting for review', async () => {
+  const form = new FormData();
+  form.append('file', new Blob([Buffer.from(`acars correction ${Date.now()}`)]), 'cockpit.png');
+  form.append('fields', JSON.stringify({ flt: 'SA0558', out: '12:32' }));
+  const res = await fetch(`${base}/acars/corrections`, { method: 'POST', body: form });
+  assert.equal(res.status, 201);
+  const meta = await (await fetch(`${base}/suggestions/${(await res.json()).id}`)).json();
+  assert.equal(meta.kind, 'acars');
+  const label = JSON.parse(fs.readFileSync(path.join(tmp, 'store', '_acars-ocr', 'labels', `${meta.dataName}.json`), 'utf8'));
+  assert.deepEqual([label.flt, label.out, label.in, label._review.by], ['SA0558', '12:32', '', 'user']);
+  const empty = new FormData();
+  empty.append('file', new Blob([Buffer.from('x')]), 'cockpit.png');
+  empty.append('fields', JSON.stringify({ flt: '' }));
+  assert.equal((await fetch(`${base}/acars/corrections`, { method: 'POST', body: empty })).status, 400);
+});

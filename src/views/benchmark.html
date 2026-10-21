@@ -282,7 +282,7 @@
     const TYPE_NAMES = { image: __('Image'), pdf: 'PDF', csv: 'CSV', xls: 'XLS', xlsx: 'XLSX', txt: 'TXT' };
     const TYPE_ICONS = { image: 'fa-image', pdf: 'fa-file-pdf', csv: 'fa-file-csv', xls: 'fa-file-excel', xlsx: 'fa-file-excel', txt: 'fa-file-lines' };
     const IMAGE_ONLY = ['date', 'day', 'duty', 'dep', 'begin', 'end', 'arr'];
-    const ALL_FIELDS = ['date', 'day', 'dc', 'duty', 'registration', 'dep', 'begin', 'end', 'arr', 'ac', 'crew', 'info'];
+    const ALL_FIELDS = ['date', 'day', 'dc', 'duty', 'registration', 'dep', 'begin', 'takeoff', 'landing', 'end', 'arr', 'ac', 'crew', 'info'];
     // every picture is 'image'; a text file is its extension (services/model-benchmark.js typeOf)
     const typeOfFile = (name) => { const ext = name.split('.').pop().toLowerCase(); return ext in TYPE_NAMES ? ext : 'image'; };
 
@@ -312,7 +312,7 @@
           ${types.length > 1 ? row(__('Overall'), r.overall.perField) : ''}
           ${types.map(t => row(TYPE_NAMES[t] || t, r.byType[t].perField)).join('')}
         </table></div>
-        <p style="font-size:12px;color:#888">${__('Images have only 7 columns ({cols}; matched allowing for OCR errors); text files (PDF, CSV, XLS, XLSX, TXT) have 13 columns, matched exactly. "Overall" only counts the 7 columns every type has.', { cols: IMAGE_ONLY.join(', ') })}</p>`;
+        <p style="font-size:12px;color:#888">${__('Images have only 7 columns ({cols}; matched allowing for OCR errors); text files (PDF, CSV, XLS, XLSX, TXT) have {n} columns, matched exactly. "Overall" only counts the 7 columns every type has.', { cols: IMAGE_ONLY.join(', '), n: ALL_FIELDS.length })}</p>`;
       const sorted = (r.files || []).slice().sort((a, b) => (a.error ? -1 : b.error ? 1 : (a.rowExact ?? 0) - (b.rowExact ?? 0)));
       const rows = sorted.map((f) => {
         const t = typeOfFile(f.file);

@@ -16,7 +16,7 @@ import crypto from 'node:crypto';
 import sharp from 'sharp';
 import { ocrLines } from '../services/paddle-ocr.js';
 import { acarsWordPages, alignAcars } from '../services/acars.js';
-import { listLabels, dataFile, labelFile, ACARS_DATA_ROOT, ACARS_LABELS_ROOT } from '../utils/data-files.js';
+import { listReviewedLabels, dataFile, labelFile, ACARS_DATA_ROOT, ACARS_LABELS_ROOT } from '../utils/data-files.js';
 import { acars } from '../services/media-client.js';
 import { EXPORTS_DIR } from '../utils/paths.js';
 
@@ -31,7 +31,7 @@ fs.mkdirSync(outDir, { recursive: true });
 
 const seen = new Set();
 const summary = { files: [], skipped: [], tokens: 0, tagged: 0, unsure: 0, byField: {}, values: 0, found: 0, missing: {} };
-const names = listLabels(ACARS_LABELS_ROOT, 'image').filter(n => fs.existsSync(dataFile(ACARS_DATA_ROOT, n)));
+const names = listReviewedLabels(ACARS_LABELS_ROOT, 'image').filter(n => fs.existsSync(dataFile(ACARS_DATA_ROOT, n)));
 
 for (const name of names) {
   const file = dataFile(ACARS_DATA_ROOT, name);

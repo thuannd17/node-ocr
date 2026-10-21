@@ -12,7 +12,7 @@ import multer from 'multer';
 import { parsePdfFile, compareRows, PDF_FIELDS, PDF_SECTIONS } from '../services/pdf-benchmark.js';
 import { compareSection } from '../services/benchmark.js';
 import { readPdfWithModel, modelInfo } from '../services/pdf-ai-extract.js';
-import { PDF_EXTS, extOf } from '../utils/data-files.js';
+import { PDF_EXTS, extOf, reviewState, LABELS_ROOT } from '../utils/data-files.js';
 import { syncMedia, localFile, readLabel, saveLabel, mediaErrorStatus } from '../services/media-client.js';
 import { previewHtml } from '../services/table-text.js';
 import { UPLOADS_DIR } from '../utils/paths.js';
@@ -99,21 +99,23 @@ const uploadFile = (req, res, next) => upload.single('file')(req, res, (err) => 
  * /roster: never from a saved label. The file is NOT kept (since 2026-10-18 a roster only joins
  * the data when an admin accepts a correction suggestion, routes/suggestions-api.js).
  * Used by POST /api/roster/upload (routes/roster-api.js) and the deprecated POST /api/pdf/upload.
- * { preview: true } adds previewHtml for CSV / Excel / TXT (the page cannot show those itself).
+ * { preview: true } adds previewHtml for CSV / Excel / TXT (the page cannot show those itself);
+ * { engine: 'parser' } gives the parser's rows instead of the model's (/roster "Try to parse").
  * The caller removes the multer temp file; the copy made here is removed here.
  */
-export async function readRosterFile(file, { preview = false } = {}) {
+export async function readRosterFile(file, { preview = false, engine = 'model' } = {}) {
   const t0 = Date.now();
-  if (!modelInfo().ready) throw new Error('No AI model yet: label a few files, then click "Train" on /models.');
+  if (engine !== 'parser' && !modelInfo().ready) throw new Error('No AI model yet: label a few files, then click "Train" on /models.');
   // the readers pick the format from the extension: read a copy named <temp>.<ext>
   const ext = extOf(file.originalname);
   const tmp = `${file.path}.${ext}`;
   fs.copyFileSync(file.path, tmp);
   try {
     const parsed = await parsePdfFile(tmp); // period and notices come from the file
-    const read = await readPdfWithModel(tmp);
+    // engine 'parser' (/roster "Try to parse"): the parser's rows
+    const read = engine === 'parser' ? { ...parsed, source: 'parser' } : await readPdfWithModel(tmp);
     const notices = [...(parsed.notices || [])];
-    if (read.source === 'parser') notices.unshift('This PDF only has images (no text layer), so the AI model cannot read it yet; the table below is what the parser read from the OCR text.');
+    if (read.source === 'parser' && engine !== 'parser') notices.unshift('This PDF only has images (no text layer), so the AI model cannot read it yet; the table below is what the parser read from the OCR text.');
     else if (read.readMode === 'ocr-image') notices.unshift('This PDF only has images: its pages were OCRed, joined into one roster image and read by the AI model like an image.');
     return {
       fileName: path.basename(file.originalname),
@@ -150,7 +152,8 @@ router.get('/files', async (req, res) => {
   try {
     const { index } = await syncMedia({ maxAgeMs: 2000 });
     const labeled = new Set(index.labels.map(l => l.name));
-    const items = index.files.filter(f => PDF_EXTS.includes(extOf(f.name))).map(f => f.name).sort().map(name => ({ name, labeled: labeled.has(name) }));
+    const items = index.files.filter(f => PDF_EXTS.includes(extOf(f.name))).map(f => f.name).sort()
+      .map(name => ({ name, labeled: labeled.has(name), review: labeled.has(name) ? reviewState(LABELS_ROOT, name) : null }));
     res.json({ items, counts: { files: items.length, labeled: items.filter(i => i.labeled).length } });
   } catch (e) {
     fail(res, e, 'GET /api/pdf/files');

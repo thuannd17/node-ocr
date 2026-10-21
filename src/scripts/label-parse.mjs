@@ -21,7 +21,7 @@ const files = fs.statSync(target).isDirectory()
   ? fs.readdirSync(target).filter(f => /\.(pdf|csv|xlsx?|txt)$/i.test(f)).sort().map(f => path.join(target, f))
   : [target];
 
-const COLS = ['date', 'day', 'dc', 'duty', 'registration', 'dep', 'begin', 'end', 'arr', 'ac', 'crew', 'info'];
+const COLS = ['date', 'day', 'dc', 'duty', 'registration', 'dep', 'begin', 'takeoff', 'landing', 'end', 'arr', 'ac', 'crew', 'info'];
 const out = {};
 for (const file of files) {
   const result = await parsePdfFile(file); // OCR (needs the OCR server) when the PDF has no text layer

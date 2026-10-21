@@ -15,7 +15,7 @@ import { extractImageWithModel, modelInfo } from '../services/pdf-ai-extract.js'
 import { saveLabelResult, savePredictedResult } from '../services/result-cache.js';
 import { syncMedia, localFile, readLabel, saveLabel, deleteFile, mediaIndex, mediaErrorStatus, acars } from '../services/media-client.js';
 import sharp from 'sharp';
-import { isDataName, kindOf, extOf } from '../utils/data-files.js';
+import { isDataName, kindOf, extOf, reviewState, LABELS_ROOT } from '../utils/data-files.js';
 import { UPLOADS_DIR, CACHE_DIR } from '../utils/paths.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -81,9 +81,10 @@ const upload = multer({
  * the temp file is removed afterwards (since 2026-10-18 a roster only joins the data (MinIO) when an admin
  * accepts a correction suggestion, routes/suggestions-api.js). Used by POST /api/roster/upload
  * (routes/roster-api.js) and the deprecated POST /api/ocr/upload.
+ * { engine: 'parser' }: OCR + services/roster-parser.js instead of the model (/roster "Try to parse").
  * Throws on failure (err.code 'OCR_BUSY' when the queue is full).
  */
-export async function readRosterImage(file) {
+export async function readRosterImage(file, { engine = 'model' } = {}) {
   let finalPath = null; // the temp file, also removed when reading fails
   try {
     const req = { file };
@@ -122,13 +123,21 @@ export async function readRosterImage(file) {
 
     const t0 = Date.now();
     let uploadPhase = 'init';
-    // /roster is for trying the AI model: every upload is read by the model (OCR + learned
-    // tagger), never answered from a saved label or the parser. /label Auto-fill offers the parser.
-    if (!modelInfo().ready) throw new Error('No AI model yet: label a few files, then click "Train" on /models.');
-    uploadPhase = 'ocr+model';
-    const result = await readImageWithModel(finalPath);
-    const timings = result._timings;
-    console.log(`[OCR Upload] AI model: OCR ${timings.ocrMs}ms + model ${timings.modelMs}ms`);
+    // /roster reads every upload with the AI model (OCR + learned tagger), never from a saved label;
+    // the parser only when asked (engine 'parser': "Try to parse" while correcting a reading).
+    let result, timings;
+    if (engine === 'parser') {
+      uploadPhase = 'ocr+parser';
+      const t1 = Date.now();
+      result = await extractWithPaddleOCR(finalPath);
+      timings = { parseMs: Date.now() - t1 };
+    } else {
+      if (!modelInfo().ready) throw new Error('No AI model yet: label a few files, then click "Train" on /models.');
+      uploadPhase = 'ocr+model';
+      result = await readImageWithModel(finalPath);
+      timings = result._timings;
+      console.log(`[OCR Upload] AI model: OCR ${timings.ocrMs}ms + model ${timings.modelMs}ms`);
+    }
 
     console.log(`[OCR Upload] Result: published=${result?.published?.length || 0}, planned=${result?.planned?.length || 0}`);
 
@@ -158,7 +167,7 @@ export async function readRosterImage(file) {
       strategy: effectiveStrategy,
       fileName: path.basename(req.file.originalname),
       fromCache: false,
-      source: 'model',
+      source: engine === 'parser' ? 'parser' : 'model',
       model: { trainedAt: modelInfo().trainedAt || null },
       quality: null,
       success: true
@@ -194,6 +203,7 @@ router.post('/ocr/upload', upload.single('image'), async (req, res) => {
 // List the roster images of MinIO (JSON). `files` = names (as before); `items`
 // adds whether each has a label and, for byte-identical copies, which file it
 // duplicates (the first copy by name). New rosters to label = unlabeled, not duplicate.
+// `review`: the label waits for a person's review (a user's submitted correction, ...: utils/data-files.js reviewState).
 router.get('/files', async (req, res) => {
   try {
     const { index } = await syncMedia({ maxAgeMs: 2000 });
@@ -203,7 +213,7 @@ router.get('/files', async (req, res) => {
     for (const f of files) if (!firstByHash.has(f.md5)) firstByHash.set(f.md5, f.name);
     const items = files.map(f => {
       const first = firstByHash.get(f.md5);
-      return { name: f.name, labeled: labeled.has(f.name), duplicateOf: first === f.name ? null : first };
+      return { name: f.name, labeled: labeled.has(f.name), review: labeled.has(f.name) ? reviewState(LABELS_ROOT, f.name) : null, duplicateOf: first === f.name ? null : first };
     });
     const unique = items.filter(i => !i.duplicateOf);
     res.json({

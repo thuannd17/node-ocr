@@ -82,3 +82,23 @@ export function listLabels(root, kind = 'all') {
 	}
 	return names.sort();
 }
+
+/**
+ * A label still waiting for a person's review: `_review: { by: 'user' | 'claude', at, ... }` (a correction a user
+ * submitted on /roster or /acars, a change made by a script). Saving it on /label writes it without `_review`.
+ * Such labels are left out of training, benchmarks and checks until then (listReviewedLabels).
+ */
+export function reviewOf(root, name) {
+	try { return JSON.parse(fs.readFileSync(labelFile(root, name), 'utf8'))._review || null; } catch { return null; }
+}
+
+/** What a file list shows of a label waiting for review: { by, at, suggestion?, note? } (not the proposed rows), or null. */
+export function reviewState(root, name) {
+	const r = reviewOf(root, name);
+	return r ? { by: r.by || 'user', at: r.at || null, ...(r.suggestion ? { suggestion: r.suggestion } : {}), ...(r.note ? { note: r.note } : {}), proposed: !!r.proposed } : null;
+}
+
+/** listLabels without the labels still waiting for review (reviewOf). */
+export function listReviewedLabels(root, kind = 'all') {
+	return listLabels(root, kind).filter(n => !reviewOf(root, n));
+}

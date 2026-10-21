@@ -37,7 +37,7 @@ import crypto from 'node:crypto';
 import { groupByContent, pickCanonicalLabels } from '../utils/content-groups.js';
 import { parseRoster, cleanExtractionResult } from '../services/roster-parser.js';
 import { compareSection } from '../services/benchmark.js';
-import { listData, listLabels, dataFile, labelFile, DATA_ROOT, LABELS_ROOT, ACARS_DATA_ROOT, ACARS_LABELS_ROOT } from '../utils/data-files.js';
+import { listData, listReviewedLabels, reviewOf, dataFile, labelFile, DATA_ROOT, LABELS_ROOT, ACARS_DATA_ROOT, ACARS_LABELS_ROOT } from '../utils/data-files.js';
 import { syncForScript, acars, syncPrefix } from '../services/media-client.js';
 import { acarsWordPages, alignAcars } from '../services/acars.js';
 import sharp from 'sharp';
@@ -106,7 +106,7 @@ function deployedVersion() {
 
 /** Labeled images, one per distinct content: Map hash -> file name. */
 function labeledRosters() {
-	const names = listData(FAKE_DATA, 'image').filter(n => fs.existsSync(labelFile(LABELS, n)));
+	const names = listData(FAKE_DATA, 'image').filter(n => fs.existsSync(labelFile(LABELS, n)) && !reviewOf(LABELS, n));
 	const groups = groupByContent(FAKE_DATA, names);
 	const { canonical } = pickCanonicalLabels(groups, LABELS);
 	return { names, canonical };
@@ -115,7 +115,7 @@ function labeledRosters() {
 /** Labeled ACARS pictures, one per distinct content: Map hash -> name (the first name). */
 function labeledAcars() {
 	const out = new Map();
-	for (const n of listLabels(ACARS_LABELS_ROOT, 'image')) {
+	for (const n of listReviewedLabels(ACARS_LABELS_ROOT, 'image')) {
 		if (!fs.existsSync(acarsFile(n))) continue;
 		const h = md5File(acarsFile(n));
 		if (!out.has(h)) out.set(h, n);

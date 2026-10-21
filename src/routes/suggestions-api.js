@@ -18,6 +18,8 @@
 // Stored by MinIO (suggestions/<id>/meta.json + file.<ext>, services/media-client.js).
 // A suggestion from /acars has kind 'acars' and the fields the model read instead of rows; Label it puts its
 // picture in the ACARS bucket (services/media-client.js acars) instead of the roster data.
+// A correction the user wrote themselves (submitCorrection, `correction: true`) is in the data already, its label
+// waiting for review on /label.
 import { Router } from 'express';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -28,9 +30,10 @@ import { previewHtml } from '../services/table-text.js';
 import { mailStatus, sendMail } from '../services/mailer.js';
 import { ACARS_FIELDS } from '../services/acars.js';
 import { extOf, kindOf } from '../utils/data-files.js';
+import { PDF_FIELDS } from '../services/pdf-benchmark.js';
 import {
   listSuggestions, getSuggestion, putSuggestion, patchSuggestion, suggestionFile, deleteSuggestionFile,
-  storeFile, fileBytes, mediaErrorStatus, acars,
+  storeFile, fileBytes, readLabel, saveLabel, mediaErrorStatus, acars,
 } from '../services/media-client.js';
 
 const ID_RE = /^\d{8}-\d{6}-[0-9a-f]{6}$/;
@@ -82,6 +85,47 @@ export async function createSuggestion(file, { note = '', rows = null, fields = 
   };
   await putSuggestion(meta, buf);
   return meta;
+}
+
+const IMAGE_ROW_FIELDS = ['date', 'day', 'duty', 'dep', 'begin', 'end', 'arr'];
+
+/**
+ * A correction a user wrote themselves (/roster, /acars "Submit this correction"): the file joins the data
+ * (deduplicated) with the user's rows or fields as its label, marked `_review` (utils/data-files.js reviewOf)
+ * for an admin to check on /label; it stays out of training until saved there. A suggestion record
+ * (status accepted, ticket open) keeps it on /helpdesk. A file whose label was already reviewed keeps that
+ * label: the user's version waits in `_review.proposed`. -> { meta, name }
+ */
+export async function submitCorrection(file, { rows = null, period = null, fields = null, acars: isAcars = false, lang = 'en', note = '', email = '' } = {}) {
+  const buf = fs.readFileSync(file.path);
+  const store = isAcars ? acars : { storeFile, readLabel, saveLabel };
+  const { name, isNew } = await store.storeFile(buf, file.originalname);
+  const at = new Date();
+  const stamp = at.toISOString().replace(/\D/g, '');
+  const keep = kindOf(name) === 'pdf' ? PDF_FIELDS : IMAGE_ROW_FIELDS;
+  const cleanRow = (r) => Object.fromEntries(keep.map(f => [f, String(r?.[f] ?? '').trim().slice(0, 500)]));
+  const tables = cleanRows(rows) || { published: [], planned: [] };
+  const proposed = isAcars ? cleanFields(fields)
+    : { ...(kindOf(name) === 'pdf' ? { period: String(period || '').trim().slice(0, 40) || null } : {}), published: tables.published.map(cleanRow), planned: tables.planned.map(cleanRow) };
+  const meta = {
+    id: `${stamp.slice(0, 8)}-${stamp.slice(8, 14)}-${crypto.randomBytes(3).toString('hex')}`,
+    createdAt: at.toISOString(),
+    status: 'accepted', handledAt: at.toISOString(), dataName: name, alreadyInData: !isNew, correction: true,
+    fileName: path.basename(file.originalname),
+    fileType: extOf(file.originalname),
+    kind: isAcars ? 'acars' : kindOf(file.originalname),
+    size: buf.length,
+    md5: crypto.createHash('md5').update(buf).digest('hex'),
+    note, email, lang,
+    ticket: 'open',
+    replies: [],
+    ...(isAcars ? { fields: proposed } : { rows: { published: proposed.published, planned: proposed.planned } }),
+  };
+  await putSuggestion(meta); // no copy of the file: it is in the data
+  const review = { by: 'user', at: meta.createdAt, suggestion: meta.id, ...(note ? { note } : {}) };
+  const existing = await store.readLabel(name);
+  await store.saveLabel(name, existing && !existing._review ? { ...existing, _review: { ...review, proposed } } : { ...proposed, _review: review });
+  return { meta, name };
 }
 
 const router = Router();

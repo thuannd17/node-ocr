@@ -28,7 +28,7 @@ import { ocrLines } from './paddle-ocr.js';
 import { extractImageWithModel, readPdfWithModel, modelInfo } from './pdf-ai-extract.js';
 import { compareSection, alignRows, normalizeField } from './benchmark.js';
 import { compareRows, PDF_FIELDS } from './pdf-benchmark.js';
-import { listLabels, dataFile, labelFile, extOf, PDF_EXTS, DATA_ROOT, LABELS_ROOT } from '../utils/data-files.js';
+import { listReviewedLabels, dataFile, labelFile, extOf, PDF_EXTS, DATA_ROOT, LABELS_ROOT } from '../utils/data-files.js';
 import { saveBenchmark, syncModels } from './ai-models.js';
 import { ROOT } from '../utils/paths.js';
 import { groupByContent, pickCanonicalLabels } from '../utils/content-groups.js';
@@ -52,7 +52,7 @@ export function labeledCounts() {
 
 /** Labeled files of one kind, one per distinct content. */
 function labeledFiles(kind) {
-  const names = listLabels(LABELS, kind).filter(n => fs.existsSync(dataFile(DATA, n)));
+  const names = listReviewedLabels(LABELS, kind).filter(n => fs.existsSync(dataFile(DATA, n)));
   const groups = groupByContent(path.join(DATA), names);
   const { canonical } = pickCanonicalLabels(groups, LABELS);
   const keep = new Set(canonical.values());

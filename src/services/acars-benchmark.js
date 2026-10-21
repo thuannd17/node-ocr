@@ -16,14 +16,14 @@ import { readAcarsPicture } from './acars-read.js';
 import { compareAcars, ACARS_FIELDS } from './acars.js';
 import { modelInfo } from './pdf-ai-extract.js';
 import { saveBenchmark, syncModels } from './ai-models.js';
-import { listLabels, dataFile, labelFile, ACARS_DATA_ROOT, ACARS_LABELS_ROOT } from '../utils/data-files.js';
+import { listReviewedLabels, dataFile, labelFile, ACARS_DATA_ROOT, ACARS_LABELS_ROOT } from '../utils/data-files.js';
 
 const pct = (m, t) => (t ? Math.round((1000 * m) / t) / 10 : null);
 
 /** Labeled ACARS pictures, one per distinct content (the first name). */
 export function labeledAcars() {
   const seen = new Set();
-  return listLabels(ACARS_LABELS_ROOT, 'image').filter((n) => {
+  return listReviewedLabels(ACARS_LABELS_ROOT, 'image').filter((n) => {
     const file = dataFile(ACARS_DATA_ROOT, n);
     if (!fs.existsSync(file)) return false;
     const h = crypto.createHash('md5').update(fs.readFileSync(file)).digest('hex');

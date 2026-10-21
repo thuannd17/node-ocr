@@ -41,6 +41,7 @@
     "label:check": "node --env-file=.env src/scripts/label-check.mjs",
     "label:audit": "node --env-file=.env src/scripts/label-audit.mjs",
     "label:draft-tables": "node --env-file=.env src/scripts/label-draft-tables.mjs",
+    "label:review": "node --env-file=.env src/scripts/label-review.mjs",
     "airports:update": "node src/scripts/airports-update.mjs"
   },
   "author": "ThuanND",

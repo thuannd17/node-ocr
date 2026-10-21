@@ -43,6 +43,9 @@ const pad2 = (n) => String(n).padStart(2, '0');
  */
 function cellText(cell) {
   if (!cell || cell.v == null) return '';
+  // A date cell whose file keeps its own text for it ("12/01/25" over a serial that formats as 11/30/25: an
+  // export that wrote the typed text and a shifted date): that text, as the sheet shows it.
+  if (cell.t === 'n' && cell.z && cell.w && XLSX.SSF.is_date(cell.z) && cell.w !== XLSX.SSF.format(cell.z, cell.v)) return cellLines(String(cell.w));
   if (cell.t === 'n' && cell.z && XLSX.SSF.is_date(cell.z)) {
     // to the nearest minute, as Excel shows it (0.2743 is 06:35, not 06:34:59)
     const mins = Math.round(cell.v * 1440);

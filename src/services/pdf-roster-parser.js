@@ -65,13 +65,26 @@ export const HOTEL_DUTY = 'HT';
  * Rows as they are given out (labels since 2026-10-16): a hotel night is an event
  * of its own, its duty the printed code ("H1*") or HT; there is no hotel field.
  * The parsers and the AI model's assembler work with the hotel field (row.hotel,
- * duty "H") inside; this turns one such row into the given-out one.
+ * duty "H") inside; this turns one such row into the given-out one (and its printed
+ * take-off / landing remark into counts, takeoffLandingTags).
  */
 export function hotelAsEvent(row) {
   const { hotel, ...out } = row;
   if (hotel && !out.duty) out.duty = hotel;
   else if (out.duty === 'H') out.duty = HOTEL_DUTY;
+  if (out.info) out.info = takeoffLandingTags(out.info);
   return out;
+}
+
+/**
+ * A take-off / landing remark printed under a flight, with no day or night: "1Take-off, 1Landing",
+ * "Take-off, Landing", "Landing" -> "[Takeoff Day/Night: 1] [Landing Day/Night: 1]". Only a remark of
+ * its own (at the start of info or after a "[...]" stat), not a word inside other text.
+ */
+export function takeoffLandingTags(info) {
+  return String(info || '')
+    .replace(/(^|\]\s+)(\d*)Take-off,?(?:\s+(\d*)Landing)?(?=\s|$)/g, (_, at, t, l) => `${at}[Takeoff Day/Night: ${t || 1}]${l === undefined ? '' : ` [Landing Day/Night: ${l || 1}]`}`)
+    .replace(/(^|\]\s+)(\d*)Landing(?=\s|$)/g, (_, at, l) => `${at}[Landing Day/Night: ${l || 1}]`);
 }
 
 /** The other way, for code that learns from labels (the hotel field and duty "H" inside). */
@@ -412,11 +425,12 @@ export function formatTime(raw, plain = 'Z') {
 function outputRow(r, plain = 'Z') {
   return {
     date: r.date, day: r.day, hotel: r.hotel || '', dc: r.dc || '', duty: r.duty, registration: r.registration || '',
-    dep: r.dep || '', begin: formatTime(r.begin, plain), end: formatTime(r.end, plain), arr: r.arr || '', ac: r.ac || '', crew: r.crew || '', info: r.info || '',
+    dep: r.dep || '', begin: formatTime(r.begin, plain), takeoff: formatTime(r.takeoff, plain), landing: formatTime(r.landing, plain), end: formatTime(r.end, plain),
+    arr: r.arr || '', ac: r.ac || '', crew: r.crew || '', info: r.info || '',
   };
 }
 
-const REPORT_COLS = ['Date', 'DC', 'C/I (Z)', 'C/O (Z)', 'Activity', 'From', 'STD (Z)', 'To', 'STA (Z)', 'AC/Hotel', 'Blk Hrs', 'Duty Hrs'];
+const REPORT_COLS = ['Date', 'DC', 'C/I (L)', 'C/I (Z)', 'C/O (L)', 'C/O (Z)', 'Activity', 'From', 'STD (L)', 'STD (Z)', 'To', 'STA (L)', 'STA (Z)', 'AC/Hotel', 'Blk Hrs', 'Duty Hrs'];
 const REPORT_DATE_RE = /^(\d{2})([A-Z][a-z]{2})(\d{2})$/;
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -440,6 +454,8 @@ function findReportHeader(page) {
  * C/O time; Duty Hrs goes to its info), and for a longer AC/Hotel text a hotel
  * row (duty "H", given out as HT; info = the hotel). `dc` is the DC column of the line, on the
  * activity (and hotel) row only, not on C/I or C/O.
+ * Some reports print the local times too, each before its UTC one (C/I (L) | C/I (Z) | C/O (L) | C/O (Z) |
+ * ... STD (L) | STD (Z) | ... STA (L) | STA (Z)): times then "11:15 Z / 13:15 L" (UTC, then local).
  */
 function parseCrewRosterReport(pages) {
   const trace = startTrace();
@@ -461,6 +477,9 @@ function parseCrewRosterReport(pages) {
         day = WEEKDAYS[new Date(2000 + Number(d[3]), MONTHS.indexOf(d[2]), Number(d[1])).getDay()];
       }
       const activity = get('Activity'), ci = get('C/I (Z)'), co = get('C/O (Z)'), acHotel = get('AC/Hotel');
+      // a UTC time with its local one when the report prints both: "2200-1" + "0000" -> "22:00 Z -1 / 00:00 L"
+      const both = (z, l) => (/^\d{4}([+-]\d)?$/.test(get(l)) && /^\d{4}([+-]\d)?$/.test(get(z)) ? `${formatTime(get(z), 'Z')} / ${formatTime(get(l), 'L')}` : get(z));
+      const marks = (row, field, ...cols) => { for (const c of cols) mark(row, field, cell[c]); };
       const blk = get('Blk Hrs'), dutyHrs = get('Duty Hrs');
       if (!date || !(activity || ci || co || acHotel || blk || dutyHrs)) continue; // page footer, blank line
       const base = { section: 'published', date, day, dc: get('DC'), notes: [] };
@@ -468,14 +487,14 @@ function parseCrewRosterReport(pages) {
       // The DC belongs to the activity; C/I and C/O rows carry none.
       // C/I, C/O "0210+1": the next day (kept as "02:10 Z +1")
       if (/^\d{4}([+-]\d)?$/.test(ci)) {
-        const ciRow = { ...base, dc: '', duty: 'C/I', dep: get('From'), begin: ci, notes: [] };
+        const ciRow = { ...base, dc: '', duty: 'C/I', dep: get('From'), begin: both('C/I (Z)', 'C/I (L)'), notes: [] };
         rows.push(ciRow);
-        mark(ciRow, 'ci', cell['C/I (Z)']); // the time makes the C/I row
+        marks(ciRow, 'ci', 'C/I (Z)', 'C/I (L)'); // the time makes the C/I row
       }
       let event = null;
       if (activity) {
         event = {
-          ...base, duty: activity, dep: get('From'), begin: get('STD (Z)'), arr: get('To'), end: get('STA (Z)'),
+          ...base, duty: activity, dep: get('From'), begin: both('STD (Z)', 'STD (L)'), arr: get('To'), end: both('STA (Z)', 'STA (L)'),
           ac: acHotel.length <= 3 ? acHotel : '', notes: [],
         };
         rows.push(event);
@@ -483,18 +502,18 @@ function parseCrewRosterReport(pages) {
         mark(event, 'dc', cell.DC);
         mark(event, 'duty', cell.Activity);
         mark(event, 'dep', cell.From);
-        mark(event, 'begin', cell['STD (Z)']);
+        marks(event, 'begin', 'STD (Z)', 'STD (L)');
         mark(event, 'arr', cell.To);
-        mark(event, 'end', cell['STA (Z)']);
+        marks(event, 'end', 'STA (Z)', 'STA (L)');
         if (acHotel.length <= 3) mark(event, 'ac', cell['AC/Hotel']);
       }
       if (/^\d+:\d{2}$/.test(blk)) { (event || lastEvent)?.notes.push(`[Block: ${blk}]`); mark(event || lastEvent, 'info', cell['Blk Hrs']); }
       let coRow = null;
       if (/^\d{4}([+-]\d)?$/.test(co)) {
-        coRow = { ...base, dc: '', duty: 'C/O', arr: get('To'), end: co, notes: [] };
+        coRow = { ...base, dc: '', duty: 'C/O', arr: get('To'), end: both('C/O (Z)', 'C/O (L)'), notes: [] };
         rows.push(coRow);
         lastCO = coRow;
-        mark(coRow, 'co', cell['C/O (Z)']);
+        marks(coRow, 'co', 'C/O (Z)', 'C/O (L)');
       }
       if (/^\d+:\d{2}$/.test(dutyHrs)) { (coRow || lastCO)?.notes.push(`[Duty: ${dutyHrs}]`); mark(coRow || lastCO, 'info', cell['Duty Hrs']); }
       if (acHotel.length > 3) {
@@ -691,6 +710,381 @@ const monthIndex = (mon) => {
 };
 
 /** Header line of an activity list: Activity | Checkin | Start | Dep | Arr | End | Checkout | AcVer | DD | CAT | Crew */
+/** A text file's line as its characters stand (services/table-text.js puts a TXT's character c at x = 20 + 6c). */
+function charLine(line) {
+  let s = '';
+  for (const it of line.items) {
+    const col = Math.max(0, Math.round((it.x - 20) / 6));
+    s = s.padEnd(col) + it.text;
+  }
+  return s;
+}
+
+const isLotLogbook = (page) => page.items.some(i => /^CZYNNOSC\.ODKOLOWANIE/.test(i.text) || (i.text === 'CZYNNOSC.ODKOLOWANIE'));
+
+/**
+ * LOT pilot's logbook as text (fixed width, Polish; a block per period "Okres:20240501-20240531;id;NAME;"):
+ *   CZYNNOSC.ODKOLOWANIE  .WYL.SILNIKOW .NALOT.NOC.SAM  .REJS       .TRASA . IL.LAD.   KM          .(K) - kapitan (P) - II pilot
+ *   Lot      20240501 0513 20240501 0632 0119      SPLNA LO 460      CPH WAW 1        832             (P)K.Stolecka
+ * Columns from the "--------.-------------..." line. A row per line: "Lot" a flight (duty = REJS, dep / arr = TRASA,
+ * begin / end = off block / engines off, registration = SAM), "Pax" one flown as a passenger (dc Pax), "Sym" a simulator
+ * session (ac = its type in SAM). Times UTC (WAW 08:55 -> RIX 10:02 is the NALOT 01:07 only so). Info "[Flight: 01:19]"
+ * ("[Sim: 04:00]"), the landings "[Landing Day/Night: 1]" (no day or night printed), "[KM: 832]"; crew the other
+ * pilots "(K)M.Szostak(P)S.Dunin" -> "[K - M.Szostak][P - S.Dunin]". Totals and notes under the table are left out.
+ */
+function parseLotLogbook(pages) {
+  const trace = startTrace();
+  const rows = [];
+  const periods = [];
+  let cut = null; // column starts, from the "-----.-----" line
+  const hhmm = (t) => (/^\d{4}$/.test(t) && +t ? `${t.slice(0, 2)}:${t.slice(2)}` : '');
+  const ymd = (t) => { const m = /^(\d{4})(\d{2})(\d{2})$/.exec(t); return m ? Date.UTC(+m[1], +m[2] - 1, +m[3]) : null; };
+  const dayRow = (t) => { const d = new Date(t); return { date: `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${String(d.getUTCFullYear() % 100).padStart(2, '0')}`, day: WEEKDAYS[d.getUTCDay()] }; };
+  for (const page of pages) {
+    for (const line of toLines(page.items)) {
+      const s = charLine(line);
+      const okres = /^Okres:(\d{8})-(\d{8})/.exec(s);
+      if (okres) { periods.push(ymd(okres[1]), ymd(okres[2])); continue; }
+      if (/^-{4,}\.-{4,}\./.test(s)) { cut = [0, ...[...s.matchAll(/\./g)].map(m => m.index + 1)]; continue; }
+      const act = s.slice(0, 8).trim();
+      if (!cut || !/^[A-Z][a-z]{2,}$/.test(act)) continue;
+      const col = (k) => s.slice(cut[k], cut[k + 1] != null ? cut[k + 1] - 1 : undefined).trim();
+      const [offDate, offTime = ''] = col(1).split(/\s+/), [onDate, onTime = ''] = col(2).split(/\s+/);
+      const d = ymd(offDate);
+      if (d == null) continue;
+      const tail = s.slice(cut[8]); // IL.LAD. | KM | the other pilots
+      const t = /^\s*(\d+)?\s+(\d+)?\s*(.*)$/.exec(tail) || [];
+      const [, landings, km, others = ''] = t;
+      const route = /^([A-Z]{3})\s+([A-Z]{3})$/.exec(col(7)) || [];
+      const flight = /[A-Z]/.test(col(6)) ? col(6) : '';
+      const on = ymd(onDate);
+      const days = on != null ? Math.round((on - d) / 86400000) : 0;
+      const sim = act === 'Sym';
+      const crew = [...others.matchAll(/\(([A-Z]+)\)([^()]+)/g)].map(m => `[${m[1]} - ${m[2].trim()}]`).join('');
+      const row = {
+        section: 'published', ...dayRow(d), dc: ['Lot', 'Sym'].includes(act) ? '' : act, duty: sim ? act : flight, dep: route[1] || '', arr: route[2] || '',
+        begin: offTime, end: onTime ? `${onTime}${days ? `+${days}` : ''}` : '', registration: sim ? '' : col(5), ac: sim ? col(5) : '', crew,
+        notes: [hhmm(col(3)) && `[${sim ? 'Sim' : 'Flight'}: ${hhmm(col(3))}]`, +landings ? `[Landing Day/Night: ${+landings}]` : '', +km ? `[KM: ${+km}]` : ''].filter(Boolean),
+      };
+      if (!row.duty && !row.dep) continue;
+      rows.push(row);
+      mark(row, 'date', line.items[1]);
+      for (const it of line.items) {
+        const c = Math.round((it.x - 20) / 6);
+        const field = c < cut[1] ? 'dc' : c < cut[5] ? 'begin' : c < cut[6] ? (sim ? 'ac' : 'registration') : c < cut[7] ? 'duty' : c < cut[8] ? 'route' : /^\(/.test(it.text) ? 'crew' : 'info';
+        if (field !== 'dc' || row.dc) mark(row, field, it);
+      }
+    }
+  }
+  const ok = periods.filter(x => x != null);
+  const fmt = (t) => { const x = new Date(t); return `${String(x.getUTCDate()).padStart(2, '0')}${MONTHS[x.getUTCMonth()]}${String(x.getUTCFullYear() % 100).padStart(2, '0')}`; };
+  const out = rows.map(r => outputRow({ ...r, info: r.notes.join(' ') }, 'Z'));
+  return { format: 'lot-logbook', period: ok.length ? `${fmt(Math.min(...ok))} - ${fmt(Math.max(...ok))}` : null, notices: [], recognized: out.length > 0, published: out, planned: [], _trace: trace, _rows: rows };
+}
+
+const isFlicaSchedule = (page) => page.items.some(i => i.text === 'FLICA') && page.items.some(i => i.text === 'DPS-ARS');
+
+/**
+ * A FLICA schedule saved as text ("June Schedule", "Last Updated Jul 15, 2022 ..."): after the month's calendar, each
+ * pairing in detail —
+ *   B5282C : 08JUN | ONLY ON WED | BSE REPT: 1636L | Operates: Jun 8 Only
+ *   DY | DD | DH | C | FLTNO | DPS-ARS | DEPL | ARRL | BLKT | GRNT | OA | | TBLK | TDHD | | TCRD | TDUTY/FDP | LAYOVER
+ *   WE | 08 |    |   | 641   | BOS-CLE | 1732 | 1947 | 0215 |      |    | | 0215 |      | | 0215 | 0326/0311 | CLE 1347
+ *      | D-END: 2002L REPT: 0949L | Hyatt Regency Cleveland A | (216)575-1234
+ *   Crew: CA | 4992 | SMITHLING, BRETT | FO | 45831 | YATES, JARED-CK
+ * — and single activities ("HST : 22JUN" / Activity | Start Date | Start Time | End Date | End Time | Credit).
+ * Rows: a C/I row (BSE REPT, then each REPT), a row per leg (DH -> dc; begin / end local "17:32 L"; info "[Block: 02:15]",
+ * a pay-only or dropped leg "[PAY]" / "[DRP]"), a C/O row at each D-END (info the duty's totals "[Block: 02:15] [Deadhead: ..]
+ * [Credit: 02:15] [Duty: 03:26] [FDP: 03:11]", at the trip's end also "[TAFB: 51:25] [Trip rig: 00:23]"), a hotel row after it
+ * (the layover station, "Hyatt Regency Cleveland A (216)575-1234 [Layover: 13:47]"). The pairing's crew on its flown legs.
+ * The year from "Last Updated"; the calendar and the month's totals are left out.
+ */
+function parseFlicaSchedule(pages) {
+  const trace = startTrace();
+  const rows = [];
+  const items = pages.flatMap(p => p.items);
+  const all = items.map(i => i.text).join(' ');
+  const upd = /Last Updated ([A-Z][a-z]{2}) \d{1,2}, (\d{4})/.exec(all);
+  const sched = /\b([A-Z][a-z]+) Schedule\b/.exec(all);
+  const monthOf = (name) => MONTHS.findIndex(m => m.toLowerCase() === String(name || '').slice(0, 3).toLowerCase());
+  let year = upd ? +upd[2] : new Date().getUTCFullYear();
+  if (upd && sched && monthOf(sched[1]) > monthOf(upd[1])) year -= 1; // a December schedule updated in January
+  const hm = (t) => (/^\d{4}$/.test(t) ? `${t.slice(0, 2)}:${t.slice(2)}` : '');
+  const dur = (t) => (/^\d{3,4}$/.test(t) && +t ? `${t.slice(0, -2).padStart(2, '0')}:${t.slice(-2)}` : '');
+  const dayRow = (t) => { const d = new Date(t); return { date: `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${String(d.getUTCFullYear() % 100).padStart(2, '0')}`, day: WEEKDAYS[d.getUTCDay()] }; };
+  const ddMon = (t) => { const m = /^(\d{2})([A-Z]{3})$/.exec(t); return m && monthOf(m[2]) >= 0 ? Date.UTC(year, monthOf(m[2]), +m[1]) : null; };
+  let head = null;      // the leg header's columns: name -> x
+  let pairing = null;   // { start, legs: [], pending: [] } of the pairing being read
+  let lastLeg = null, lastDate = null, nextRept = null, dutyDay = null; // dutyDay: the date of the duty's C/I
+  let first = null, last = null;
+  const legRows = [];
+  const flush = () => { if (pairing) for (const r of pairing.legs) if (pairing.crew && r.flown) r.crew = pairing.crew; pairing = null; };
+  for (const page of pages) {
+    for (const line of toLines(page.items)) {
+      const texts = line.items.map(i => i.text);
+      const at = (name) => { if (!head || head[name] == null) return ''; return line.items.find(i => Math.abs(i.x - head[name]) < 3)?.text.trim() || ''; };
+      const itemAt = (name) => (head && head[name] != null ? line.items.find(i => Math.abs(i.x - head[name]) < 3) : null);
+      // a pairing: "B5282C : 08JUN | ... | BSE REPT: 1636L"
+      const ph = /^(\S+) : (\d{2}[A-Z]{3})$/.exec(texts[0] || '');
+      if (ph) {
+        flush();
+        const start = ddMon(ph[2]);
+        const rept = /BSE REPT: (\d{4})L/.exec(texts.join(' '));
+        pairing = { start, legs: [] };
+        nextRept = rept ? { time: rept[1], item: line.items.find(i => /BSE REPT/.test(i.text)) } : null;
+        lastDate = start;
+        continue;
+      }
+      if (texts[0] === 'DY' && texts.includes('DPS-ARS')) { head = Object.fromEntries(line.items.map(i => [i.text, i.x])); continue; }
+      if (texts[0] === 'Activity' && texts.includes('Start Date')) { head = Object.fromEntries(line.items.map(i => [i.text, i.x])); continue; }
+      if (/^Crew:/.test(texts[0] || '')) continue;
+      // the pairing's crew: "CA | 4992 | SMITHLING, BRETT | FO | 45831 | YATES, JARED-CK"
+      if (pairing && /^(CA|FO|FA|FE|SO)$/.test(texts[0] || '')) {
+        const crew = [];
+        for (let k = 0; k + 2 < texts.length; k += 3) if (/^[A-Z]{2}$/.test(texts[k]) && /^\d+$/.test(texts[k + 1])) crew.push(`[${texts[k]} - ${texts[k + 1]} - ${texts[k + 2]}]`);
+        pairing.crew = crew.join('');
+        for (const r of pairing.legs) if (r.flown) mark(r, 'crew', line.items);
+        continue;
+      }
+      // a single activity: HST | 22JUN | 09:00 | 22JUN | 17:00 | 0400
+      if (head && head['Start Date'] != null && ddMon(at('Start Date')) != null && at('Activity')) {
+        flush();
+        const s = ddMon(at('Start Date')), e = ddMon(at('End Date'));
+        const days = e != null ? Math.round((e - s) / 86400000) : 0;
+        const row = {
+          section: 'published', ...dayRow(s), duty: at('Activity'), begin: at('Start Time').replace(':', ''),
+          end: at('End Time') ? `${at('End Time').replace(':', '')}${days ? `+${days}` : ''}` : '', notes: [dur(at('Credit')) && `[Credit: ${dur(at('Credit'))}]`].filter(Boolean),
+        };
+        rows.push(row);
+        for (const [f, n] of [['duty', 'Activity'], ['date', 'Start Date'], ['begin', 'Start Time'], ['end', 'End Time'], ['info', 'Credit']]) mark(row, f, itemAt(n));
+        first ??= s; last = s;
+        continue;
+      }
+      // the duty end: " | D-END: 2002L REPT: 0949L | hotel | phone" or "D-END: 2001L    T.A.F.B.: 5125    DHD: 0450    TRIP RIG: 0023"
+      const dend = /D-END: (\d{4})L/.exec(texts.join(' '));
+      if (pairing && dend && lastLeg) {
+        const text = texts.join(' ');
+        const legEnd = lastLeg.endMin;
+        const endMin = +dend[1].slice(0, 2) * 60 + +dend[1].slice(2);
+        // on the duty's date (its C/I), "+1" when it ends a later day
+        const base = dutyDay ?? lastLeg.t;
+        const plus = Math.round((lastLeg.t - base) / 86400000) + (lastLeg.endDays || 0) + (endMin < legEnd ? 1 : 0);
+        const totals = lastLeg.totals || [];
+        const co = {
+          section: 'published', ...dayRow(base), duty: 'C/O', arr: lastLeg.arr, end: `${dend[1]}${plus ? `+${plus}` : ''}`,
+          notes: [...totals, ...[['TAFB', /T\.A\.F\.B\.: (\d{3,5})/], ['Trip rig', /TRIP RIG: (\d{3,4})/]].map(([k, re]) => { const m = re.exec(text); return m && dur(m[1]) && `[${k}: ${dur(m[1])}]`; }).filter(Boolean)],
+        };
+        rows.push(co);
+        mark(co, 'co', line.items.find(i => /D-END/.test(i.text)));
+        const rept = /REPT: (\d{4})L/.exec(text.replace(/BSE REPT/g, ''));
+        nextRept = rept ? { time: rept[1], item: line.items.find(i => /REPT/.test(i.text)) } : null;
+        const hotel = texts.slice(1).filter(t => !/D-END|REPT|T\.A\.F\.B|TRIP RIG/.test(t)).join(' ').trim();
+        if (hotel && lastLeg.layover) {
+          const h = { section: 'published', ...dayRow(base), duty: 'H', dep: lastLeg.layover.station, notes: [hotel, lastLeg.layover.time && `[Layover: ${lastLeg.layover.time}]`].filter(Boolean) };
+          rows.push(h);
+          mark(h, 'hotel', line.items.slice(1).filter(i => !/D-END/.test(i.text)));
+        }
+        lastLeg = null;
+        continue;
+      }
+      // a leg: WE | 08 | DH? | C? | 641 | BOS-CLE | 1732 | 1947 | 0215 | GRNT ...
+      const route = /^([A-Z]{3})-([A-Z]{3})$/.exec(at('DPS-ARS'));
+      if (!pairing || !route || !/^\d{2}$/.test(at('DD'))) continue;
+      let t = Date.UTC(new Date(lastDate).getUTCFullYear(), new Date(lastDate).getUTCMonth(), +at('DD'));
+      if (t < lastDate - 15 * 86400000) t = Date.UTC(new Date(lastDate).getUTCFullYear(), new Date(lastDate).getUTCMonth() + 1, +at('DD')); // into the next month
+      lastDate = t;
+      const dep = at('DEPL'), arr = at('ARRL');
+      const depMin = +dep.slice(0, 2) * 60 + +dep.slice(2), arrMin = +arr.slice(0, 2) * 60 + +arr.slice(2);
+      const endDays = arrMin < depMin ? 1 : 0;
+      if (nextRept) {
+        const reptMin = +nextRept.time.slice(0, 2) * 60 + +nextRept.time.slice(2);
+        const ct = reptMin > depMin ? t - 86400000 : t; // reported the evening before a leg after midnight
+        const ci = { section: 'published', ...dayRow(ct), duty: 'C/I', dep: route[1], begin: nextRept.time, notes: [] };
+        rows.push(ci);
+        mark(ci, 'ci', nextRept.item);
+        nextRept = null;
+        dutyDay = ct;
+      }
+      const flag = /^(PAY|DRP)$/.test(at('GRNT')) ? at('GRNT') : '';
+      const blk = at('BLKT').trim();
+      const tdf = /^(\d{4})\/(\d{4})$/.exec(at('TDUTY/FDP'));
+      const lay = /^([A-Z]{3})\s+(\d{3,4})$/.exec(at('LAYOVER'));
+      const row = {
+        section: 'published', ...dayRow(t), dc: at('DH') === 'DH' ? 'DH' : '', duty: at('FLTNO'), dep: route[1], arr: route[2], begin: dep, end: `${arr}${endDays ? '+1' : ''}`,
+        notes: [dur(blk) && `[Block: ${dur(blk)}]`, flag && `[${flag}]`].filter(Boolean), flown: !flag && at('DH') !== 'DH',
+      };
+      rows.push(row);
+      pairing.legs.push(row);
+      for (const [f, n] of [['date', 'DD'], ['dc', 'DH'], ['duty', 'FLTNO'], ['route', 'DPS-ARS'], ['begin', 'DEPL'], ['end', 'ARRL'], ['info', 'BLKT'], ['info', 'GRNT']]) if (f !== 'dc' || row.dc) mark(row, f, itemAt(n));
+      lastLeg = {
+        t, arr: route[2], endMin: arrMin, endDays,
+        totals: [['Block', 'TBLK'], ['Deadhead', 'TDHD'], ['Credit', 'TCRD']].map(([k, n]) => dur(at(n)) && `[${k}: ${dur(at(n))}]`).filter(Boolean)
+          .concat(tdf ? [dur(tdf[1]) && `[Duty: ${dur(tdf[1])}]`, dur(tdf[2]) && `[FDP: ${dur(tdf[2])}]`].filter(Boolean) : []),
+        layover: lay ? { station: lay[1], time: dur(lay[2]) } : null,
+      };
+      first ??= t; last = t;
+    }
+  }
+  flush();
+  const fmt = (t) => { const x = new Date(t); return `${String(x.getUTCDate()).padStart(2, '0')}${MONTHS[x.getUTCMonth()]}${String(x.getUTCFullYear() % 100).padStart(2, '0')}`; };
+  // the month of the schedule
+  const m = sched ? monthOf(sched[1]) : -1;
+  const period = m >= 0 ? `01${MONTHS[m]}${String(year % 100).padStart(2, '0')} - ${new Date(Date.UTC(year, m + 1, 0)).getUTCDate()}${MONTHS[m]}${String(year % 100).padStart(2, '0')}`
+    : first != null ? `${fmt(first)} - ${fmt(last)}` : null;
+  const out = rows.map(({ flown, ...r }) => outputRow({ ...r, info: r.notes.join(' ') }, 'L'));
+  return { format: 'flica-schedule', period, notices: [], recognized: out.length > 0, published: out, planned: [], _trace: trace, _rows: rows };
+}
+
+/** The duty table of a "Trip Information" page: its header line (Day | Flight | Departure-Arrival | Start(LT) | ...). */
+function findTripInfoHeader(page) {
+  if (!page.items.some(i => i.text === 'Trip Information')) return null;
+  const lines = toLines(page.items);
+  const k = lines.findIndex(l => ['Day', 'Flight', 'Departure-Arrival', 'Start(LT)', 'End(LT)'].every(t => l.items.some(i => i.text === t)));
+  if (k < 0) return null;
+  const head = lines[k];
+  const x = (t) => head.items.find(i => i.text === t)?.x;
+  // "Duty Summary" / "Trip Summary" stand on the line above it, over their own columns
+  const above = lines[k - 1]?.items || [];
+  return {
+    y: head.y,
+    cols: ['Day', 'Flight', 'Departure-Arrival', 'Start(LT)', 'End(LT)', 'Start', 'End', 'Block', 'A/C', 'Cnx'].filter(x).map(name => ({ name, x: x(name) })),
+    summary: above.find(i => i.text === 'Duty Summary')?.x ?? Infinity,
+    trip: above.find(i => i.text === 'Trip Summary')?.x ?? Infinity,
+  };
+}
+
+/**
+ * "Trip Information" (one trip of a cargo / charter airline): its duties top down, each
+ *   Duty start | 15:15                                  (UTC)        Duty  | 18:45   (Duty Summary)
+ *   Mon | 484 | SUU-YQX | 11:45 | 22:30 | 18:45 | 01:00 | 06:15 | 74Y | 01:42      Block | 13:03
+ *   Tue | 484 | YQX-RZE | ...                                                     Rest  | 19:30
+ *   17Aug | Duty end | 10:00
+ * The date on the "Duty end" line is the (UTC) day the duty starts; a leg's weekday is its UTC start day
+ * (the year from "Operates: Only on Sun 16Aug2026"). Rows as in the Crew Roster Report: a C/I row (the duty
+ * start, dep), a row per leg (duty = Flight, "DH DL1582" -> dc DH; begin / end "18:45 Z / 11:45 L" UTC then
+ * local with their day offsets; ac = A/C; info "[Block: 06:15] [Cnx: 01:42]"), a C/O row on the duty's date
+ * (the duty end, arr; info the Duty Summary "[Duty: 18:45] [Block: 13:03] [Rest: 19:30]"). The crew of the
+ * trip (page "Crew on trip": Pos | Crew ID | Name) is the crew of every flight with an aircraft type.
+ * The Trip Summary column (homebase, totals) is left out.
+ */
+function parseTripInformation(pages) {
+  const trace = startTrace();
+  const rows = [];
+  const DAY = 86400000;
+  const all = pages.flatMap(p => p.items.map(i => i.text)).join(' ');
+  let year = Number(/Operates:.*?\d{1,2}[A-Z][a-z]{2}(\d{4})/.exec(all)?.[1] || /Date:\s*\d{1,2}[A-Z][a-z]{2}(\d{4})/.exec(all)?.[1] || new Date().getUTCFullYear());
+  let lastMonth = -1;
+  const minutes = (t) => { const m = /^(\d{1,2}):(\d{2})$/.exec(t || ''); return m ? +m[1] * 60 + +m[2] : null; };
+  const isTime = (t) => minutes(t) != null;
+  // the trip's crew (page 2): "CP | 2465 | Peter Schweyher"
+  const crew = [];
+  for (const page of pages) {
+    const lines = toLines(page.items);
+    const k = lines.findIndex(l => ['Pos', 'Crew ID', 'Name'].every(t => l.items.some(i => i.text === t)));
+    if (k < 0) continue;
+    for (const l of lines.slice(k + 1)) {
+      const [pos, id, ...name] = l.items.map(i => i.text);
+      if (!/^[A-Z]{2,4}$/.test(pos || '') || !/^\d+$/.test(id || '') || !name.length) continue;
+      crew.push({ text: `[${pos} - ${id} - ${name.join(' ')}]`, items: l.items });
+    }
+  }
+  const crewText = crew.map(c => c.text).join('');
+  const crewItems = crew.flatMap(c => c.items);
+  const off = (n) => (n ? ` ${n > 0 ? '+' : ''}${n}` : '');
+  // "18:45" UTC with its local "11:45": "18:45 Z / 11:45 L -1", day offsets from `base` (the row's date)
+  const zl = (utcDay, z, l, base) => {
+    const t = utcDay + minutes(z) * 60000;
+    let s = `${z} Z${off(Math.floor((t - base) / DAY))}`;
+    if (isTime(l)) {
+      const offset = ((minutes(l) - minutes(z) + 720 + 2880) % 1440) - 720; // local - UTC, minutes
+      s += ` / ${l} L${off(Math.floor((t + offset * 60000 - base) / DAY))}`;
+    }
+    return { s, t };
+  };
+  let first = null, last = null;
+  for (const page of pages) {
+    const header = findTripInfoHeader(page);
+    if (!header) continue;
+    const colOf = (it) => {
+      if (it.x >= header.trip - 3) return 'trip';
+      if (it.x >= header.summary - 3) return it.x >= header.summary + 40 ? 'sumValue' : 'sumLabel';
+      return [...header.cols].reverse().find(c => it.x >= c.x - 4)?.name || header.cols[0].name;
+    };
+    let duty = null;
+    for (const line of toLines(page.items.filter(i => i.y > header.y + 2))) {
+      const cell = {};
+      for (const it of line.items) (cell[colOf(it)] ||= []).push(it);
+      const get = (c) => (cell[c] || []).map(i => i.text).join(' ').trim();
+      const flight = get('Flight');
+      if (flight === 'Duty start') duty = { start: get('Start'), startItems: cell.Start, legs: [], summary: [] };
+      if (!duty) continue;
+      if (get('sumLabel') && get('sumValue')) duty.summary.push({ text: `[${get('sumLabel')}: ${get('sumValue')}]`, value: get('sumValue'), items: [...cell.sumLabel, ...cell.sumValue] });
+      if (WEEKDAYS.includes(get('Day')) && flight !== 'Duty start' && flight !== 'Duty end') duty.legs.push({ day: get('Day'), cell, get: (c) => (cell[c] || []).map(i => i.text).join(' ').trim() });
+      if (flight !== 'Duty end') continue;
+      // the duty's date, then its rows
+      const m = /^(\d{1,2})([A-Z][a-z]{2})$/.exec(get('Day'));
+      const month = m ? MONTHS.indexOf(m[2]) : -1;
+      if (month < 0) { duty = null; continue; }
+      if (lastMonth >= 0 && month < lastMonth) year += 1; // December -> January
+      lastMonth = month;
+      const D = Date.UTC(year, month, +m[1]);
+      const dateOf = (t) => { const d = new Date(t); return { date: `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${String(d.getUTCFullYear() % 100).padStart(2, '0')}`, day: WEEKDAYS[d.getUTCDay()] }; };
+      const route = (leg) => /^([A-Z]{3})-([A-Z]{3})$/.exec(leg.get('Departure-Arrival')) || [];
+      if (isTime(duty.start)) {
+        const ci = { section: 'published', ...dateOf(D), duty: 'C/I', dep: route(duty.legs[0] || { get: () => '' })[1] || '', begin: duty.start, notes: [] };
+        rows.push(ci);
+        mark(ci, 'ci', duty.startItems);
+      }
+      let lastEnd = D + (minutes(duty.start) || 0) * 60000;
+      for (const leg of duty.legs) {
+        const g = leg.get;
+        // its UTC start day: the first day from the duty's date with its weekday
+        const day = D + ((WEEKDAYS.indexOf(leg.day) - new Date(D).getUTCDay() + 7) % 7) * DAY;
+        const begin = isTime(g('Start')) ? zl(day, g('Start'), g('Start(LT)'), day) : null;
+        let endDay = day;
+        if (begin && isTime(g('End')) && minutes(g('End')) < minutes(g('Start'))) endDay += DAY;
+        const end = isTime(g('End')) ? zl(endDay, g('End'), g('End(LT)'), day) : null;
+        const [, dep = '', arr = ''] = route(leg);
+        const dh = /^DH\s+(.+)$/.exec(g('Flight'));
+        const ac = g('A/C') === '-' ? '' : g('A/C');
+        const row = {
+          section: 'published', ...dateOf(day), dc: dh ? 'DH' : '', duty: dh ? dh[1] : g('Flight'), dep, arr,
+          begin: begin?.s || '', end: end?.s || '', ac, crew: ac ? crewText : '',
+          notes: [isTime(g('Block')) && `[Block: ${g('Block')}]`, isTime(g('Cnx')) && `[Cnx: ${g('Cnx')}]`].filter(Boolean),
+        };
+        rows.push(row);
+        for (const [f, c] of [['date', 'Day'], ['duty', 'Flight'], ['route', 'Departure-Arrival'], ['begin', 'Start'], ['begin', 'Start(LT)'], ['end', 'End'], ['end', 'End(LT)'], ['ac', 'A/C']]) mark(row, f, leg.cell[c]);
+        if (isTime(g('Block'))) mark(row, 'info', leg.cell.Block);
+        if (isTime(g('Cnx'))) mark(row, 'info', leg.cell.Cnx);
+        if (ac) mark(row, 'crew', crewItems);
+        first ??= day;
+        last = day;
+        if (end) lastEnd = end.t;
+      }
+      if (isTime(get('End'))) {
+        // the duty end: at or after its last leg's arrival
+        let t = D + Math.floor((lastEnd - D) / DAY) * DAY + minutes(get('End')) * 60000;
+        if (t < lastEnd) t += DAY;
+        const lastLeg = duty.legs.at(-1);
+        const co = {
+          section: 'published', ...dateOf(D), duty: 'C/O', arr: lastLeg ? route(lastLeg)[2] || '' : '',
+          end: `${get('End')}${Math.floor((t - D) / DAY) ? `+${Math.floor((t - D) / DAY)}` : ''}`,
+          notes: duty.summary.filter(s => s.value !== '-').map(s => s.text),
+        };
+        rows.push(co);
+        mark(co, 'co', cell.End);
+        for (const s of duty.summary.filter(x => x.value !== '-')) mark(co, 'info', s.items);
+      }
+      first ??= D;
+      last = Math.max(last ?? D, D);
+      duty = null;
+    }
+  }
+  const fmt = (t) => { const d = new Date(t); return `${String(d.getUTCDate()).padStart(2, '0')}${MONTHS[d.getUTCMonth()]}${String(d.getUTCFullYear() % 100).padStart(2, '0')}`; };
+  const out = rows.map(r => outputRow({ ...r, info: r.notes.join(' ') }));
+  return { format: 'trip-information', period: first != null ? `${fmt(first)} - ${fmt(last)}` : null, notices: [], recognized: out.length > 0, published: out, planned: [], _trace: trace, _rows: rows };
+}
+
 function findActivityListHeader(page) {
   for (const line of toLines(page.items)) {
     const at = (t) => line.items.find(i => i.text === t);
@@ -1110,7 +1504,7 @@ function parseMonthRoster(pages) {
  * FLIGHT/CALLSIGN "FI665(ICE665)" -> duty FI665, REGISTRATION -> registration, AIRCRAFT TYPE -> ac,
  * DEPARTURE DATE "22 SEP 2026" -> date, the airports' "BIKF / KEF" -> dep/arr (IATA), the
  * "OOOI timeline" (STD, OFF BLOCK, TAKEOFF, LANDING, ON BLOCK, STA, AIR TIME, BLOCK ACT., UTC):
- * OFF BLOCK -> begin, ON BLOCK -> end, STD / STA / block time -> info. Times in UTC.
+ * OFF BLOCK -> begin, TAKEOFF -> takeoff, LANDING -> landing, ON BLOCK -> end, STD / STA / block time -> info. Times in UTC.
  */
 const isPostflight = (pages) => pages.some(p => p.items.some(i => i.text === 'FLIGHT/CALLSIGN')) && pages.some(p => p.items.some(i => /P O S T F L I G H T/.test(i.text)));
 
@@ -1136,13 +1530,13 @@ function parsePostflight(pages) {
   const rows = [];
   if (callsign && d) {
     const month = MONTHS.findIndex(m => m.toUpperCase() === d[2]);
-    const [std, off, , , on, sta, , block] = t;
+    const [std, off, takeoff, landing, on, sta, , block] = t;
     const iata = (it) => it?.text.split(' / ')[1] || '';
     const fmt = (it) => (it ? `${it.text.slice(0, 2)}:${it.text.slice(2)}` : '');
     const row = {
       section: 'published', date: `${Number(d[1])} ${MONTHS[month]} ${d[3].slice(2)}`, day: WEEKDAYS[new Date(Number(d[3]), month, Number(d[1])).getDay()],
       duty: callsign.text.replace(/\(.*$/, ''), registration: reg?.text || '', ac: type?.text || '',
-      dep: iata(airports[0]), arr: iata(airports[1]), begin: off?.text || '', end: on?.text || '',
+      dep: iata(airports[0]), arr: iata(airports[1]), begin: off?.text || '', takeoff: takeoff?.text || '', landing: landing?.text || '', end: on?.text || '',
       notes: [std && `[STD ${fmt(std)} Z]`, sta && `[STA ${fmt(sta)} Z]`, block && `[Block: ${fmt(block)}]`].filter(Boolean),
     };
     rows.push(row);
@@ -1153,6 +1547,8 @@ function parsePostflight(pages) {
     mark(row, 'arr', airports[1] ? [wordsIn(airports[1]).pop()] : []);
     mark(row, 'ac', [type]);
     mark(row, 'begin', [off]);
+    mark(row, 'takeoff', [takeoff]);
+    mark(row, 'landing', [landing]);
     mark(row, 'end', [on]);
     mark(row, 'info', [std, sta, block].filter(Boolean));
   }
@@ -1975,6 +2371,9 @@ function parseAny(pages) {
   // CSV / Excel: read by their column headers (services/table-roster-parser.js)
   const table = parseTableRoster(pages, { mark, startTrace });
   if (table) return table;
+  if (pages.some(isLotLogbook)) return parseLotLogbook(pages);
+  if (pages.some(isFlicaSchedule)) return parseFlicaSchedule(pages);
+  if (pages.some(findTripInfoHeader)) return parseTripInformation(pages);
   if (pages.some(findActivityListHeader)) return parseActivityList(pages);
   if (pages.some(findLogBookHeader)) return parseLogBookReport(pages);
   if (pages.some(findDayBlockHeader)) return parseDayBlocks(pages);

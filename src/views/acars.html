@@ -43,6 +43,54 @@
     .meta { font-size: 12px; color: var(--muted); margin-top: 10px; }
     .actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
     .btn.sent, .btn.sent:disabled { background: #2e7d32; color: #fff; border-color: #2e7d32; cursor: default; }
+    /* Correction popup ("Suggest a correction"): as /label's viewer, the picture on the left, its values on the right */
+    .viewer { position: fixed; inset: 0; z-index: 1000; background: rgba(20, 28, 42, .55); display: flex; padding: 14px; }
+    .viewer[hidden] { display: none; }
+    body.viewer-open { overflow: hidden; }
+    .viewer-box { background: var(--bg); border-radius: 10px; box-shadow: 0 10px 40px rgba(0,0,0,.35); flex: 1; display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
+    .viewer-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 8px 12px; background: var(--card); border-bottom: 1px solid var(--border); }
+    .viewer-head .title { display: flex; gap: 4px 8px; align-items: center; flex-wrap: wrap; min-width: 0; flex: 1 1 320px; }
+    .viewer-head .title b { white-space: nowrap; font-size: 14px; color: var(--nav-bg); }
+    .viewer-head .file-name { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 11.5px; color: var(--muted); word-break: break-all; flex: 1 1 200px; min-width: 0; }
+    .viewer-head .pos { font-size: 12px; color: var(--muted); white-space: nowrap; }
+    .viewer .vbtn { cursor: pointer; border: none; border-radius: 6px; padding: 6px 12px; font-size: 13px; background: var(--primary); color: #fff; display: inline-flex; gap: 6px; align-items: center; }
+    .viewer .vbtn:hover:not(:disabled) { background: var(--primary-dark); }
+    .viewer .vbtn:disabled { opacity: .5; cursor: default; }
+    .viewer .vbtn.secondary { background: var(--secondary); border: none; color: #fff; }
+    .viewer .vbtn.secondary:hover:not(:disabled) { background: var(--secondary-dark); }
+    .viewer .vbtn.small { padding: 3px 8px; font-size: 12px; }
+    .viewer-head .close { background: transparent; color: #555; font-size: 22px; line-height: 1; padding: 2px 8px; border: none; cursor: pointer; border-radius: 6px; }
+    .viewer-head .close:hover { background: #eceff3; }
+    .state-badge { display: inline-block; padding: 1px 6px; border-radius: 8px; font-size: 10px; font-weight: 600; background: #ede7f6; color: #5e35b1; }
+    .state-badge.parser { background: #e3f2fd; color: #1565c0; }
+    .state-badge.sent { background: #d3f3d3; color: #2a7d2a; }
+    .state-badge.draft { background: #fff3cd; color: #8a5a00; }
+    .viewer-body { --split: 50%; flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, var(--split)) 12px minmax(0, 1fr); padding: 10px; }
+    .viewer-body > .vpanel { min-height: 0; overflow: auto; background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 12px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+    .splitter { cursor: col-resize; border-radius: 4px; position: relative; touch-action: none; }
+    .splitter::after { content: ''; position: absolute; left: 5px; top: calc(50% - 24px); width: 2px; height: 48px; border-radius: 1px; background: #b8c2d1; }
+    .splitter:hover, .splitter.dragging { background: #d6e1f1; }
+    @media (max-width: 900px) {
+      .viewer { padding: 0; }
+      .viewer-box { border-radius: 0; }
+      .viewer-body { grid-template-columns: 1fr; grid-template-rows: minmax(220px, 40%) minmax(0, 1fr); gap: 8px; overflow: hidden; }
+      .splitter { display: none; }
+    }
+    .v-preview img { max-width: 100%; align-self: flex-start; border: 1px solid #eee; border-radius: 6px; cursor: zoom-in; }
+    .v-preview img.zoomed { max-width: none; cursor: zoom-out; }
+    .v-tools { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+    .v-tools .spacer { flex: 1; }
+    .v-hint { font-size: 12px; color: #5d4037; background: #fff8e1; border: 1px solid #ffe082; border-radius: 6px; padding: 6px 10px; }
+    .v-status { font-size: 12px; min-height: 18px; }
+    .v-status.ok { color: #2a7d2a; }
+    .v-status.err { color: #c33; }
+    .v-status.busy { color: #888; }
+    .v-form { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 12px; align-items: center; max-width: 560px; }
+    .v-form label { font-size: 13px; font-weight: 600; color: #445; }
+    .v-form input { padding: 6px 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; font-family: Consolas, monospace; }
+    .v-form input:focus { outline: none; border-color: #ffc107; box-shadow: 0 0 0 2px #fff3c4; }
+    .v-form input:read-only { background: #f5f7fa; color: #556; }
+    .viewer.locked #vTryParse, .viewer.locked #vSubmit, .viewer.locked #vReset, .viewer.locked .v-hint { display: none; }
     .msg.ok { background: #e8f5e9; color: #1b5e20; }
 
     /* "Suggest a correction" dialog (as on /roster) */
@@ -86,10 +134,42 @@
     </div>
   </main>
 
+  <!-- Correction popup: the picture and its values to correct, picture by picture (Previous / Next) -->
+  <div class="viewer" id="viewer" hidden role="dialog" aria-modal="true" aria-labelledby="vTitle">
+    <div class="viewer-box">
+      <div class="viewer-head">
+        <div class="title">
+          <b id="vTitle">Suggest a correction</b>
+          <span class="state-badge" id="vBadge"></span>
+          <span class="file-name" id="vFile"></span>
+        </div>
+        <span class="pos" id="vPos"></span>
+        <button class="vbtn secondary small" id="vPrev" title="Previous picture (Alt+↑)"><i class="fa-solid fa-arrow-up" aria-hidden="true"></i> Previous</button>
+        <button class="vbtn secondary small" id="vNext" title="Next picture (Alt+↓)"><i class="fa-solid fa-arrow-down" aria-hidden="true"></i> Next</button>
+        <button class="close" id="vClose" title="Close (Esc)" aria-label="Close"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
+      </div>
+      <div class="viewer-body" id="vBody">
+        <div class="vpanel v-preview" id="vPreview"></div>
+        <div class="splitter" id="vSplitter" title="Drag to resize"></div>
+        <div class="vpanel">
+          <div class="v-tools">
+            <button class="vbtn secondary small" id="vTryParse" title="Read the picture with the parser instead of the AI model (replaces the values)"><i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i> Try to parse</button>
+            <button class="vbtn secondary small" id="vReset" title="Put back what the AI model read (drops your changes to this picture)"><i class="fa-solid fa-rotate-left" aria-hidden="true"></i> Reset</button>
+            <span class="spacer"></span>
+            <button class="vbtn small" id="vSubmit" title="Send the values as you corrected them to the administrators to review"><i class="fa-solid fa-paper-plane" aria-hidden="true"></i> Submit this correction</button>
+          </div>
+          <div class="v-hint">Correct the values the picture shows, or let the parser read it instead.</div>
+          <span class="v-status" id="vStatus"></span>
+          <div class="v-form" id="vForm"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <dialog class="suggest" id="suggestDialog" aria-labelledby="suggestTitle">
     <form method="dialog" id="suggestForm">
       <h3 id="suggestTitle"><i class="fa-solid fa-comment-medical" aria-hidden="true"></i> Suggest a correction</h3>
-      <p>Did the AI model read the picture wrong? Send it to the administrators: they check it, write the right values and use it to teach the AI model. The picture is kept on the server until they have handled it.</p>
+      <p>The parser could not read this picture either. Report it to the administrators: they check it, write the right values and use it to teach the AI model. The picture is kept on the server until they have handled it.</p>
       <div class="file"><i class="fa-regular fa-image" aria-hidden="true"></i> <strong id="suggestFile"></strong></div>
       <label for="suggestEmail">Your email</label>
       <input type="email" id="suggestEmail" required maxlength="254" autocomplete="email" placeholder="name@example.com">
@@ -99,7 +179,7 @@
       <div class="dlg-actions">
         <span class="err" id="suggestErr"></span>
         <button type="button" class="btn secondary" id="suggestCancel">Cancel</button>
-        <button type="submit" class="btn" id="suggestSend"><i class="fa-solid fa-paper-plane" aria-hidden="true"></i> Send</button>
+        <button type="submit" class="btn" id="suggestSend"><i class="fa-solid fa-flag" aria-hidden="true"></i> Report</button>
       </div>
     </form>
   </dialog>
@@ -108,8 +188,9 @@
     const $ = (id) => document.getElementById(id);
     const escapeHtml = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[c]));
     const FIELDS = [['flt', 'Flt No'], ['date', 'Date'], ['dept', 'Dept'], ['dest', 'Dest'], ['out', 'Out'], ['off', 'Off'], ['on', 'On'], ['in', 'In'], ['info', 'Info']];
-    let last = null, busy = false;
-    let current = null; // { file, name, fields, suggestion } of the picture shown
+    let busy = false;
+    let current = null; // { file, name, url, fields, meta, suggestion, draft } of the picture shown
+    const shots = [];   // every picture read in this visit, for the correction popup's Previous / Next
 
     function showMsg(text, kind) {
       const m = $('msg');
@@ -123,8 +204,8 @@
         fields[k] ? `<dd>${escapeHtml(fields[k])}</dd>` : `<dd class="none">${__('not read')}</dd>`}`).join('')}</dl>
         <div class="meta">${escapeHtml(meta)}</div>
         <div class="actions"><button class="btn secondary" id="copyBtn"><i class="fa-regular fa-copy" aria-hidden="true"></i> <span>${__('Copy')}</span></button>
-          <button class="btn secondary" id="suggestBtn" title="${escapeHtml(__('A value is wrong? Send the picture to the administrators to check'))}"><i class="fa-solid fa-comment-medical" aria-hidden="true"></i> <span>${__('Suggest a correction')}</span></button></div>`;
-      $('suggestBtn').addEventListener('click', openSuggest);
+          <button class="btn secondary" id="suggestBtn" title="${escapeHtml(__('A value is wrong? Correct it and send it to the administrators'))}"><i class="fa-solid fa-comment-medical" aria-hidden="true"></i> <span>${__('Suggest a correction')}</span></button></div>`;
+      $('suggestBtn').addEventListener('click', () => openViewer(current));
       renderSuggestBtn();
       $('copyBtn').addEventListener('click', async () => {
         const text = FIELDS.map(([k, label]) => `${label}: ${fields[k] || '-'}`).join('\n');
@@ -140,10 +221,9 @@
       }
       busy = true;
       $('scanBtn').disabled = $('pickBtn').disabled = true;
-      if (last) URL.revokeObjectURL(last);
-      last = URL.createObjectURL(file);
+      const url = URL.createObjectURL(file); // kept: the popup shows the pictures read before too
       $('layout').hidden = false; // shown from the first picture on
-      $('picture').innerHTML = `<img src="${last}" alt="${escapeHtml(file.name)}">`;
+      $('picture').innerHTML = `<img src="${url}" alt="${escapeHtml(file.name)}">`;
       $('fields').innerHTML = `<div class="empty"><i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i> ${__('Reading the picture…')}</div>`;
       hideMsg();
       try {
@@ -154,8 +234,10 @@
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
         const secs = ((data.ms || 0) / 1000).toFixed(1);
-        current = { file, name: file.name || 'acars.jpg', fields: data.fields || {}, suggestion: null };
-        renderFields(data.fields || {}, __('Read in {s} s by the AI model (trained {when}).', { s: secs, when: data.model?.trainedAt ? new Date(data.model.trainedAt).toLocaleString() : '?' }));
+        const meta = __('Read in {s} s by the AI model (trained {when}).', { s: secs, when: data.model?.trainedAt ? new Date(data.model.trainedAt).toLocaleString() : '?' });
+        current = { file, name: file.name || 'acars.jpg', url, fields: data.fields || {}, meta, suggestion: null };
+        shots.push(current);
+        renderFields(data.fields || {}, meta);
       } catch (err) {
         $('fields').innerHTML = `<div class="empty">${__('Nothing read.')}</div>`;
         showMsg(__(err.message), 'err');
@@ -165,20 +247,181 @@
       }
     }
 
-    // ---- Suggest a correction: the picture + what the model read go to the admins (/helpdesk) ----
+    // ---- Suggest a correction: a popup as /label's viewer ----
+    // The picture on the left, its values as inputs on the right; Previous / Next go through the pictures read in this
+    // visit, each keeping its own unsent changes (shot.draft). "Try to parse" lets the parser read the picture instead;
+    // "Submit this correction" sends the picture with the values (/api/acars/corrections: it joins the ACARS data,
+    // waiting for an admin's review on /label). When the parser reads nothing either, the "Report" dialog sends the
+    // picture with a note instead (/api/acars/suggestions).
     const suggestDialog = $('suggestDialog');
+    const viewer = $('viewer');
+    const viewerOpen = () => !viewer.hidden;
+    let vShot = null; // the picture shown in the popup
+    const fileOf = (pic) => [pic.file, /\.(jpe?g|png|bmp|jfif)$/i.test(pic.name) ? pic.name : 'acars.jpg'];
+
     function renderSuggestBtn() {
       const btn = $('suggestBtn');
       if (!btn) return;
-      const sent = !!current?.suggestion;
-      btn.disabled = sent;
-      btn.classList.toggle('sent', sent);
+      const sent = current?.suggestion;
+      btn.classList.toggle('sent', !!sent);
       btn.querySelector('i').className = sent ? 'fa-solid fa-check' : 'fa-solid fa-comment-medical';
-      btn.querySelector('span').textContent = sent ? __('Suggestion sent') : __('Suggest a correction');
+      btn.querySelector('span').textContent = !sent ? __('Suggest a correction') : sent.review ? __('Correction sent') : __('Suggestion sent');
     }
-    function openSuggest() {
-      if (!current || current.suggestion) return;
-      $('suggestFile').textContent = current.name;
+    function vStatus(kind, msg) { const el = $('vStatus'); el.className = `v-status ${kind || ''}`; el.textContent = msg || ''; }
+    function vBadge(shot) {
+      const b = $('vBadge'), sent = shot.suggestion;
+      const [text, kind] = sent ? [sent.review ? __('Correction sent') : __('Suggestion sent'), 'sent']
+        : shot.draftDirty ? [__('changed'), 'draft'] : shot.draftBy === 'parser' ? [__('read by the parser'), 'parser'] : ['AI model', ''];
+      b.className = `state-badge ${kind}`;
+      b.textContent = text;
+    }
+    const vValues = () => Object.fromEntries(FIELDS.map(([k]) => [k, $('ve-' + k)?.value.trim() || '']));
+    function keepDraft() { if (vShot?.draftDirty && !vShot.suggestion) vShot.draft = vValues(); }
+
+    function openViewer(shot) {
+      if (!shot) return;
+      viewer.hidden = false;
+      document.body.classList.add('viewer-open');
+      showInViewer(shot);
+    }
+    function closeViewer() {
+      if (!viewerOpen()) return;
+      keepDraft();
+      viewer.hidden = true;
+      document.body.classList.remove('viewer-open');
+      const shot = vShot;
+      vShot = null;
+      // the page shows the picture looked at last
+      if (shot && shot !== current) {
+        current = shot;
+        $('picture').innerHTML = `<img src="${shot.url}" alt="${escapeHtml(shot.name)}">`;
+      }
+      if (current) renderFields(current.fields, current.meta);
+    }
+    function showInViewer(shot) {
+      if (vShot && vShot !== shot) keepDraft();
+      vShot = shot;
+      const k = shots.indexOf(shot);
+      $('vPos').textContent = `${k + 1} / ${shots.length}`;
+      $('vPrev').disabled = k <= 0;
+      $('vNext').disabled = k >= shots.length - 1;
+      $('vFile').textContent = shot.name;
+      const img = Object.assign(document.createElement('img'), { src: shot.url, alt: shot.name, title: __('Click to zoom in / out') });
+      img.addEventListener('click', () => img.classList.toggle('zoomed'));
+      $('vPreview').replaceChildren(img);
+      const sent = shot.suggestion;
+      viewer.classList.toggle('locked', !!sent);
+      const values = sent ? shot.fields : (shot.draft || shot.fields);
+      $('vForm').innerHTML = FIELDS.map(([k, label]) => `<label for="ve-${k}">${__(label)}</label><input id="ve-${k}" data-field="${k}" autocomplete="off" spellcheck="false"${sent ? ' readonly' : ''} value="${escapeHtml(values[k] || '')}">`).join('');
+      vBadge(shot);
+      vStatus(sent ? 'ok' : '', sent ? (sent.review ? __('This correction was sent: the administrators review it.') : __('This picture was reported to the administrators.')) : '');
+      if (!sent) $('ve-flt').focus();
+    }
+    function stepViewer(delta) {
+      const k = shots.indexOf(vShot) + delta;
+      if (k >= 0 && k < shots.length) showInViewer(shots[k]);
+    }
+    $('vForm').addEventListener('input', () => { if (vShot) { vShot.draftDirty = true; vBadge(vShot); } });
+    $('vPrev').addEventListener('click', () => stepViewer(-1));
+    $('vNext').addEventListener('click', () => stepViewer(1));
+    $('vClose').addEventListener('click', closeViewer);
+    viewer.addEventListener('mousedown', (e) => { if (e.target === viewer) closeViewer(); }); // a click outside the box
+    $('vReset').addEventListener('click', () => {
+      const shot = vShot;
+      if (!shot || shot.suggestion) return;
+      if (shot.draftDirty && !confirm(__('Drop the changes you made to the values?'))) return;
+      Object.assign(shot, { draft: null, draftDirty: false, draftBy: null });
+      showInViewer(shot);
+    });
+    document.addEventListener('keydown', (e) => {
+      if (!viewerOpen() || suggestDialog.open) return;
+      if (e.key === 'Escape') { e.preventDefault(); closeViewer(); }
+      else if (e.altKey && e.key === 'ArrowDown') { e.preventDefault(); stepViewer(1); }
+      else if (e.altKey && e.key === 'ArrowUp') { e.preventDefault(); stepViewer(-1); }
+    });
+    // Drag the bar between the picture and the values to resize them (remembered per browser)
+    {
+      const body = $('vBody'), bar = $('vSplitter');
+      try { const saved = Number(localStorage.getItem('acars.split')); if (saved >= 20 && saved <= 80) body.style.setProperty('--split', saved + '%'); } catch { /* storage blocked */ }
+      bar.addEventListener('pointerdown', (e) => {
+        try { bar.setPointerCapture(e.pointerId); } catch { /* not a live pointer */ }
+        bar.classList.add('dragging');
+        const move = (ev) => {
+          const r = body.getBoundingClientRect();
+          body.style.setProperty('--split', Math.min(80, Math.max(20, ((ev.clientX - r.left) / r.width) * 100)).toFixed(1) + '%');
+        };
+        bar.addEventListener('pointermove', move);
+        bar.addEventListener('pointerup', () => {
+          bar.classList.remove('dragging');
+          bar.removeEventListener('pointermove', move);
+          try { localStorage.setItem('acars.split', parseFloat(body.style.getPropertyValue('--split')) || ''); } catch { /* storage blocked */ }
+        }, { once: true });
+      });
+    }
+
+    // Try to parse: the parser reads the picture; its values replace the inputs. Nothing read: the Report dialog.
+    $('vTryParse').addEventListener('click', async () => {
+      const shot = vShot, btn = $('vTryParse');
+      if (!shot || shot.suggestion) return;
+      if (shot.draftDirty && !confirm(__('The parser\'s values replace yours. Go on?'))) return;
+      btn.disabled = true;
+      vStatus('busy', __('The parser is reading the picture…'));
+      try {
+        const body = new FormData();
+        body.append('file', ...fileOf(shot));
+        const res = await fetch('/api/acars/read?engine=parser', { method: 'POST', body });
+        const data = await res.json().catch(() => ({}));
+        if (shot !== vShot) return;
+        const read = data.fields || {};
+        if (!res.ok || !FIELDS.some(([k]) => read[k])) {
+          vStatus('err', res.ok ? __('The parser could not read any value of this picture.') : __('The parser could not read this picture: {error}', { error: __(data.error || `HTTP ${res.status}`) }));
+          openSuggest(shot);
+          return;
+        }
+        Object.assign(shot, { draft: Object.fromEntries(FIELDS.map(([k]) => [k, read[k] || ''])), draftDirty: false, draftBy: 'parser' });
+        showInViewer(shot);
+        vStatus('ok', __('The parser read the picture: check the values against it, fix what is wrong, then click Submit this correction.'));
+      } catch (err) {
+        if (shot === vShot) vStatus('err', __(err.message));
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    // Submit this correction: the picture + the values as corrected go to the admins, to review on /label.
+    $('vSubmit').addEventListener('click', async () => {
+      const shot = vShot, btn = $('vSubmit');
+      if (!shot || shot.suggestion) return;
+      const fields = vValues();
+      if (!Object.values(fields).some(Boolean)) { vStatus('err', __('Every field is empty: fill in what the picture shows, or try to parse it.')); return; }
+      btn.disabled = true;
+      vStatus('busy', __('Sending…'));
+      try {
+        const body = new FormData();
+        body.append('file', ...fileOf(shot));
+        body.append('fields', JSON.stringify(fields));
+        const res = await fetch('/api/acars/corrections', { method: 'POST', body });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+        Object.assign(shot, { suggestion: { ...data, review: true }, fields, draft: null, draftDirty: false });
+        if (shot === current) renderFields(fields, shot.meta);
+        if (shot === vShot) {
+          showInViewer(shot);
+          vStatus('ok', __('Thank you! Your correction of {name} was sent: the administrators review it and use it to teach the AI model.', { name: shot.name }));
+        }
+      } catch (err) {
+        if (shot === vShot) vStatus('err', __('Could not send it: {error}', { error: __(err.message) }));
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    // The Report dialog (over the popup): the picture, a note and the user's email to the admins (/helpdesk)
+    let reportShot = null;
+    function openSuggest(shot) {
+      if (!shot || shot.suggestion) return;
+      reportShot = shot;
+      $('suggestFile').textContent = shot.name;
       $('suggestErr').textContent = '';
       $('suggestSend').disabled = false;
       suggestDialog.showModal();
@@ -189,26 +432,29 @@
     $('suggestCancel').addEventListener('click', () => suggestDialog.close());
     $('suggestForm').addEventListener('submit', async (e) => {
       e.preventDefault();
-      const pic = current;
+      const pic = reportShot;
       if (!pic || pic.suggestion) return;
       $('suggestSend').disabled = true;
       $('suggestErr').textContent = '';
       try {
         const email = $('suggestEmail').value.trim();
         const body = new FormData();
-        body.append('file', pic.file, /\.(jpe?g|png|bmp|jfif)$/i.test(pic.name) ? pic.name : 'acars.jpg');
+        body.append('file', ...fileOf(pic));
         body.append('email', email);
         body.append('note', $('suggestNote').value.trim());
-        body.append('fields', JSON.stringify(pic.fields));
+        body.append('fields', JSON.stringify(pic === vShot ? vValues() : pic.fields));
         const res = await fetch('/api/acars/suggestions', { method: 'POST', body });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-        pic.suggestion = data;
+        Object.assign(pic, { suggestion: data, draft: null, draftDirty: false });
         try { localStorage.setItem('suggest.email', email); } catch { /* storage blocked */ }
         suggestDialog.close();
         $('suggestNote').value = '';
-        if (pic === current) renderSuggestBtn();
-        showMsg(__('Thank you! Your suggestion for {name} was sent to the administrators.', { name: pic.name }), 'ok');
+        if (pic === current) renderFields(pic.fields, pic.meta);
+        if (pic === vShot) {
+          showInViewer(pic);
+          vStatus('ok', __('Thank you! Your suggestion for {name} was sent to the administrators.', { name: pic.name }));
+        }
       } catch (err) {
         $('suggestErr').textContent = __('Could not send it: {error}', { error: __(err.message) });
         $('suggestSend').disabled = false;

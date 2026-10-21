@@ -5,7 +5,7 @@
  * retrain.
  *
  *   alignLabel(tagPages, label) -> { tokens tagged in place, stats }
- * Each token gets field (date, duty, dc, registration, dep, arr, begin, end, ac,
+ * Each token gets field (date, duty, dc, registration, dep, arr, begin, takeoff, landing, end, ac,
  * hotel, info, ci, co, co_info, O, or "?" = not sure, left out of training),
  * section and row.
  *
@@ -52,6 +52,8 @@ function labelDate(value) {
 }
 
 const norm = s => s.replace(/[[\]()]/g, '').replace(/[,;]$/, '');
+// a label's take-off / landing count, as one word to find
+const TAKEOFF_WORD = '\u0001takeoff', LANDING_WORD = '\u0001landing';
 
 export function alignLabel(tagPages, label, { ocr = false } = {}) {
   FUZZY = ocr;
@@ -197,6 +199,8 @@ export function alignLabel(tagPages, label, { ocr = false } = {}) {
       one('dc', r.dc);
       if (row.anchorField !== 'hotel') one('hotel', r.hotel);
       time('begin', r.begin);
+      time('takeoff', r.takeoff);
+      time('landing', r.landing);
       time('end', r.end);
     } else if (row.derivedCiCo && row.anchorField === 'co' && timesOf(r.begin).length) time('begin', r.begin);
     // Date: the day's first row, on its line or the lines just before it (since the previous row).
@@ -249,7 +253,9 @@ export function alignLabel(tagPages, label, { ocr = false } = {}) {
         const duty = String(row.r.duty || '').trim();
         const text = String(row.r.info || '');
         // The legend description at the end ("[SSB: Short Standby]") is printed elsewhere.
-        const own = duty && text.endsWith(']') && text.lastIndexOf(`[${duty}: `) >= 0 ? text.slice(0, text.lastIndexOf(`[${duty}: `)) : text;
+        const own = (duty && text.endsWith(']') && text.lastIndexOf(`[${duty}: `) >= 0 ? text.slice(0, text.lastIndexOf(`[${duty}: `)) : text)
+          // "[Takeoff Day/Night: 1]" is the printed "1Take-off," / "Take-off," (takeoffLandingTags), "[Landing Day/Night: 1]" "Landing"
+          .replace(/\[Takeoff Day\/Night: \d+]/g, TAKEOFF_WORD).replace(/\[Landing Day\/Night: \d+]/g, LANDING_WORD);
         row.infoLeft = own.split(/\s+/).filter(Boolean).map(norm).filter(Boolean);
         // Words that must be found: all but a bracket's name ("Block:" of "[Block: 3:25]" may be the label's own words).
         row.infoNeed = new Set();
@@ -266,8 +272,9 @@ export function alignLabel(tagPages, label, { ocr = false } = {}) {
           // "00:00][DT": stats printed without spaces are several label words.
           const parts = t.t.split(/[\])]\s*[[(]/).map(norm).filter(Boolean);
           const left = [...row.infoLeft];
-          const ok = parts.length && parts.every(w => { const k = left.indexOf(w); if (k < 0) return false; left.splice(k, 1); return true; });
-          if (ok) { take(t, infoField(row), row.sec, row.i); for (const w of parts) row.infoNeed.delete(w); row.infoLeft = left; }
+          const asLabel = w => (/^\d*Take-off$/.test(w) && left.includes(TAKEOFF_WORD) ? TAKEOFF_WORD : /^\d*Landing$/.test(w) && left.includes(LANDING_WORD) ? LANDING_WORD : w);
+          const ok = parts.length && parts.every(w => { const k = left.indexOf(asLabel(w)); if (k < 0) return false; left.splice(k, 1); return true; });
+          if (ok) { take(t, infoField(row), row.sec, row.i); for (const w of parts) row.infoNeed.delete(asLabel(w)); row.infoLeft = left; }
           else if (/^[\])]$/.test(t.t) && row.infoLeft.length >= 0 && lines[li].tokens[lines[li].tokens.indexOf(t) - 1]?.field === infoField(row)) take(t, infoField(row), row.sec, row.i);
         }
       }

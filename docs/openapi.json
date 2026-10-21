@@ -44,7 +44,7 @@
           "Roster"
         ],
         "summary": "Read a roster file",
-        "description": "Reads a crew roster into its two tables, \"Published roster\" and \"Rest of this roster is planned\", with the AI model (as on /roster). One endpoint for every file type; the server picks the reader from the file:\n\n| File | How it is read | `readMode` |\n|---|---|---|\n| JPG, PNG, BMP, JFIF (eCrew screenshot) | OCR (PaddleOCR) + AI model | `ocr-image` |\n| PDF with a text layer (duty plan, schedule report) | its text + AI model | `text` |\n| PDF without a text layer, duty plan | OCR + parser (`source: parser`) | `ocr` |\n| PDF without a text layer, roster screen printed to PDF | pages OCRed as one roster image + AI model | `ocr-image` |\n| CSV, XLS, XLSX, TXT | its cells / text + AI model | `text` |\n\nImages give the columns date, day, duty, dep, begin, end, arr; other files can add more (see RosterRow). Takes from about one second to a minute depending on the queue. The file is only read: it is deleted right after. To send it to the administrators because the rows are wrong, use `POST /api/roster/suggestions`.",
+        "description": "Reads a crew roster into its two tables, \"Published roster\" and \"Rest of this roster is planned\", with the AI model (as on /roster). One endpoint for every file type; the server picks the reader from the file:\n\n| File | How it is read | `readMode` |\n|---|---|---|\n| JPG, PNG, BMP, JFIF (eCrew screenshot) | OCR (PaddleOCR) + AI model | `ocr-image` |\n| PDF with a text layer (duty plan, schedule report) | its text + AI model | `text` |\n| PDF without a text layer, duty plan | OCR + parser (`source: parser`) | `ocr` |\n| PDF without a text layer, roster screen printed to PDF | pages OCRed as one roster image + AI model | `ocr-image` |\n| CSV, XLS, XLSX, TXT | its cells / text + AI model | `text` |\n\nImages give the columns date, day, duty, dep, begin, end, arr; other files can add more (see RosterRow). Takes from about one second to a minute depending on the queue. The file is only read: it is deleted right after. To send it to the administrators because the rows are wrong, use `POST /api/roster/corrections` (with the rows corrected) or `POST /api/roster/suggestions` (a report: what is wrong).",
         "operationId": "uploadRoster",
         "requestBody": {
           "required": true,
@@ -134,6 +134,20 @@
                 "1"
               ]
             }
+          },
+          {
+            "name": "engine",
+            "in": "query",
+            "required": false,
+            "description": "`model` (default): the AI model; `parser`: the rule-based parser instead (as /roster \"Try to parse\" does while correcting a reading)",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "model",
+                "parser"
+              ],
+              "default": "model"
+            }
           }
         ]
       }
@@ -216,6 +230,87 @@
           {
             "lang": "curl",
             "source": "curl -F file=@roster.png -F email=crew@example.com -F \"note=12 Mar: the duty is OS 769\" http://localhost:3000/api/roster/suggestions"
+          }
+        ]
+      }
+    },
+    "/api/roster/corrections": {
+      "post": {
+        "tags": [
+          "Roster"
+        ],
+        "summary": "Submit a corrected reading",
+        "description": "The rows read from a roster were wrong and you corrected them? Send the roster file with the rows as they should be. The file joins the training data with these rows as its label, waiting for an administrator to review them (they are not used to train the model before that). For a roster you cannot correct yourself, use `POST /api/roster/suggestions`.",
+        "operationId": "submitCorrection",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "file",
+                  "rows"
+                ],
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "The roster: JPG, PNG, BMP, JFIF, PDF, CSV, XLS, XLSX or TXT, up to 10 MB"
+                  },
+                  "rows": {
+                    "type": "string",
+                    "description": "JSON `{ \"published\": [RosterRow], \"planned\": [RosterRow] }`: the rows as they should be (not both empty)"
+                  },
+                  "period": {
+                    "type": "string",
+                    "description": "The roster's period, as `POST /api/roster/upload` gave it (optional, e.g. `01Mar25 - 31Mar25`)"
+                  },
+                  "note": {
+                    "type": "string",
+                    "maxLength": 2000,
+                    "description": "A note for the administrators (optional)"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Received: the file and its corrected values wait for an administrator's review",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CorrectionCreated"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "413": {
+            "description": "The file is larger than 10 MB",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "File larger than 10 MB"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "curl",
+            "source": "curl -F file=@roster.png -F 'rows={\"published\":[{\"date\":\"12 Mar 25\",\"day\":\"Wed\",\"duty\":\"OS 769\",\"dep\":\"VIE\",\"begin\":\"06:10 Z\",\"end\":\"08:05 Z\",\"arr\":\"LHR\"}],\"planned\":[]}' http://localhost:3000/api/roster/corrections"
           }
         ]
       }
@@ -311,6 +406,22 @@
             "lang": "curl",
             "source": "curl -F \"file=@acars.jpg\" http://localhost:3000/api/acars/read"
           }
+        ],
+        "parameters": [
+          {
+            "name": "engine",
+            "in": "query",
+            "required": false,
+            "description": "`model` (default): the AI model; `parser`: the rule-based parser instead (as /acars \"Try to parse\" does while correcting a reading)",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "model",
+                "parser"
+              ],
+              "default": "model"
+            }
+          }
         ]
       }
     },
@@ -392,6 +503,83 @@
           {
             "lang": "curl",
             "source": "curl -F file=@acars.jpg -F email=crew@example.com -F \"note=OFF is 12:39\" http://localhost:3000/api/acars/suggestions"
+          }
+        ]
+      }
+    },
+    "/api/acars/corrections": {
+      "post": {
+        "tags": [
+          "ACARS"
+        ],
+        "summary": "Submit a corrected ACARS reading",
+        "description": "The values read from an ACARS picture were wrong and you corrected them? Send the picture with the values as they should be. The picture joins the ACARS training data with these values as its label, waiting for an administrator to review them. For a picture you cannot correct yourself, use `POST /api/acars/suggestions`.",
+        "operationId": "submitAcarsCorrection",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "file",
+                  "fields"
+                ],
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "The picture: JPG, PNG, BMP or JFIF, up to 10 MB"
+                  },
+                  "fields": {
+                    "type": "string",
+                    "description": "JSON: the values as they should be (`flt`, `date`, `dept`, `dest`, `out`, `off`, `on`, `in`, `info`; not all empty)"
+                  },
+                  "note": {
+                    "type": "string",
+                    "maxLength": 2000,
+                    "description": "A note for the administrators (optional)"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Received: the file and its corrected values wait for an administrator's review",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CorrectionCreated"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "413": {
+            "description": "The file is larger than 10 MB",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "File larger than 10 MB"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "curl",
+            "source": "curl -F file=@acars.jpg -F 'fields={\"flt\":\"SA0558\",\"out\":\"12:32\",\"off\":\"12:39\"}' http://localhost:3000/api/acars/corrections"
           }
         ]
       }
@@ -1038,6 +1226,16 @@
             "type": "string",
             "description": "`HH:MM Z` = UTC, `L`/`LB` = local; `A`/`E` prefix = actual/estimated; `+1` = next day",
             "example": "21:45 Z"
+          },
+          "takeoff": {
+            "type": "string",
+            "description": "Takeoff (wheels-off) time, same form as `begin`; empty when the file has none",
+            "example": "21:58 Z"
+          },
+          "landing": {
+            "type": "string",
+            "description": "Landing (touchdown) time, same form as `begin`; empty when the file has none",
+            "example": "23:12 Z"
           },
           "end": {
             "type": "string",
@@ -2051,6 +2249,32 @@
             "type": "string",
             "example": "http://localhost:3000/route-map?r=Mar+2025%7C%23c0392b%7CVIE-HAN%2CHAN-VIE%2CVIE-JFK",
             "description": "Opens /route-map with these routes. Add &embed=1 to show only the map (for an iframe), &view=globe for the globe, &table=0 without the route table."
+          }
+        }
+      },
+      "CorrectionCreated": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "20261021-153012-a1b2c3"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "accepted"
+            ],
+            "description": "The file is in the data, its label waiting for an administrator"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "review": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
           }
         }
       }

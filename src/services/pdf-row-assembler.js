@@ -1,6 +1,6 @@
 /**
  * Learned PDF extractor, second half: words already tagged with a field (date,
- * duty, dep, arr, begin, end, ac, registration, hotel, dc, info, route, ci, co,
+ * duty, dep, arr, begin, takeoff, landing, end, ac, registration, hotel, dc, info, route, ci, co,
  * co_info, ci_info or O) -> roster rows, in the same shape as the parser
  * (services/pdf-roster-parser.js) and the labels in labels/pdf/.
  *
@@ -41,6 +41,9 @@ const DAY_NAMES = {
 const PLANNED_LINE = [PLANNED_RE, /REST\s*[O0()D]?F\s*TH?I?S?\s*ROS[TI]ER\s*IS\s*P[L1I]?ANNED/i]; // OCR slips: "THERESTOFTHSROSTERISPLANNED", "REST)F", "ROSIER"
 export const HOTEL_CODE_RE = /^H(\d+\*?|\?)$/;
 const DURATION_RE = /^\d{1,3}:\d{2}$/;
+const COUNT_RE = /^\d{1,3}$/; // a take-off / landing count ("1" under "TKoffsDay")
+const VALUE_RE = /^(\d{1,3}:\d{2}|\d{1,3})$/;
+const INFO_FIELDS = new Set(['info', 'co_info', 'ci_info']);
 const TIME_IN_RE = /[AE]?!?\d{2}:?\d{2}([+-]\d(?!\d))?/g; // "A02:00": the A (actual) / E (estimated) stays
 const ANCHORS = new Set(['duty', 'hotel', 'ci', 'co']);
 
@@ -102,7 +105,11 @@ function headerAt(header, x) {
   }
   const left = cells.filter(c => c[0].x <= x + 4);
   const cell = left.length ? left[left.length - 1] : cells[0];
-  return { word: cell.map(t => t.t.toLowerCase()).join(' ') };
+  const wordOf = c => c.map(t => t.t.toLowerCase()).join(' ');
+  const word = wordOf(cell);
+  // a header word printed twice ("TOFF Day | Night", "LND Day | Night"): which one, for what is learned per column
+  const same = cells.filter(c => wordOf(c) === word);
+  return { word, key: same.length > 1 ? `${word}#${same.indexOf(cell) + 1}` : word };
 }
 
 /** Is the column of x marked as UTC ("UTC", "(Z)") on any header line above? */
@@ -257,7 +264,9 @@ function spansOf(tokens) {
   for (const t of tokens) {
     const last = spans[spans.length - 1];
     const prev = last?.tokens[last.tokens.length - 1];
-    if (last && last.field === t.field && t.x - (prev.x + widthOf(prev)) < 25) { last.tokens.push(t); last.text += ` ${t.t}`; } else spans.push({ field: t.field, tokens: [t], text: t.t, x: t.x });
+    // (two values side by side, "1" "01:09", are two info cells, not one)
+    const cells = INFO_FIELDS.has(t.field) && VALUE_RE.test(t.t) && VALUE_RE.test(prev?.t || '');
+    if (last && last.field === t.field && !cells && t.x - (prev.x + widthOf(prev)) < 25) { last.tokens.push(t); last.text += ` ${t.t}`; } else spans.push({ field: t.field, tokens: [t], text: t.t, x: t.x });
   }
   return spans.filter(s => s.field !== 'O');
 }
@@ -452,6 +461,13 @@ export function assembleRows(tagPages, pdfPages = [], conventions = {}) {
     // 3. The other words.
     for (const s of spans) {
       if (s.field === 'date' || (ANCHORS.has(s.field) && !(isHotelSpan(s) && !hotelName(s)))) continue;
+      // A name in a table's crew column ("Self" under "PicName"): its row's crew, as the labels write it ("[PIC - Self]").
+      const crewWrap = s.field === 'crew' && blockHeaders.length && conventions.crewWrap?.[`${layoutKey(blockHeaders[0])}|${headerAt(blockHeaders[blockHeaders.length - 1], s.x)?.key}`];
+      if (crewWrap && crewWrap !== 'no') {
+        const row = mains.length ? [...mains].reverse().find(r => r.x <= s.x) || mains[0] : lineRows.find(r => r.anchor === null) || rows[rows.length - 1];
+        if (row) (row.crew ||= []).push(crewWrap.replace('{}', s.text));
+        continue;
+      }
       // The crew of the day's flights (a stack beside them), not of one row.
       if (s.field === 'crew') { const g = ctx.crewGroup ?? ctx.group ?? `d:${datePart?.text}`; if (!crewOf.has(g)) crewOf.set(g, []); crewOf.get(g).push(s); continue; }
       // Indicator codes of the legend ("M", "B,M"): the day's, for all its events.
@@ -642,7 +658,7 @@ export function assembleRows(tagPages, pdfPages = [], conventions = {}) {
     written.push({ r, section, ymd: d ? Date.UTC(2000 + d.year, d.month, d.day) : null, crewShapes: conventions.crewShapes?.[r.layout], row: {
       date: d ? `${d.day} ${MONTHS[d.month]} ${String(d.year).padStart(2, '0')}` : '',
       day: d ? WEEKDAYS[weekdayOf(d)] : '',
-      hotel, dc: val('dc'), duty, registration: val('registration'), dep, begin: time('begin'), end: time('end'), arr, ac, crew: '',
+      hotel, dc: val('dc'), duty, registration: val('registration'), dep, begin: time('begin'), takeoff: time('takeoff'), landing: time('landing'), end: time('end'), arr, ac, crew: (r.crew || []).join(''),
       // "Delay" "00:50" printed under a flight: its delay
       info: info.filter(Boolean).join(' ').replace(/\s+/g, ' ').trim().replace(/(^|\s)Delay (\d{1,2}:\d{2})(?=\s|$)/g, '$1[Delay $2]'),
       ...(conventions.debug ? { _dateText: r.date?.text || '' } : {}),
@@ -710,7 +726,7 @@ function joinDocumentTables(written, pdfPages, { crewOf, dayCodes, legend, conve
       written.splice(at, 0, {
         r: { fromTable: true }, section: prev?.section || 'published', ymd,
         row: { date: `${dd} ${MONTHS[mm - 1]} ${String(yyyy).slice(2)}`, day: WEEKDAYS[new Date(ymd).getUTCDay()], hotel: '', dc: '', duty: 'H', registration: '',
-          dep: stay.port, begin: '', end: '', arr: '', ac: '', crew: '', info: [stay.address, stay.phone && `Tel ${stay.phone}`].filter(Boolean).join(', ') },
+          dep: stay.port, begin: '', takeoff: '', landing: '', end: '', arr: '', ac: '', crew: '', info: [stay.address, stay.phone && `Tel ${stay.phone}`].filter(Boolean).join(', ') },
       });
     }
   }
@@ -743,9 +759,10 @@ function cellsOf(r) {
 function infoText(span, headers, conventions) {
   const text = tidyInfo(span.text);
   const h = headerAt(headers[headers.length - 1], span.x);
-  if (DURATION_RE.test(text)) {
-    const pattern = h && conventions.duration?.[h.word];
-    return pattern ? pattern.replace('{}', text) : text;
+  if (DURATION_RE.test(text) || COUNT_RE.test(text)) {
+    const pattern = h && (conventions.duration?.[h.key] ?? conventions.duration?.[h.word]);
+    if (pattern) return pattern.replace('{}', text);
+    if (DURATION_RE.test(text)) return text;
   }
   const wrap = h && conventions.wrap?.[`${layoutKey(headers[0])}|${h.word}`];
   return { text, ...(wrap && wrap !== '{}' ? { wrap } : {}), col: h?.word ?? null, y: span.tokens[0].y };
@@ -753,14 +770,16 @@ function infoText(span, headers, conventions) {
 
 /**
  * What a labeled file teaches about its layout (tagPages with the true tags):
- *   duration:   how a bare duration in an info column is written ("3:25" under "Blk" -> "[Block: {}]")
+ *   duration:   how a bare duration or count in an info column is written ("3:25" under "Blk" -> "[Block: {}]",
+ *               "1" under the second "Day" -> "[Landing Day: {}]")
  *   wrap:       how other info text is written, per layout and column ("Requested Day Off" -> "[{duty}: {}]")
+ *   crewWrap:   how a name in a table's crew column is written, per layout and column ("Self" -> "[PIC - {}]")
  *   dateAnchor: whether an event belongs to the date above it ('previous') or the nearest one ('center'), per layout
  *   zone:       the zone letter of times printed plain, per note of the document ("All times in Local Station" -> L)
  * Counts per key; mergeConventions keeps the most common answer.
  */
 export function learnConventions(tagPages, label, pdfPages = []) {
-  const duration = {}, wrap = {}, dateAnchor = {}, zone = {}, headerWords = {}, place = {}, legendTag = {}, crewShapes = {}, dayWide = {}, afterPeriod = {}, trainingCrew = {};
+  const duration = {}, wrap = {}, dateAnchor = {}, zone = {}, headerWords = {}, place = {}, legendTag = {}, crewShapes = {}, dayWide = {}, afterPeriod = {}, trainingCrew = {}, crewWrap = {};
   const rowsOf = sec => (label[sec] || []).map(hotelFromEvent); // hotel nights as the words are tagged
   const vote = (obj, key, val) => { const seen = (obj[key] ||= {}); seen[val] = (seen[val] || 0) + 1; };
   // Column headers: the line right above a page's first row, 3+ words none of which belongs to a row,
@@ -816,19 +835,35 @@ export function learnConventions(tagPages, label, pdfPages = []) {
     const blockOf = x => starts.filter(s => x >= s).length - 1;
     const blockHeader = (x) => { const tokens = header.tokens.filter(h => blockOf(h.x) === blockOf(x)); return tokens.length ? { tokens } : header; };
     // Only a duration alone in its cell ("3:25" under "Blk Hrs"), not one inside a printed stat ("[ FT 05:49 ]").
+    // (values side by side in their own cells, "1" "1" "01:09", are each alone)
     const alone = new Set();
     for (const l of lines) {
       l.tokens.forEach((t, k) => {
-        const same = n => n && n.field === t.field && n.row === t.row && n.section === t.section;
+        const same = n => n && n.field === t.field && n.row === t.row && n.section === t.section && !(VALUE_RE.test(n.t) && VALUE_RE.test(t.t));
         if (!same(l.tokens[k - 1]) && !same(l.tokens[k + 1])) alone.add(t);
       });
     }
-    for (const t of page.tokens) {
-      if (!['info', 'co_info', 'ci_info'].includes(t.field) || !DURATION_RE.test(t.t) || t.row == null || !alone.has(t)) continue;
+    // A row's n-th value "02:09" is its label's n-th "[..: 02:09]" ("[Flight: 02:09] [PIC: 02:09]"); a count "1" as a duration.
+    const seenOfRow = new Map();
+    for (const t of [...page.tokens].sort((a, c) => a.y - c.y || a.x - c.x)) {
+      if (!INFO_FIELDS.has(t.field) || !(DURATION_RE.test(t.t) || COUNT_RE.test(t.t)) || t.row == null || !alone.has(t)) continue;
       const info = rowsOf(t.section)[t.row]?.info || '';
-      const m = new RegExp(`\\[([^\\]]*?)\\s*${t.t.replace(/[.:]/g, '\\$&')}\\]`).exec(info);
+      const seenKey = `${t.section}|${t.row}|${t.t}`;
+      const nth = seenOfRow.get(seenKey) || 0;
+      seenOfRow.set(seenKey, nth + 1);
+      const m = [...info.matchAll(new RegExp(`\\[([^\\]]*?)\\s*${t.t.replace(/[.:]/g, '\\$&')}\\]`, 'g'))][nth];
       if (!m) continue;
-      vote(duration, headerAt(blockHeader(t.x), t.x).word, m[1] ? `[${m[1]} {}]` : '[{}]');
+      vote(duration, headerAt(blockHeader(t.x), t.x).key, m[1] ? `[${m[1]} {}]` : '[{}]');
+    }
+    // A name in a crew column ("Self" under "PicName") as its label writes it: "[PIC - {}]".
+    for (const t of page.tokens) {
+      if (t.field !== 'crew' || t.row == null) continue;
+      const words = page.tokens.filter(n => n.field === 'crew' && n.row === t.row && n.section === t.section && Math.abs(n.y - t.y) < 2 && headerAt(blockHeader(n.x), n.x).key === headerAt(blockHeader(t.x), t.x).key);
+      if (words[0] !== t) continue; // once per cell
+      const text = words.sort((a, c) => a.x - c.x).map(n => n.t).join(' ');
+      const crew = rowsOf(t.section)[t.row]?.crew || '';
+      const m = new RegExp(`\\[([^\\]\\[]*?) - ${text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\]`).exec(crew);
+      vote(crewWrap, `${key}|${headerAt(blockHeader(t.x), t.x).key}`, m ? `[${m[1]} - {}]` : 'no');
     }
     // Other info text: a run of info words of one row on one line, as its label writes it.
     for (const l of lines.filter(l => l.y > headers[0].y + 1)) {
@@ -889,7 +924,7 @@ export function learnConventions(tagPages, label, pdfPages = []) {
     const crews = [...rowsOf('published'), ...rowsOf('planned')].map(r => r.crew || '').join(' ');
     vote(trainingCrew, fileLayout, trainings.some(t => t.crew.some(c => crews.includes(`[${c}]`))) ? 'yes' : 'no');
   }
-  return { duration, wrap, dateAnchor, zone, headerWords, place, legendTag, crewShapes, dayWide, afterPeriod, trainingCrew };
+  return { duration, wrap, dateAnchor, zone, headerWords, place, legendTag, crewShapes, dayWide, afterPeriod, trainingCrew, crewWrap };
 }
 
 /** Conventions of several files: the most common answer per key. */
@@ -897,7 +932,7 @@ export function mergeConventions(list) {
   const out = { headerWords: [...new Set(list.flatMap(c => Object.keys(c.headerWords || {})))].sort(), crewShapes: {} };
   // duty shapes given crew, per layout: every shape any file of it showed ("9 A9")
   for (const c of list) for (const [k, v] of Object.entries(c.crewShapes || {})) out.crewShapes[k] = [...new Set([...(out.crewShapes[k]?.split(' ') || []), ...Object.keys(v)])].sort().join(' ');
-  for (const part of ['duration', 'wrap', 'dateAnchor', 'zone', 'place', 'legendTag', 'dayWide', 'afterPeriod', 'trainingCrew']) {
+  for (const part of ['duration', 'wrap', 'dateAnchor', 'zone', 'place', 'legendTag', 'dayWide', 'afterPeriod', 'trainingCrew', 'crewWrap']) {
     const counts = {};
     for (const c of list) {
       for (const [k, v] of Object.entries(c[part] || {})) {

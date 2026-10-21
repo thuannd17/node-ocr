@@ -18,7 +18,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import sharp from 'sharp';
 import { acarsLineTruths } from '../services/acars.js';
-import { listLabels, dataFile, labelFile, ACARS_DATA_ROOT, ACARS_LABELS_ROOT } from '../utils/data-files.js';
+import { listReviewedLabels, dataFile, labelFile, ACARS_DATA_ROOT, ACARS_LABELS_ROOT } from '../utils/data-files.js';
 import { acars } from '../services/media-client.js';
 import { ROOT } from '../utils/paths.js';
 
@@ -40,7 +40,7 @@ const seen = new Set();
 const lists = { train: [], val: [] };
 const stats = { pictures: { train: 0, val: 0 }, crops: { train: 0, val: 0 }, fixesMisread: 0, skippedNoLines: [], skippedChars: 0 };
 
-for (const name of listLabels(ACARS_LABELS_ROOT, 'image')) {
+for (const name of listReviewedLabels(ACARS_LABELS_ROOT, 'image')) {
   const file = dataFile(ACARS_DATA_ROOT, name);
   if (!fs.existsSync(file)) continue;
   const hash = md5(file);

@@ -20,7 +20,7 @@ const page = () => ({
     word('Printed', 40, 700), word('by', 80, 700), word('crew', 95, 700), word('system', 120, 700),
   ],
 });
-const row = (r) => ({ date: '', day: '', hotel: '', dc: '', duty: '', registration: '', dep: '', begin: '', end: '', arr: '', ac: '', crew: '', info: '', ...r });
+const row = (r) => ({ date: '', day: '', hotel: '', dc: '', duty: '', registration: '', dep: '', begin: '', takeoff: '', landing: '', end: '', arr: '', ac: '', crew: '', info: '', ...r });
 const label = {
   published: [
     row({ date: '3 Mar 25', day: 'Mon', duty: 'XY101', dep: 'AAA', begin: '08:00 Z', end: '09:30 Z', arr: 'BBB', info: '[Blk Hrs 1:30]' }),

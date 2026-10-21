@@ -78,7 +78,7 @@
     return (h >>> 0).toString(16).padStart(8, '0');
   }
 
-  const LABELS = { dc: 'DC', registration: 'Reg', ac: 'AC', crew: 'Crew', info: 'Info' };
+  const LABELS = { dc: 'DC', registration: 'Reg', takeoff: 'Takeoff', landing: 'Landing', ac: 'AC', crew: 'Crew', info: 'Info' };
 
   function summaryOf(row) {
     const route = row.dep && row.arr ? `${row.dep} → ${row.arr}` : row.dep || row.arr || '';

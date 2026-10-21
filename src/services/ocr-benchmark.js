@@ -21,7 +21,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ocrLines } from './paddle-ocr.js';
-import { listLabels, dataFile, labelFile, DATA_ROOT, LABELS_ROOT } from '../utils/data-files.js';
+import { listReviewedLabels, dataFile, labelFile, DATA_ROOT, LABELS_ROOT } from '../utils/data-files.js';
 import { groupByContent, pickCanonicalLabels } from '../utils/content-groups.js';
 import { ROOT } from '../utils/paths.js';
 import { activeRecId } from './rec-models.js';
@@ -37,7 +37,7 @@ const pct = (m, t) => (t ? Math.round((1000 * m) / t) / 10 : null);
 
 /** Labeled images, one per distinct content (as the other benchmarks). */
 function labeledImages() {
-  const names = listLabels(LABELS, 'image').filter(n => fs.existsSync(dataFile(DATA, n)));
+  const names = listReviewedLabels(LABELS, 'image').filter(n => fs.existsSync(dataFile(DATA, n)));
   const { canonical } = pickCanonicalLabels(groupByContent(DATA, names), LABELS);
   const keep = new Set(canonical.values());
   return names.filter(n => keep.has(n)).sort();

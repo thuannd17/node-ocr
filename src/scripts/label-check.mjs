@@ -18,7 +18,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { parsePdfFile, compareRows, PDF_SECTIONS } from '../services/pdf-benchmark.js';
-import { listLabels, dataFile, labelFile, DATA_ROOT, LABELS_ROOT } from '../utils/data-files.js';
+import { listReviewedLabels, dataFile, labelFile, DATA_ROOT, LABELS_ROOT } from '../utils/data-files.js';
 import { syncForScript } from '../services/media-client.js';
 import { EXPORTS_DIR } from '../utils/paths.js';
 
@@ -35,7 +35,7 @@ const LABELS = LABELS_ROOT;
 let before = null;
 try { before = JSON.parse(fs.readFileSync(OUT, 'utf8')); } catch { /* first run */ }
 
-const names = listLabels(LABELS, 'pdf').filter(n => fs.existsSync(dataFile(DATA, n)));
+const names = listReviewedLabels(LABELS, 'pdf').filter(n => fs.existsSync(dataFile(DATA, n)));
 const files = {};
 for (const [k, name] of names.entries()) {
   process.stderr.write(`\r${k + 1}/${names.length}`);

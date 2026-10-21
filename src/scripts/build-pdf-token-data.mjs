@@ -25,7 +25,7 @@ import { parseNetlinePdf, hotelFromEvent } from '../services/pdf-roster-parser.j
 import { compareRows, PDF_SECTIONS } from '../services/pdf-benchmark.js';
 import { wordsOf, plainTokens } from '../services/pdf-tokens.js';
 import { alignLabel } from '../services/pdf-label-align.js';
-import { listLabels, dataFile, labelFile, DATA_ROOT, LABELS_ROOT } from '../utils/data-files.js';
+import { listReviewedLabels, dataFile, labelFile, DATA_ROOT, LABELS_ROOT } from '../utils/data-files.js';
 import { syncForScript } from '../services/media-client.js';
 import { EXPORTS_DIR } from '../utils/paths.js';
 
@@ -38,11 +38,11 @@ const pdfDir = DATA_ROOT;
 const labelsDir = LABELS_ROOT;
 fs.mkdirSync(outDir, { recursive: true });
 
-const CORE = ['duty', 'dc', 'registration', 'dep', 'arr', 'begin', 'end', 'ac', 'hotel'];
+const CORE = ['duty', 'dc', 'registration', 'dep', 'arr', 'begin', 'takeoff', 'landing', 'end', 'ac', 'hotel'];
 const summary = { files: [], skipped: [], aligned: [], tokens: 0, tagged: 0, byField: {}, conflicts: 0, coverage: {} };
 for (const f of CORE) summary.coverage[f] = { withToken: 0, total: 0 };
 
-const names = listLabels(labelsDir, 'pdf').filter(n => fs.existsSync(dataFile(pdfDir, n)));
+const names = listReviewedLabels(labelsDir, 'pdf').filter(n => fs.existsSync(dataFile(pdfDir, n)));
 
 for (const name of names) {
   const label = JSON.parse(fs.readFileSync(labelFile(labelsDir, name), 'utf8'));

@@ -2,8 +2,11 @@
 // ACARS pictures (services/acars.js): the cockpit's OOOI page read into Flt No, Dept, Dest, Out, Off, On, In, Info.
 //
 // Public (docs/openapi.json, used by /acars):
-//   POST   /api/acars/read            multipart "file" (JPG, PNG, BMP, JFIF) -> { fields, ms, model } (AI model only;
-//                                     the picture is only read, never kept)
+//   POST   /api/acars/read            multipart "file" (JPG, PNG, BMP, JFIF) -> { fields, ms, model } (the AI model;
+//                                     ?engine=parser: the parser, /acars "Try to parse"; the picture is only read, never kept)
+//   POST   /api/acars/suggestions     report a wrong reading (the picture + what is wrong) to the admins
+//   POST   /api/acars/corrections     the fields as the user corrected them: the picture joins the data, its label
+//                                     waiting for review on /label
 // Admin (/label "ACARS files"; the pictures and labels live in MinIO, bucket ACARS_BUCKET, services/media-client.js acars):
 //   GET    /api/acars/files           every picture with its label state and byte-identical copies
 //   GET    /api/acars/raw?name=       the picture
@@ -19,9 +22,9 @@ import { acars, mediaErrorStatus } from '../services/media-client.js';
 import { readAcarsPicture } from '../services/acars-read.js';
 import { ACARS_FIELDS } from '../services/acars.js';
 import { modelInfo } from '../services/pdf-ai-extract.js';
-import { isDataName, kindOf, IMAGE_EXTS } from '../utils/data-files.js';
+import { isDataName, kindOf, IMAGE_EXTS, reviewState, ACARS_LABELS_ROOT } from '../utils/data-files.js';
 import { UPLOADS_DIR } from '../utils/paths.js';
-import { createSuggestion, cleanEmail } from './suggestions-api.js';
+import { createSuggestion, submitCorrection, cleanEmail } from './suggestions-api.js';
 
 const router = Router();
 
@@ -51,13 +54,15 @@ const uploadFile = (req, res, next) => upload.single('file')(req, res, (err) => 
 
 router.post('/acars/read', uploadFile, async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Send the ACARS picture in the multipart field "file"' });
+  const engine = String(req.query.engine || 'model');
+  if (!['model', 'parser'].includes(engine)) return res.status(400).json({ error: 'engine must be model or parser' });
   const t0 = Date.now();
   // the OCR server needs the extension to know the picture's format
   const file = req.file.path + path.extname(req.file.originalname).toLowerCase();
   try {
     fs.renameSync(req.file.path, file);
-    const r = await readAcarsPicture(file, { engine: 'model' });
-    res.json({ fileName: req.file.originalname, fields: r.fields, timings: r.timings, model: { trainedAt: modelInfo().trainedAt || null }, ms: Date.now() - t0 });
+    const r = await readAcarsPicture(file, { engine });
+    res.json({ fileName: req.file.originalname, source: engine, fields: r.fields, timings: r.timings, model: { trainedAt: modelInfo().trainedAt || null }, ms: Date.now() - t0 });
   } catch (e) {
     if (e.status === 409) return res.status(409).json({ error: e.message });
     fail(res, e, 'POST /api/acars/read');
@@ -92,6 +97,31 @@ router.post('/acars/suggestions', uploadFile, async (req, res) => {
   }
 });
 
+/**
+ * POST /api/acars/corrections  multipart: file (the picture), fields (JSON { flt, date, dept, dest, out, off, on, in, info }:
+ * as the user corrected them), note?. The picture joins the ACARS data with these fields as its label, waiting for an
+ * admin's review on /label (not used for training until then). -> 201 { id, status: 'accepted', review: true }
+ */
+router.post('/acars/corrections', uploadFile, async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'Send the ACARS picture in the multipart field "file"' });
+  try {
+    let fields;
+    try { fields = JSON.parse(req.body?.fields || ''); } catch { return res.status(400).json({ error: '"fields" must be JSON: { "flt": "...", "out": "...", ... }' }); }
+    if (!fields || typeof fields !== 'object' || !ACARS_FIELDS.some(f => String(fields[f] || '').trim())) {
+      return res.status(400).json({ error: 'Every field is empty: fill in what the picture shows, or report it instead' });
+    }
+    const note = String(req.body?.note || '').trim();
+    if (note.length > 2000) return res.status(400).json({ error: 'The note is longer than 2000 characters' });
+    const { meta } = await submitCorrection(req.file, { fields, acars: true, note, lang: req.lang });
+    res.status(201).json({ id: meta.id, status: meta.status, createdAt: meta.createdAt, review: true });
+  } catch (e) {
+    if (e.code !== 'MEDIA_DOWN') console.error('[acars correction]', e);
+    res.status(e.code === 'MEDIA_DOWN' ? 503 : 500).json({ error: e.code === 'MEDIA_DOWN' ? 'Corrections cannot be received right now, please try again later' : e.message });
+  } finally {
+    fs.rm(req.file.path, { force: true }, () => {});
+  }
+});
+
 // ---- admin: the dataset ----
 
 router.get('/acars/files', async (req, res) => {
@@ -103,7 +133,7 @@ router.get('/acars/files', async (req, res) => {
     for (const f of files) if (!firstByHash.has(f.md5)) firstByHash.set(f.md5, f.name);
     const items = files.map(f => {
       const first = firstByHash.get(f.md5);
-      return { name: f.name, labeled: labeled.has(f.name), duplicateOf: first === f.name ? null : first };
+      return { name: f.name, labeled: labeled.has(f.name), review: labeled.has(f.name) ? reviewState(ACARS_LABELS_ROOT, f.name) : null, duplicateOf: first === f.name ? null : first };
     });
     res.json({ items, counts: { files: items.length, labeled: items.filter(i => i.labeled).length } });
   } catch (e) {

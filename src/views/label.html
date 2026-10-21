@@ -95,6 +95,8 @@
     .labeled-badge { display: inline-block; padding: 1px 6px; border-radius: 8px; font-size: 10px; font-weight: 600; }
     .labeled-badge.yes { background: #d3f3d3; color: #2a7d2a; }
     .labeled-badge.no  { background: #ffe0e0; color: #c33; }
+    .labeled-badge.review { background: #fff3cd; color: #8a5a00; }
+    .page-header .todo .to-review { color: #b26a00; font-weight: 600; }
 
     /* Table editor (same look as /roster) */
     .toolbar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
@@ -120,7 +122,8 @@
     td[data-field="info"], td[data-field="crew"] { font-size: 11px; color: #555; min-width: 160px; }
     /* optional PDF columns with no value in this file (shown again with "Show all columns") */
     table.hide-dc [data-field="dc"],
-    table.hide-registration [data-field="registration"], table.hide-ac [data-field="ac"], table.hide-crew [data-field="crew"] { display: none; }
+    table.hide-registration [data-field="registration"], table.hide-ac [data-field="ac"], table.hide-crew [data-field="crew"],
+    table.hide-takeoff [data-field="takeoff"], table.hide-landing [data-field="landing"] { display: none; }
     td.actions { white-space: nowrap; width: 1%; }
     td.actions button { padding: 1px 7px; font-size: 13px; margin-left: 2px; }
     td.actions button.del { background: var(--danger); }
@@ -166,6 +169,7 @@
   <div class="card toolbar tree-tools">
     <input type="search" id="treeSearch" placeholder="Search by file name…" aria-label="Search by file name" />
     <label><input type="checkbox" id="onlyTodo" /> Only files without a label</label>
+    <label title="Labels a user submitted on /roster or /acars, or that Claude changed: check them, then Save"><input type="checkbox" id="onlyReview" /> Only files to review</label>
     <label><input type="checkbox" id="showDups" /> Show duplicate images</label>
     <div class="right">
       <button class="tb danger" id="delDups" hidden title="Remove every copy of a file whose content is already in the data, with its label (one of each stays: the one whose label was saved last). They go to trash/&lt;date&gt;/ in MinIO."><i class="fa-solid fa-clone" aria-hidden="true"></i> <span>Delete duplicates</span></button>
@@ -211,6 +215,7 @@
             <button class="secondary small roster-only" id="calendarBtn" title="Open the rows in the table (unsaved ones too) on the Calendar page"><i class="fa-solid fa-calendar-days" aria-hidden="true"></i> View calendar</button>
             <button class="secondary small" id="jsonBtn"><i class="fa-solid fa-code" aria-hidden="true"></i> JSON</button>
             <button class="secondary small" id="reloadBtn" title="Drop the changes and load the saved label again"><i class="fa-solid fa-rotate-left" aria-hidden="true"></i> Reload</button>
+            <button class="secondary small" id="useProposedBtn" hidden title="Put the rows the user submitted in the table (the saved label stays until you save)"><i class="fa-solid fa-file-import" aria-hidden="true"></i> Use the submitted version</button>
             <button class="small" id="saveBtn" title="Ctrl+S"><i class="fa-solid fa-floppy-disk" aria-hidden="true"></i> Save label</button>
           </div>
           <div class="toolbar pdf-only" style="display:none">
@@ -256,9 +261,9 @@
     const $ = (id) => document.getElementById(id);
     const FIELDS = {
       image: ['date', 'day', 'duty', 'dep', 'begin', 'end', 'arr'],
-      pdf: ['date', 'day', 'dc', 'duty', 'registration', 'dep', 'begin', 'end', 'arr', 'ac', 'crew', 'info'],
+      pdf: ['date', 'day', 'dc', 'duty', 'registration', 'dep', 'begin', 'takeoff', 'landing', 'end', 'arr', 'ac', 'crew', 'info'],
     };
-    const TITLES = { date: 'Date', day: 'Day', dc: 'DC', duty: 'Duty', registration: 'Reg.', dep: 'Dep', begin: 'Begin', end: 'End', arr: 'Arr', ac: 'AC', crew: 'Crew', info: 'Info' };
+    const TITLES = { date: 'Date', day: 'Day', dc: 'DC', duty: 'Duty', registration: 'Reg.', dep: 'Dep', begin: 'Begin', takeoff: 'Takeoff', landing: 'Landing', end: 'End', arr: 'Arr', ac: 'AC', crew: 'Crew', info: 'Info' };
     const SECTIONS = ['published', 'planned'];
     // ACARS pictures (/api/acars/*): one label of fields, no rows
     const ACARS_FIELDS = [['flt', 'Flt No', 'QFA0057'], ['date', 'Date', '2 Sep 22 | 28 May | 14'], ['dept', 'Dept', 'YBBN'], ['dest', 'Dest', 'AYPY'], ['out', 'Out', 'HH:MM'], ['off', 'Off', 'HH:MM'],
@@ -268,6 +273,10 @@
     // File tree marks: labeled / not labeled yet
     const LABELED_ICON = `<i class="fa-solid fa-circle-check" style="color:#2e7d32" title="${__('Labeled')}" aria-hidden="true"></i>`;
     const NEW_ICON = `<i class="fa-regular fa-circle" style="color:#9e9e9e" title="${__('Not labeled')}" aria-hidden="true"></i>`;
+    // A label waiting for a person's review (`_review`): submitted by a user on /roster or /acars, or changed by Claude
+    const REVIEW_BY = { user: 'submitted by a user', claude: 'changed by Claude' };
+    const reviewIcon = (r) => `<i class="fa-solid fa-circle-exclamation" style="color:#e08a00" title="${__('Needs review')}: ${__(REVIEW_BY[r.by] || REVIEW_BY.user)}" aria-hidden="true"></i>`;
+    const fileIcon = (f) => (f.review ? reviewIcon(f.review) : f.done ? LABELED_ICON : NEW_ICON);
     const PARAMS = new URLSearchParams(location.search);
     const EMBED = PARAMS.has('embed');   // inside the benchmark's popup
     const REVIEW = PARAMS.has('review'); // mark where the AI model's reading differs from the label
@@ -298,8 +307,8 @@
     // ---------- Tree ----------
     function visibleFiles() {
       const q = $('treeSearch').value.trim().toLowerCase();
-      const onlyTodo = $('onlyTodo').checked, showDups = $('showDups').checked;
-      return files.filter(f => (showDups || !f.duplicateOf) && (!onlyTodo || !f.done) && (!q || f.name.toLowerCase().includes(q)));
+      const onlyTodo = $('onlyTodo').checked, onlyReview = $('onlyReview').checked, showDups = $('showDups').checked;
+      return files.filter(f => (showDups || !f.duplicateOf) && (!onlyTodo || !f.done) && (!onlyReview || f.review) && (!q || f.name.toLowerCase().includes(q)));
     }
 
     function renderTree() {
@@ -326,9 +335,9 @@
         const d = document.createElement('details');
         // a folder stays as the user left it; the one holding the selected file opens
         d.open = searching || openFolders.has(ext) || (current && folderOf(current) === ext);
-        const done = list.filter(f => f.done).length;
+        const done = list.filter(f => f.done).length, toReview = list.filter(f => f.review).length;
         const icon = { pdf: 'fa-file-pdf', csv: 'fa-file-csv', xls: 'fa-file-excel', xlsx: 'fa-file-excel', txt: 'fa-file-lines', acars: 'fa-satellite-dish' }[ext] || 'fa-image';
-        d.innerHTML = `<summary><i class="fa-solid ${icon}" aria-hidden="true"></i> ${ext === 'acars' ? __('ACARS pictures') : ext}<span class="count">${__('{done}/{total} labeled', { done, total: list.length })}</span></summary>`;
+        d.innerHTML = `<summary><i class="fa-solid ${icon}" aria-hidden="true"></i> ${ext === 'acars' ? __('ACARS pictures') : ext}<span class="count">${__('{done}/{total} labeled', { done, total: list.length })}${toReview ? ` · ${__('{n} to review', { n: toReview })}` : ''}</span></summary>`;
         d.addEventListener('toggle', () => {
           if (d.open) openFolders.add(ext); else openFolders.delete(ext);
           safeSet('label.openFolders', JSON.stringify([...openFolders]));
@@ -339,7 +348,7 @@
           const item = document.createElement('li');
           item.className = 'file' + (current && current.name === f.name ? ' active' : '') + (f.duplicateOf ? ' dup' : '');
           item.title = f.name + (f.duplicateOf ? `\n${__('Same content as {name}', { name: f.duplicateOf })}` : '');
-          item.innerHTML = `<span>${f.done ? LABELED_ICON : NEW_ICON}</span><span class="fname"></span><span class="dirty-dot"></span>`
+          item.innerHTML = `<span>${fileIcon(f)}</span><span class="fname"></span><span class="dirty-dot"></span>`
             + `<button class="del-file" title="${__('Remove this file from the data (with its label)')}" aria-label="${__('Remove file')}"><i class="fa-solid fa-trash-can" aria-hidden="true"></i></button>`;
           item.querySelector('.fname').textContent = f.name;
           item.querySelector('.del-file').addEventListener('click', (e) => { e.stopPropagation(); deleteFile(f); });
@@ -362,9 +371,16 @@
     function updateTodo() {
       const todo = files.filter(f => !f.duplicateOf && !f.done);
       const pdf = todo.filter(f => f.kind === 'pdf').length, ac = todo.filter(f => f.kind === 'acars').length;
+      const review = files.filter(f => f.review).length;
       $('todoCount').textContent = todo.length
         ? `— ${__('{images} images and {pdfs} PDFs without a label', { images: todo.length - pdf - ac, pdfs: pdf })}${ac ? `, ${__('{n} ACARS pictures', { n: ac })}` : ''}`
         : `— ${__('all labeled')}`;
+      if (review) {
+        const span = document.createElement('span');
+        span.className = 'to-review';
+        span.textContent = ` · ${__('{n} to review', { n: review })}`;
+        $('todoCount').appendChild(span);
+      }
     }
 
     // ---------- Table editor ----------
@@ -417,8 +433,8 @@
       setDirty(false);
     }
 
-    // DC / Reg. / AC / Crew: hidden in both tables when no row of this PDF has a value.
-    const OPTIONAL_FIELDS = ['dc', 'registration', 'ac', 'crew'];
+    // DC / Reg. / Takeoff / Landing / AC / Crew: hidden in both tables when no row of this PDF has a value.
+    const OPTIONAL_FIELDS = ['dc', 'registration', 'takeoff', 'landing', 'ac', 'crew'];
     function hideEmptyColumns() {
       const rows = SECTIONS.flatMap(labelRows);
       for (const f of OPTIONAL_FIELDS) {
@@ -668,12 +684,35 @@
       history.replaceState(null, '', '/label');
     }
 
-    function showBadge(has) {
+    function showBadge(has, review = null) {
       const b = $('labeledBadge');
       b.style.display = '';
-      b.className = 'labeled-badge ' + (has ? 'yes' : 'no');
-      b.textContent = has ? __('labeled') : __('not labeled');
+      b.className = 'labeled-badge ' + (review ? 'review' : has ? 'yes' : 'no');
+      b.textContent = review ? __('needs review') : has ? __('labeled') : __('not labeled');
     }
+
+    // The file's label waits for review: who changed it, when, and the user's own version (a reviewed label kept)
+    let proposed = null;
+    function showReview(data) {
+      const r = data?._review;
+      proposed = r?.proposed || null;
+      $('useProposedBtn').hidden = !proposed;
+      if (!r) return false;
+      const when = r.at ? new Date(r.at).toLocaleString() : '?';
+      const who = r.by === 'claude' ? __('Changed by Claude on {time}', { time: when }) : __('Submitted by a user on {time}', { time: when });
+      const note = r.note ? ` — "${r.note}"` : '';
+      setStatus('err', proposed
+        ? `${who}${note}. ${__('The table shows the label saved before; click "Use the submitted version" to see the user\'s rows. Save marks it reviewed.')}`
+        : `${who}${note}. ${__('Needs review: check every row against the file, fix it, then Save (that marks it reviewed).')}`);
+      return true;
+    }
+    $('useProposedBtn').addEventListener('click', () => {
+      if (!proposed || !current) return;
+      if (dirty && !confirm(__('The submitted version replaces the whole current table. Go on?'))) return;
+      renderTables(proposed);
+      setDirty(true);
+      setStatus('err', __('The rows the user submitted: check them against the file, fix them, then Save.'));
+    });
 
     async function loadLabel() {
       const f = current;
@@ -684,6 +723,7 @@
         if (res.status === 404) {
           renderTables({ published: [], planned: [] });
           showBadge(false);
+          showReview(null);
           setStatus('err', f.kind === 'acars'
             ? __('No label yet. Click Auto-fill to get a suggestion, or fill the fields by hand.')
             : __('No label yet. Click Auto-fill to get a suggestion from {by}, or add rows by hand.', { by: f.kind === 'pdf' ? __('the PDF parser') : 'OCR' }));
@@ -692,8 +732,8 @@
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const data = await res.json();
         renderTables(data);
-        showBadge(true);
-        if (data._autoLabel) setStatus('err', `${labelPath(f)} — ${__('an AUTOMATIC label from the parser, not reviewed yet: check every row, then click Save')}`);
+        showBadge(true, data._review);
+        if (showReview(data)) { /* the review note is the status */ } else if (data._autoLabel) setStatus('err', `${labelPath(f)} — ${__('an AUTOMATIC label from the parser, not reviewed yet: check every row, then click Save')}`);
         else setStatus('ok', labelPath(f) + (data._reviewedAt ? ` — ${__('saved {time}', { time: new Date(data._reviewedAt).toLocaleString() })}` : ''));
         if (REVIEW && f.kind === 'image') await loadReview();
       } catch (e) {
@@ -714,10 +754,12 @@
         if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
         setDirty(false);
         showBadge(true);
+        showReview(null); // saved: reviewed
         savedOnce = true;
-        if (!f.done) {
+        if (!f.done || f.review) {
           f.done = f.labeled = true;
-          if (f._el) f._el.firstElementChild.innerHTML = LABELED_ICON;
+          f.review = null;
+          if (f._el) f._el.firstElementChild.innerHTML = fileIcon(f);
           updateTodo();
         }
         setStatus('ok', __('Saved {file}', { file: data.file || labelPath(f) }) + (f.kind === 'acars' ? '' : ` (${body.published.length} published, ${body.planned.length} planned)`));
@@ -847,12 +889,13 @@
       const acarsCopy = new Set((ac.items || []).filter(i => i.duplicateOf && i.labeled).map(i => i.duplicateOf));
       const labeledCopy = new Set((img.items || []).filter(i => i.duplicateOf && i.labeled).map(i => i.duplicateOf));
       files = [
-        ...(img.items || []).map(i => ({ name: i.name, kind: 'image', labeled: i.labeled, duplicateOf: i.duplicateOf, done: i.labeled || labeledCopy.has(i.name) })),
-        ...(pdf.items || []).map(p => ({ name: p.name, kind: 'pdf', labeled: p.labeled, duplicateOf: null, done: p.labeled })),
-        ...(ac.items || []).map(i => ({ name: i.name, kind: 'acars', labeled: i.labeled, duplicateOf: i.duplicateOf, done: i.labeled || acarsCopy.has(i.name) })),
+        ...(img.items || []).map(i => ({ name: i.name, kind: 'image', labeled: i.labeled, review: i.review || null, duplicateOf: i.duplicateOf, done: i.labeled || labeledCopy.has(i.name) })),
+        ...(pdf.items || []).map(p => ({ name: p.name, kind: 'pdf', labeled: p.labeled, review: p.review || null, duplicateOf: null, done: p.labeled })),
+        ...(ac.items || []).map(i => ({ name: i.name, kind: 'acars', labeled: i.labeled, review: i.review || null, duplicateOf: i.duplicateOf, done: i.labeled || acarsCopy.has(i.name) })),
       ].map(f => ({ ...f, ext: extOf(f.name) }));
-      // roster files, then ACARS; unlabeled first inside each folder, so new uploads are easy to find
-      files.sort((a, b) => (a.kind === 'acars') - (b.kind === 'acars') || folderOf(a).localeCompare(folderOf(b)) || (a.done - b.done) || a.name.localeCompare(b.name));
+      // roster files, then ACARS; inside each folder the labels to review first, then the unlabeled ones (new uploads), then the rest
+      const rank = (f) => (f.review ? 0 : f.done ? 2 : 1);
+      files.sort((a, b) => (a.kind === 'acars') - (b.kind === 'acars') || folderOf(a).localeCompare(folderOf(b)) || (rank(a) - rank(b)) || a.name.localeCompare(b.name));
       updateTodo();
       updateDupButton();
     }
@@ -896,6 +939,7 @@
 
     $('treeSearch').addEventListener('input', renderTree);
     $('onlyTodo').addEventListener('change', renderTree);
+    $('onlyReview').addEventListener('change', renderTree);
     $('showDups').addEventListener('change', renderTree);
     $('treeRefresh').addEventListener('click', async () => {
       $('treeRefresh').disabled = true;
