@@ -24,11 +24,11 @@ const HEADER_FROM_DUTY = { date: -54 / 114, H: -29 / 114, 'R dep': 41 / 114, arr
 // key path|mtime|page, a few files' worth.
 const pageCache = new Map();
 
-async function ocrPage(filePath, page) {
+async function ocrPage(filePath, page, rotate = 0) {
   let key = null;
-  try { key = `${path.resolve(filePath)}|${fs.statSync(filePath).mtimeMs}|${page}`; } catch { /* read it anyway */ }
+  try { key = `${path.resolve(filePath)}|${fs.statSync(filePath).mtimeMs}|${page}|${rotate}`; } catch { /* read it anyway */ }
   if (key && pageCache.has(key)) return pageCache.get(key);
-  const data = await ocrPageNow(filePath, page);
+  const data = await ocrPageNow(filePath, page, rotate);
   if (key) {
     pageCache.set(key, data);
     if (pageCache.size > 20) pageCache.delete(pageCache.keys().next().value);
@@ -36,11 +36,11 @@ async function ocrPage(filePath, page) {
   return data;
 }
 
-async function ocrPageNow(filePath, page) {
+async function ocrPageNow(filePath, page, rotate = 0) {
   const res = await fetch(`${OCR_SERVER_URL}/ocr`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ path: path.resolve(filePath), page, dpi: DPI }),
+    body: JSON.stringify({ path: path.resolve(filePath), page, dpi: DPI, ...(rotate ? { rotate } : {}) }),
     signal: AbortSignal.timeout(Number(process.env.OCR_TIMEOUT_MS || 300000)),
   }).catch((e) => { throw new Error(`The OCR server is not responding (${OCR_SERVER_URL}): ${e.cause?.code || e.message}. This PDF has no text layer, so it needs OCR: npm run ocr:server`); });
   const data = await res.json().catch(() => null);
@@ -154,10 +154,34 @@ function repairGrid(items) {
   return out;
 }
 
+// Words a page read the right way up is full of: times, words, airport codes.
+const READABLE_RE = /^(\d{1,2}:\d{2}|[A-Z][a-z]{2,}|[a-z]{3,}|[A-Z]{3})$/;
+
+/**
+ * A page OCR'd the right way up. A scan lying on its side reads as standing boxes of
+ * nonsense ("ZE/WBS"): when most boxes stand, the page is read again turned a quarter
+ * each way (the OCR server's "rotate"), keeping the reading with more readable words.
+ */
+async function ocrUpright(filePath, page) {
+  const data = await ocrPage(filePath, page);
+  const boxes = (data.lines || []).filter(l => String(l.text).length >= 3).map((l) => {
+    const xs = l.box.map(q => q[0]), ys = l.box.map(q => q[1]);
+    return Math.max(...ys) - Math.min(...ys) > Math.max(...xs) - Math.min(...xs);
+  });
+  if (boxes.length < 10 || boxes.filter(Boolean).length < boxes.length * 0.6) return data;
+  const readable = (d) => (d.lines || []).reduce((n, l) => n + String(l.text).split(/\s+/).filter(w => READABLE_RE.test(w)).length, 0);
+  let best = data;
+  for (const rotate of [90, 270]) {
+    const turned = await ocrPage(filePath, page, rotate);
+    if (turned.rotate === rotate && readable(turned) > readable(best)) best = turned;
+  }
+  return best;
+}
+
 export async function ocrPdfPages(filePath) {
-  const first = await ocrPage(filePath, 1);
+  const first = await ocrUpright(filePath, 1);
   const results = [first];
-  for (let p = 2; p <= (first.pageCount || 1); p += 1) results.push(await ocrPage(filePath, p));
+  for (let p = 2; p <= (first.pageCount || 1); p += 1) results.push(await ocrUpright(filePath, p));
   return dayFirstDates(results.map((data, i) => ocrDataToPage(data, i + 1)));
 }
 
@@ -167,9 +191,9 @@ export async function ocrPdfPages(filePath) {
  * pixels, as PaddleOCR gives them for a roster image. -> { lines, width, height }
  */
 export async function ocrPdfAsImage(filePath) {
-  const first = await ocrPage(filePath, 1);
+  const first = await ocrUpright(filePath, 1);
   const pages = [first];
-  for (let p = 2; p <= (first.pageCount || 1); p += 1) pages.push(await ocrPage(filePath, p));
+  for (let p = 2; p <= (first.pageCount || 1); p += 1) pages.push(await ocrUpright(filePath, p));
   const lines = [];
   let top = 0;
   for (const p of pages) {

@@ -303,9 +303,10 @@ def _append_from_legacy_page(page, lines):
             continue
         lines.append({"text": text, "confidence": score, "box": _to_box(box)})
 
-def render_pdf_page(path, page_no, dpi):
+def render_pdf_page(path, page_no, dpi, rotate=0):
     """Render one page (1-based) of a PDF to a temp PNG for OCR (image-only
-    PDFs, e.g. a duty plan printed from a browser). Returns (png, pages, px per pt)."""
+    PDFs, e.g. a duty plan printed from a browser), turned `rotate` degrees
+    clockwise (a scan lying on its side). Returns (png, pages, px per pt)."""
     import pypdfium2 as pdfium
     pdf = pdfium.PdfDocument(path)
     try:
@@ -314,6 +315,8 @@ def render_pdf_page(path, page_no, dpi):
             raise ValueError(f"page {page_no} out of range 1..{count}")
         scale = dpi / 72.0
         image = pdf[page_no - 1].render(scale=scale).to_pil().convert("RGB")
+        if rotate % 360:
+            image = image.rotate(-(rotate % 360), expand=True)
         fd, png = tempfile.mkstemp(suffix=".png")
         os.close(fd)
         image.save(png, "PNG")
@@ -460,10 +463,11 @@ class Handler(BaseHTTPRequestHandler):
         try:
             ocr_path = img_path
             if img_path.lower().endswith(".pdf"):
-                # {"path": "x.pdf", "page": 1, "dpi": 200}: OCR one rendered page.
-                pdf_png, count, scale = render_pdf_page(img_path, int(req.get("page") or 1), int(req.get("dpi") or 200))
+                # {"path": "x.pdf", "page": 1, "dpi": 200, "rotate": 0}: OCR one rendered page.
+                rotate = int(req.get("rotate") or 0)
+                pdf_png, count, scale = render_pdf_page(img_path, int(req.get("page") or 1), int(req.get("dpi") or 200), rotate)
                 ocr_path = pdf_png
-                pdf_info = {"page": int(req.get("page") or 1), "pageCount": count, "scale": scale}
+                pdf_info = {"page": int(req.get("page") or 1), "pageCount": count, "scale": scale, "rotate": rotate}
             lines, width, height, timing = run_ocr(ocr_path)
             elapsed = int((time.time() - t0) * 1000)
             with _stats_lock:

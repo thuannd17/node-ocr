@@ -42,6 +42,9 @@
     .fields dt:nth-last-of-type(1), .fields dd:nth-last-of-type(1) { border-bottom: none; }
     .meta { font-size: 12px; color: var(--muted); margin-top: 10px; }
     .actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+    .btn.danger { background: var(--danger); }
+    .btn.danger:hover:not(:disabled) { background: var(--danger-dark); }
+    .btn.danger:disabled { background: #ccc; }
     .btn.sent, .btn.sent:disabled { background: #2e7d32; color: #fff; border-color: #2e7d32; cursor: default; }
     /* Correction popup ("Suggest a correction"): as /label's viewer, the picture on the left, its values on the right */
     .viewer { position: fixed; inset: 0; z-index: 1000; background: rgba(20, 28, 42, .55); display: flex; padding: 14px; }
@@ -59,6 +62,8 @@
     .viewer .vbtn.secondary { background: var(--secondary); border: none; color: #fff; }
     .viewer .vbtn.secondary:hover:not(:disabled) { background: var(--secondary-dark); }
     .viewer .vbtn.small { padding: 3px 8px; font-size: 12px; }
+    .viewer .vbtn.danger { background: var(--danger); }
+    .viewer .vbtn.danger:hover:not(:disabled) { background: var(--danger-dark); }
     .viewer-head .close { background: transparent; color: #555; font-size: 22px; line-height: 1; padding: 2px 8px; border: none; cursor: pointer; border-radius: 6px; }
     .viewer-head .close:hover { background: #eceff3; }
     .state-badge { display: inline-block; padding: 1px 6px; border-radius: 8px; font-size: 10px; font-weight: 600; background: #ede7f6; color: #5e35b1; }
@@ -78,10 +83,19 @@
     }
     .v-preview img { max-width: 100%; align-self: flex-start; border: 1px solid #eee; border-radius: 6px; cursor: zoom-in; }
     .v-preview img.zoomed { max-width: none; cursor: zoom-out; }
+    /* the values' side: a toolbar card that stays put, a message card (only while there is a message), the values scrolling */
+    .v-side { min-height: 0; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+    .v-side > .vpanel { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 12px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+    .v-side > .v-tools-card { flex: none; padding: 8px 12px; }
+    .v-side > .v-alert-card { flex: none; padding: 8px 12px; border-left: 4px solid #b0bac8; }
+    .v-alert-card:has(.v-status:empty) { display: none; }
+    .v-alert-card:has(.v-status.ok) { border-left-color: #2a7d2a; }
+    .v-alert-card:has(.v-status.err) { border-left-color: #c33; background: #fff6f6; }
+    .v-side > .v-values { flex: 1; min-height: 0; overflow: auto; }
     .v-tools { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
     .v-tools .spacer { flex: 1; }
     .v-hint { font-size: 12px; color: #5d4037; background: #fff8e1; border: 1px solid #ffe082; border-radius: 6px; padding: 6px 10px; }
-    .v-status { font-size: 12px; min-height: 18px; }
+    .v-status { font-size: 12px; }
     .v-status.ok { color: #2a7d2a; }
     .v-status.err { color: #c33; }
     .v-status.busy { color: #888; }
@@ -90,10 +104,10 @@
     .v-form input { padding: 6px 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; font-family: Consolas, monospace; }
     .v-form input:focus { outline: none; border-color: #ffc107; box-shadow: 0 0 0 2px #fff3c4; }
     .v-form input:read-only { background: #f5f7fa; color: #556; }
-    .viewer.locked #vTryParse, .viewer.locked #vSubmit, .viewer.locked #vReset, .viewer.locked .v-hint { display: none; }
+    .viewer.locked #vTryParse, .viewer.locked #vSubmit, .viewer.locked #vReport, .viewer.locked #vReset, .viewer.locked .v-hint { display: none; }
     .msg.ok { background: #e8f5e9; color: #1b5e20; }
 
-    /* "Suggest a correction" dialog (as on /roster) */
+    /* "Report parsing" dialog (as on /roster) */
     dialog.suggest { border: none; border-radius: 10px; padding: 0; width: min(520px, calc(100vw - 32px)); box-shadow: 0 10px 30px rgba(0,0,0,0.25); }
     dialog.suggest::backdrop { background: rgba(20, 28, 45, 0.45); }
     dialog.suggest form { padding: 18px 20px; display: flex; flex-direction: column; gap: 12px; }
@@ -151,16 +165,21 @@
       <div class="viewer-body" id="vBody">
         <div class="vpanel v-preview" id="vPreview"></div>
         <div class="splitter" id="vSplitter" title="Drag to resize"></div>
-        <div class="vpanel">
+        <div class="v-side">
+        <div class="vpanel v-tools-card">
           <div class="v-tools">
             <button class="vbtn secondary small" id="vTryParse" title="Read the picture with the parser instead of the AI model (replaces the values)"><i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i> Try to parse</button>
-            <button class="vbtn secondary small" id="vReset" title="Put back what the AI model read (drops your changes to this picture)"><i class="fa-solid fa-rotate-left" aria-hidden="true"></i> Reset</button>
+            <button class="vbtn secondary small" id="vReset" title="Put back what the AI model read (drops your changes to this picture)"><i class="fa-solid fa-rotate-left" aria-hidden="true"></i> Reload</button>
             <span class="spacer"></span>
             <button class="vbtn small" id="vSubmit" title="Send the values as you corrected them to the administrators to review"><i class="fa-solid fa-paper-plane" aria-hidden="true"></i> Submit this correction</button>
+            <button class="vbtn small danger" id="vReport" title="Report this picture to the administrators with a note: they check it and write the right values"><i class="fa-solid fa-flag" aria-hidden="true"></i> Report</button>
           </div>
+        </div>
+        <div class="vpanel v-alert-card" role="status"><span class="v-status" id="vStatus"></span></div>
+        <div class="vpanel v-values">
           <div class="v-hint">Correct the values the picture shows, or let the parser read it instead.</div>
-          <span class="v-status" id="vStatus"></span>
           <div class="v-form" id="vForm"></div>
+        </div>
         </div>
       </div>
     </div>
@@ -168,8 +187,8 @@
 
   <dialog class="suggest" id="suggestDialog" aria-labelledby="suggestTitle">
     <form method="dialog" id="suggestForm">
-      <h3 id="suggestTitle"><i class="fa-solid fa-comment-medical" aria-hidden="true"></i> Suggest a correction</h3>
-      <p>The parser could not read this picture either. Report it to the administrators: they check it, write the right values and use it to teach the AI model. The picture is kept on the server until they have handled it.</p>
+      <h3 id="suggestTitle"><i class="fa-solid fa-flag" aria-hidden="true"></i> Report parsing</h3>
+      <p>This picture was not read right? Report it to the administrators: they check it, write the right values and use it to teach the AI model. The picture is kept on the server until they have handled it.</p>
       <div class="file"><i class="fa-regular fa-image" aria-hidden="true"></i> <strong id="suggestFile"></strong></div>
       <label for="suggestEmail">Your email</label>
       <input type="email" id="suggestEmail" required maxlength="254" autocomplete="email" placeholder="name@example.com">
@@ -204,8 +223,10 @@
         fields[k] ? `<dd>${escapeHtml(fields[k])}</dd>` : `<dd class="none">${__('not read')}</dd>`}`).join('')}</dl>
         <div class="meta">${escapeHtml(meta)}</div>
         <div class="actions"><button class="btn secondary" id="copyBtn"><i class="fa-regular fa-copy" aria-hidden="true"></i> <span>${__('Copy')}</span></button>
-          <button class="btn secondary" id="suggestBtn" title="${escapeHtml(__('A value is wrong? Correct it and send it to the administrators'))}"><i class="fa-solid fa-comment-medical" aria-hidden="true"></i> <span>${__('Suggest a correction')}</span></button></div>`;
+          <button class="btn secondary" id="suggestBtn" title="${escapeHtml(__('A value is wrong? Correct it and send it to the administrators'))}"><i class="fa-solid fa-comment-medical" aria-hidden="true"></i> <span>${__('Suggest a correction')}</span></button>
+          <button class="btn danger" id="reportBtn" title="${escapeHtml(__('Report this picture to the administrators with a note: they check it and write the right values'))}"><i class="fa-solid fa-flag" aria-hidden="true"></i> <span>${__('Report')}</span></button></div>`;
       $('suggestBtn').addEventListener('click', () => openViewer(current));
+      $('reportBtn').addEventListener('click', () => openSuggest(current));
       renderSuggestBtn();
       $('copyBtn').addEventListener('click', async () => {
         const text = FIELDS.map(([k, label]) => `${label}: ${fields[k] || '-'}`).join('\n');
@@ -251,8 +272,8 @@
     // The picture on the left, its values as inputs on the right; Previous / Next go through the pictures read in this
     // visit, each keeping its own unsent changes (shot.draft). "Try to parse" lets the parser read the picture instead;
     // "Submit this correction" sends the picture with the values (/api/acars/corrections: it joins the ACARS data,
-    // waiting for an admin's review on /label). When the parser reads nothing either, the "Report" dialog sends the
-    // picture with a note instead (/api/acars/suggestions).
+    // waiting for an admin's review on /label). The "Report parsing" dialog (the Report buttons next to Suggest a
+    // correction and to Submit this correction) sends the picture with a note instead (/api/acars/suggestions).
     const suggestDialog = $('suggestDialog');
     const viewer = $('viewer');
     const viewerOpen = () => !viewer.hidden;
@@ -266,6 +287,7 @@
       btn.classList.toggle('sent', !!sent);
       btn.querySelector('i').className = sent ? 'fa-solid fa-check' : 'fa-solid fa-comment-medical';
       btn.querySelector('span').textContent = !sent ? __('Suggest a correction') : sent.review ? __('Correction sent') : __('Suggestion sent');
+      if ($('reportBtn')) $('reportBtn').disabled = !!sent;
     }
     function vStatus(kind, msg) { const el = $('vStatus'); el.className = `v-status ${kind || ''}`; el.textContent = msg || ''; }
     function vBadge(shot) {
@@ -326,6 +348,7 @@
     $('vNext').addEventListener('click', () => stepViewer(1));
     $('vClose').addEventListener('click', closeViewer);
     viewer.addEventListener('mousedown', (e) => { if (e.target === viewer) closeViewer(); }); // a click outside the box
+    $('vReport').addEventListener('click', () => openSuggest(vShot));
     $('vReset').addEventListener('click', () => {
       const shot = vShot;
       if (!shot || shot.suggestion) return;
@@ -359,7 +382,7 @@
       });
     }
 
-    // Try to parse: the parser reads the picture; its values replace the inputs. Nothing read: the Report dialog.
+    // Try to parse: the parser reads the picture; its values replace the inputs. Nothing read: an error, the values stay.
     $('vTryParse').addEventListener('click', async () => {
       const shot = vShot, btn = $('vTryParse');
       if (!shot || shot.suggestion) return;
@@ -375,7 +398,6 @@
         const read = data.fields || {};
         if (!res.ok || !FIELDS.some(([k]) => read[k])) {
           vStatus('err', res.ok ? __('The parser could not read any value of this picture.') : __('The parser could not read this picture: {error}', { error: __(data.error || `HTTP ${res.status}`) }));
-          openSuggest(shot);
           return;
         }
         Object.assign(shot, { draft: Object.fromEntries(FIELDS.map(([k]) => [k, read[k] || ''])), draftDirty: false, draftBy: 'parser' });
@@ -416,7 +438,7 @@
       }
     });
 
-    // The Report dialog (over the popup): the picture, a note and the user's email to the admins (/helpdesk)
+    // The Report parsing dialog (the Report button): the picture, a note and the user's email to the admins (/helpdesk)
     let reportShot = null;
     function openSuggest(shot) {
       if (!shot || shot.suggestion) return;

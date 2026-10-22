@@ -77,6 +77,21 @@
     .viewer-head .close:hover { background: #eceff3; }
     .viewer-body { --split: 42%; flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, var(--split)) 12px minmax(0, 1fr); padding: 10px; gap: 0; }
     .viewer-body > .panel { min-height: 0; overflow: auto; }
+    /* the table side: the toolbar card stays put, the tables scroll under it */
+    .table-side { min-height: 0; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+    .table-side > .tools-card { flex: none; gap: 6px; padding: 8px 12px; }
+    .tools-card .toolbar { padding: 0; margin: 0; background: none; border: 0; box-shadow: none; }
+    /* messages (status, review note): a card of their own, only while there is one */
+    .table-side > .alert-card { flex: none; gap: 6px; padding: 8px 12px; border-left: 4px solid #b0bac8; }
+    .alert-card:not(:has(.status:not(:empty))):not(:has(.review-note:not([hidden]))) { display: none; }
+    .alert-card:has(.status.ok:not(:empty)) { border-left-color: #2a7d2a; }
+    .alert-card:has(.status.err:not(:empty)) { border-left-color: #c33; background: #fff6f6; }
+    .alert-card .status:empty { display: none; }
+    .period-range { display: inline-flex; gap: 4px; align-items: center; font-size: 13px; }
+    .period-range input[type="date"] { padding: 3px 6px; }
+    .period-shown { font-size: 12px; color: var(--muted); }
+    #publishedBody tr[hidden], #plannedBody tr[hidden] { display: none; }
+    .table-side > .table-panel { flex: 1; min-height: 0; overflow: auto; }
     .splitter { cursor: col-resize; border-radius: 4px; position: relative; touch-action: none; }
     .splitter::after { content: ''; position: absolute; left: 5px; top: calc(50% - 24px); width: 2px; height: 48px; border-radius: 1px; background: #b8c2d1; }
     .splitter:hover, .splitter.dragging { background: #d6e1f1; }
@@ -203,7 +218,8 @@
           <iframe id="rosterPdf" title="PDF" style="display:none"></iframe>
         </div>
         <div class="splitter" id="splitter" title="Drag to resize"></div>
-        <div class="panel table-panel">
+        <div class="table-side">
+        <div class="panel tools-card">
           <div class="toolbar">
             <select id="engineSel" title="How to read the file to suggest a label" style="padding:3px 6px; border:1px solid #ddd; border-radius:4px; font-size:12px">
               <option value="parser">Parser</option>
@@ -218,13 +234,24 @@
             <button class="secondary small" id="useProposedBtn" hidden title="Put the rows the user submitted in the table (the saved label stays until you save)"><i class="fa-solid fa-file-import" aria-hidden="true"></i> Use the submitted version</button>
             <button class="small" id="saveBtn" title="Ctrl+S"><i class="fa-solid fa-floppy-disk" aria-hidden="true"></i> Save label</button>
           </div>
-          <div class="toolbar pdf-only" style="display:none">
-            <label style="font-size:13px">Period <input id="periodInput" placeholder="01Jul24 - 31Jul24" /></label>
-            <label style="font-size:12px; color:var(--muted)"><input type="checkbox" id="allCols" /> Show all columns</label>
+          <div class="toolbar roster-only">
+            <span class="period-range"><span>Period</span>
+              <input type="date" id="periodFrom" title="Period start" aria-label="Period start" /> –
+              <input type="date" id="periodTo" title="Period end" aria-label="Period end" /></span>
+            <input type="hidden" id="periodInput" />
+            <button class="secondary small" id="periodReset" title="Back to the first to the last event"><i class="fa-solid fa-rotate-left" aria-hidden="true"></i> Reset to default</button>
+            <span class="period-shown" id="periodShown"></span>
+            <span class="spacer"></span>
+            <label class="pdf-only" style="display:none; font-size:12px; color:var(--muted)"><input type="checkbox" id="allCols" /> Show all columns</label>
           </div>
+        </div>
+
+        <div class="panel alert-card" id="alertCard" role="status">
           <span class="status" id="status"></span>
           <div class="review-note" id="reviewNote" hidden></div>
+        </div>
 
+        <div class="panel table-panel">
           <div id="acarsEditor">
             <div class="acars-form" id="acarsForm"></div>
           </div>
@@ -251,6 +278,7 @@
               <button class="secondary small" id="copyBtn"><i class="fa-solid fa-copy" aria-hidden="true"></i> Copy</button></div>
             <textarea id="jsonArea" readonly spellcheck="false" aria-label="JSON to save"></textarea>
           </div>
+        </div>
         </div>
       </div>
     </div>
@@ -427,7 +455,8 @@
         body.innerHTML = '';
         for (const row of data?.[sec] || []) body.appendChild(makeRow(row));
       }
-      $('periodInput').value = data?.period || '';
+      showPeriod(data?.period || '');
+      resetPeriodView();
       hideEmptyColumns();
       renumber();
       setDirty(false);
@@ -451,6 +480,60 @@
         $(sec + 'Empty').style.display = rows.length ? 'none' : '';
         $(sec + 'Table').style.display = rows.length ? '' : 'none';
       }
+      filterByPeriod();
+    }
+
+    // ---------- Period: only the rows between two dates shown (the first event's date to the last's at first) ----------
+    // A view filter only: the label's period (#periodInput) and its rows stay as they are, nothing to save.
+    // Dates outside the events' cannot be picked (min / max), nor a start after the end.
+    const MON3 = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    // "01Mar18", "1 Mar 18", "01MAR2018" -> "2018-03-01" ('' when not a date)
+    function isoDate(text) {
+      const m = /^(\d{1,2})\s*([A-Za-z]{3})[A-Za-z]*\s*(\d{4}|\d{2})$/.exec(String(text).trim());
+      const mon = m ? MON3.findIndex(x => x.toLowerCase() === m[2].toLowerCase()) : -1;
+      if (mon < 0) return '';
+      return `${m[3].length === 2 ? '20' + m[3] : m[3]}-${String(mon + 1).padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+    }
+    function showPeriod(text) {
+      $('periodInput').value = text;
+    }
+    // [first, last] date of the rows ('' when none has a readable date)
+    function eventRange() {
+      const dates = SECTIONS.flatMap(labelRows).map(tr => isoDate(tr.querySelector('td[data-field="date"]')?.textContent || '')).filter(Boolean).sort();
+      return [dates[0] || '', dates.at(-1) || ''];
+    }
+    let shownRange = ['', ''];
+    function setPeriodBounds() {
+      const [min, max] = eventRange();
+      const from = $('periodFrom'), to = $('periodTo');
+      // (a picked range that was the whole range follows the rows when they change)
+      if (!from.value || from.value === shownRange[0] || from.value < min) from.value = min;
+      if (!to.value || to.value === shownRange[1] || to.value > max) to.value = max;
+      if (from.value > to.value) from.value = to.value; // (typed in, not picked)
+      shownRange = [min, max];
+      from.min = to.min = min;
+      from.max = to.max = max;
+      if (from.value) to.min = from.value;
+      if (to.value) from.max = to.value;
+    }
+    function resetPeriodView() {
+      $('periodFrom').value = $('periodTo').value = '';
+      setPeriodBounds();
+    }
+    function filterByPeriod() {
+      const on = current?.kind === 'pdf' || current?.kind === 'image'; // (ACARS pictures have no rows)
+      setPeriodBounds();
+      const a = $('periodFrom').value, b = $('periodTo').value;
+      let shown = 0, all = 0;
+      for (const sec of SECTIONS) for (const tr of labelRows(sec)) {
+        const d = isoDate(tr.querySelector('td[data-field="date"]')?.textContent || '');
+        const out = !!(on && d && ((a && d < a) || (b && d > b))); // a row without a readable date stays
+        tr.hidden = out;
+        if (tr._hint) tr._hint.hidden = out;
+        all++;
+        if (!out) shown++;
+      }
+      $('periodShown').textContent = on ? __('{shown} / {n} rows shown', { shown, n: all }) : '';
     }
 
     // ---------- Review: the AI model's reading vs this label (images) ----------
@@ -630,7 +713,9 @@
       });
     }
     document.querySelectorAll('[data-add]').forEach(b => b.addEventListener('click', () => addRow(b.dataset.add)));
-    $('periodInput').addEventListener('input', () => setDirty(true));
+    $('periodFrom').addEventListener('change', filterByPeriod);
+    $('periodTo').addEventListener('change', filterByPeriod);
+    $('periodReset').addEventListener('click', () => { resetPeriodView(); filterByPeriod(); });
     $('allCols').addEventListener('change', () => current && hideEmptyColumns());
 
     // ---------- Selecting / loading / saving ----------

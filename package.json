@@ -21,7 +21,7 @@
   },
   "scripts": {
     "start": "node --env-file=.env src/index.js",
-    "tunnel": "cloudflare tunnel --url http://localhost:3000",
+    "tunnel": "                                                                                                                      cloudflare tunnel --url http://localhost:3000",
     "media:import": "node --env-file=.env src/scripts/media-import.mjs",
     "models:archive": "node --env-file=.env src/scripts/models-archive.mjs",
     "test": "node --test --test-concurrency=1 tests",

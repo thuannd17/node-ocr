@@ -31,3 +31,28 @@ test('an OCR page is repaired and parsed like a text PDF', () => {
     ['27 Jun 26', 'Sat', 'EW 762', 'CGN', '05:15 Z', '06:15 Z', 'ZRH', '320', '[Landing Day/Night: 1] [DT 12:41] [FDT 11:13] [xFDP 00:00]'],
   ]);
 });
+
+test('a scan lying on its side (most OCR boxes standing) is read again turned a quarter, the more readable way kept', async () => {
+  const { ocrPdfPages } = await import('../src/services/pdf-ocr.js');
+  const standing = (text, i) => ({ text, confidence: 0.5, box: [[10 + i * 20, 10], [20 + i * 20, 10], [20 + i * 20, 60], [10 + i * 20, 60]] });
+  const lying = (text, i) => ({ text, confidence: 0.9, box: [[10, 10 + i * 20], [60, 10 + i * 20], [60, 20 + i * 20], [10, 20 + i * 20]] });
+  const answers = {
+    0: { lines: ['ZE/WBS', 'UOW', 'S9O', 'FRRE', 'ZS:ZO', 'OZ:1O', 'HIV', 'SnS', 'RRP', 'MZ8', 'ZZ/I'].map(standing) },
+    90: { rotate: 90, lines: ['Released', 'Roster', 'Month:', 'June', 'Activity', 'From', '13:10', '15:45', 'MUC', 'ATH', 'FREE'].map(lying) },
+    270: { rotate: 270, lines: ['xx', 'OI:EI', 'Sb:SI'].map(lying) },
+  };
+  const asked = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    const { rotate = 0 } = JSON.parse(init.body);
+    asked.push(rotate);
+    return { ok: true, json: async () => ({ ok: true, scale: 2, width: 200, height: 300, pageCount: 1, ...answers[rotate] }) };
+  };
+  try {
+    const [page] = await ocrPdfPages(`no-such-file-${Date.now()}.pdf`);
+    assert.deepEqual(asked, [0, 90, 270]);
+    assert.deepEqual(page.items.slice(0, 4).map(i => i.text), ['Released', 'Roster', 'Month:', 'June']);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});

@@ -36,6 +36,8 @@
     .viewer button.secondary { background: var(--secondary); }
     .viewer button.secondary:hover:not(:disabled) { background: var(--secondary-dark); }
     .viewer button.small { padding: 3px 8px; font-size: 12px; }
+    .viewer button.danger { background: var(--danger); }
+    .viewer button.danger:hover:not(:disabled) { background: var(--danger-dark); }
     .viewer-head .close { background: transparent; color: #555; font-size: 22px; line-height: 1; padding: 2px 8px; }
     .viewer-head .close:hover { background: #eceff3 !important; }
     .state-badge { display: inline-block; padding: 1px 6px; border-radius: 8px; font-size: 10px; font-weight: 600; background: #ede7f6; color: #5e35b1; }
@@ -57,11 +59,24 @@
     .v-preview img.zoomed { max-width: none; cursor: zoom-out; }
     .v-preview iframe { width: 100%; flex: 1; min-height: 400px; border: 1px solid #eee; background: #fff; }
     .v-preview.doc { overflow: hidden; }
+    /* the tables' side: a toolbar card that stays put, a message card (only while there is a message), the tables scrolling */
+    .v-side { min-height: 0; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+    .v-side > .panel { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 12px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+    .v-side > .v-tools-card { flex: none; gap: 6px; padding: 8px 12px; }
+    .v-side > .v-alert-card { flex: none; padding: 8px 12px; border-left: 4px solid #b0bac8; }
+    .v-alert-card:has(.v-status:empty) { display: none; }
+    .v-alert-card:has(.v-status.ok) { border-left-color: #2a7d2a; }
+    .v-alert-card:has(.v-status.err) { border-left-color: #c33; background: #fff6f6; }
+    .v-side > #vPanel { flex: 1; min-height: 0; overflow: auto; }
+    .v-period { display: inline-flex; gap: 4px; align-items: center; font-size: 13px; }
+    .v-period input[type="date"] { padding: 3px 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 12px; }
+    .v-period-shown { font-size: 12px; color: var(--muted); }
+    .v-table tbody tr[hidden] { display: none; }
     .v-tools { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
     .v-tools .spacer { flex: 1; }
     .v-tools label { font-size: 12px; color: var(--muted); display: inline-flex; gap: 4px; align-items: center; }
     .v-hint { font-size: 12px; color: #5d4037; background: #fff8e1; border: 1px solid #ffe082; border-radius: 6px; padding: 6px 10px; }
-    .v-status { font-size: 12px; min-height: 18px; }
+    .v-status { font-size: 12px; }
     .v-status.ok { color: #2a7d2a; }
     .v-status.err { color: #c33; }
     .v-status.busy { color: #888; }
@@ -84,7 +99,7 @@
     .v-table.locked td.actions, .v-table.locked th.actions { display: none; }
     .v-empty { color: #999; font-style: italic; padding: 12px; text-align: center; border: 1px dashed #ddd; border-radius: 6px; }
     .v-wait { color: var(--muted); padding: 24px; text-align: center; font-size: 14px; }
-    .viewer.locked [data-vadd], .viewer.locked #vTryParse, .viewer.locked #vSubmit { display: none; }
+    .viewer.locked [data-vadd], .viewer.locked #vTryParse, .viewer.locked #vSubmit, .viewer.locked #vReport { display: none; }
     .v-table.hide-dc [data-field="dc"], .v-table.hide-registration [data-field="registration"], .v-table.hide-ac [data-field="ac"], .v-table.hide-crew [data-field="crew"],
     .v-table.hide-takeoff [data-field="takeoff"], .v-table.hide-landing [data-field="landing"] { display: none; }
     /* "Suggest a correction" dialog */
@@ -294,8 +309,15 @@
     .file-queue .queue-nav { border: 1px solid #ccc; background: #fff; border-radius: 6px; padding: 6px 10px; cursor: pointer; color: #444; }
     .file-queue .queue-nav:disabled { color: #bbb; cursor: default; }
     .file-queue .queue-summary { font-size: 13px; color: #666; }
-    .file-queue .job-status { flex-basis: 100%; font-size: 14px; color: #555; display: none; }
-    .file-queue .job-status.visible { display: block; }
+    .file-queue .queue-actions { display: none; gap: 8px; align-items: center; margin-left: auto; }
+    body.has-result .file-queue .queue-actions { display: inline-flex; }
+    .file-queue .queue-actions .btn { margin-top: 0; padding: 7px 14px; font-size: 14px; }
+    .btn.danger { background: var(--danger); }
+    .btn.danger:hover:not(:disabled) { background: var(--danger-dark); }
+    .btn.danger:disabled { background: #ccc; }
+    /* where the file shown is in the queue (waiting, being read): a card of its own, only then */
+    .card.job-status { font-size: 14px; color: #555; display: none; padding: 12px 16px; }
+    .card.job-status.visible { display: block; }
 
     /* Responsive: stack on small screens */
     @media (max-width: 700px) {
@@ -334,7 +356,6 @@
       <span id="saveStatus" style="font-size:13px; color:#666;"></span>
       <button class="btn btn-secondary" id="reparseBtn" onclick="reparseImage()" title="Let the AI model read this file again"><i class="fa-solid fa-rotate-right" aria-hidden="true"></i> Re-read</button>
       <button class="btn btn-secondary" id="icsBtn" onclick="exportIcs()" title="Download the Published + Planned rows of this file as an .ics calendar (Google Calendar, Outlook, Apple Calendar…)"><i class="fa-solid fa-file-export" aria-hidden="true"></i> Export .ics</button>
-      <button class="btn" id="suggestBtn" onclick="openViewer()" title="The table does not match your roster? Correct it and send it to the administrators"><i class="fa-solid fa-comment-medical" aria-hidden="true"></i> <span>Suggest a correction</span></button>
       <button class="btn btn-secondary" id="calendarBtn" onclick="viewCalendar()" title="Open the rows of this file on the Calendar page"><i class="fa-solid fa-calendar-days" aria-hidden="true"></i> View calendar</button>
     </span>
     <div id="error" class="error"></div>
@@ -348,13 +369,17 @@
     <select id="fileSelect"></select>
     <button class="queue-nav" id="nextFile" type="button" title="Next file"><i class="fa-solid fa-chevron-right" aria-hidden="true"></i></button>
     <span id="queueSummary" class="queue-summary"></span>
-    <div id="jobStatus" class="job-status"></div>
+    <span class="queue-actions">
+      <button class="btn" id="suggestBtn" onclick="openViewer()" title="The table does not match your roster? Correct it and send it to the administrators"><i class="fa-solid fa-comment-medical" aria-hidden="true"></i> <span>Suggest a correction</span></button>
+      <button class="btn danger" id="reportBtn" onclick="openReport(selected)" title="Report this file to the administrators with a note: they check it and write the right rows"><i class="fa-solid fa-flag" aria-hidden="true"></i> <span>Report</span></button>
+    </span>
   </div>
+  <div class="card job-status" id="jobStatus" role="status"></div>
 
   <dialog class="suggest" id="suggestDialog" aria-labelledby="suggestTitle">
     <form method="dialog" id="suggestForm">
-      <h3 id="suggestTitle"><i class="fa-solid fa-comment-medical" aria-hidden="true"></i> Suggest a correction</h3>
-      <p>The parser could not read this file either. Report it to the administrators: they check it, write the right rows and use it to teach the AI model. The file is kept on the server until they have handled it.</p>
+      <h3 id="suggestTitle"><i class="fa-solid fa-flag" aria-hidden="true"></i> Report parsing</h3>
+      <p>This file was not read right? Report it to the administrators: they check it, write the right rows and use it to teach the AI model. The file is kept on the server until they have handled it.</p>
       <div class="file"><i class="fa-regular fa-file" aria-hidden="true"></i> <strong id="suggestFile"></strong></div>
       <label for="suggestEmail" style="font-size:14px; font-weight:600">Your email</label>
       <input type="email" id="suggestEmail" required maxlength="254" autocomplete="email" placeholder="name@example.com">
@@ -364,7 +389,7 @@
       <div class="actions">
         <span class="err" id="suggestErr"></span>
         <button type="button" class="btn btn-secondary" id="suggestCancel">Cancel</button>
-        <button type="submit" class="btn" id="suggestSend"><i class="fa-solid fa-flag" aria-hidden="true"></i> Report</button>
+        <button type="submit" class="btn" id="suggestSend"><i class="fa-solid fa-paper-plane" aria-hidden="true"></i> Send</button>
       </div>
     </form>
   </dialog>
@@ -386,16 +411,28 @@
       <div class="viewer-body" id="vBody">
         <div class="panel v-preview" id="vPreview"></div>
         <div class="splitter" id="vSplitter" title="Drag to resize"></div>
-        <div class="panel" id="vPanel">
+        <div class="v-side">
+        <div class="panel v-tools-card" id="vToolsCard">
           <div class="v-tools">
             <button class="secondary small" id="vTryParse" title="Read the file with the parser instead of the AI model (replaces the table)"><i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i> Try to parse</button>
-            <button class="secondary small" id="vReset" title="Put back what the AI model read (drops your changes to this file)"><i class="fa-solid fa-rotate-left" aria-hidden="true"></i> Reset</button>
-            <label class="v-pdf-only"><input type="checkbox" id="vAllCols"> Show all columns</label>
+            <button class="secondary small" id="vReset" title="Put back what the AI model read (drops your changes to this file)"><i class="fa-solid fa-rotate-left" aria-hidden="true"></i> Reload</button>
             <span class="spacer"></span>
             <button class="small" id="vSubmit" title="Send the table as you corrected it to the administrators to review"><i class="fa-solid fa-paper-plane" aria-hidden="true"></i> Submit this correction</button>
+            <button class="small danger" id="vReport" title="Report this file to the administrators with a note: they check it and write the right rows"><i class="fa-solid fa-flag" aria-hidden="true"></i> Report</button>
           </div>
+          <div class="v-tools">
+            <span class="v-period"><span>Period</span>
+              <input type="date" id="vPeriodFrom" title="Period start" aria-label="Period start" /> –
+              <input type="date" id="vPeriodTo" title="Period end" aria-label="Period end" /></span>
+            <button class="secondary small" id="vPeriodReset" title="Back to the first to the last event"><i class="fa-solid fa-rotate-left" aria-hidden="true"></i> Reset to default</button>
+            <span class="v-period-shown" id="vPeriodShown"></span>
+            <span class="spacer"></span>
+            <label class="v-pdf-only"><input type="checkbox" id="vAllCols"> Show all columns</label>
+          </div>
+        </div>
+        <div class="panel v-alert-card" role="status"><span class="v-status" id="vStatus"></span></div>
+        <div class="panel" id="vPanel">
           <div class="v-hint" id="vHint">Correct the table: click a cell to change it, add or delete rows. Or let the parser read the file instead.</div>
-          <span class="v-status" id="vStatus"></span>
           <div id="vEditor">
             <div class="v-section">Published <span class="n" id="vPublishedN"></span>
               <button class="small" data-vadd="published"><i class="fa-solid fa-plus" aria-hidden="true"></i> Add row</button></div>
@@ -411,6 +448,7 @@
             </div>
           </div>
           <div class="v-wait" id="vWait" hidden></div>
+        </div>
         </div>
       </div>
     </div>
@@ -723,8 +761,8 @@
     // The file on the left, its tables to correct on the right (cells, Add row, insert / delete per row). Previous /
     // Next go through the files of this session, each keeping its own unsent changes (job.draft). "Try to parse" lets
     // the parser read the file instead; "Submit this correction" sends the file with the rows (/api/roster/corrections:
-    // it joins the data, waiting for an admin's review on /label). When the parser reads nothing either, the "Report"
-    // dialog sends the file with a note instead (/api/roster/suggestions).
+    // it joins the data, waiting for an admin's review on /label). The "Report parsing" dialog (the Report buttons next
+    // to Suggest a correction and to Submit this correction) sends the file with a note instead (/api/roster/suggestions).
     const suggestDialog = document.getElementById('suggestDialog');
     const $v = (id) => document.getElementById(id);
     const viewer = $v('viewer');
@@ -741,6 +779,7 @@
       btn.classList.toggle('corrected', !!sent?.review);
       btn.querySelector('i').className = sent ? 'fa-solid fa-check' : 'fa-solid fa-comment-medical';
       btn.querySelector('span').textContent = !sent ? __('Suggest a correction') : sent.review ? __('Correction sent') : __('Suggestion sent');
+      document.getElementById('reportBtn').disabled = !!sent || selected?.status !== 'done';
     }
     function vStatus(kind, msg) { const s = $v('vStatus'); s.className = 'v-status ' + (kind || ''); s.textContent = msg || ''; }
     function vBadge(text, kind) { const b = $v('vBadge'); b.className = 'state-badge ' + (kind || ''); b.textContent = text || ''; b.style.display = text ? '' : 'none'; }
@@ -799,7 +838,7 @@
       }
       const ready = job.status === 'done';
       for (const id of ['vEditor', 'vHint']) $v(id).hidden = !ready;
-      document.querySelector('.v-tools').style.display = ready ? '' : 'none';
+      $v('vToolsCard').style.display = ready ? '' : 'none';
       $v('vWait').hidden = ready;
       if (!ready) {
         $v('vWait').textContent = job.status === 'error' ? __('This file could not be read: {error}', { error: job.error }) : __('This file is still being read…');
@@ -812,6 +851,7 @@
       $v('vHint').hidden = !!sent;
       $v('vReset').hidden = !!sent;
       for (const el of document.querySelectorAll('.v-pdf-only')) el.style.display = job.kind === 'pdf' ? '' : 'none';
+      vResetPeriod(job);
       for (const tr of document.querySelectorAll('.v-head')) {
         tr.innerHTML = '<th>#</th>' + FIELDS[vKind(job)].map(f => `<th data-field="${f}">${TITLES[f]}</th>`).join('') + '<th class="actions"></th>';
       }
@@ -867,6 +907,53 @@
         $v(`v${cap}Table`).style.display = rows.length ? '' : 'none';
       }
       vHideEmpty();
+      vFilterByPeriod();
+    }
+    // Period: only the rows between two dates shown, the first event's date to the last's at first (rosters and pictures).
+    // A view filter only: Submit sends every row. Dates outside the events' cannot be picked (min / max), nor a start after the end.
+    const MON3 = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    // "01Mar18", "1 Mar 18", "01MAR2018" -> "2018-03-01" ('' when not a date)
+    function isoDate(text) {
+      const m = /^(\d{1,2})\s*([A-Za-z]{3})[A-Za-z]*\s*(\d{4}|\d{2})$/.exec(String(text).trim());
+      const mon = m ? MON3.findIndex(x => x.toLowerCase() === m[2].toLowerCase()) : -1;
+      if (mon < 0) return '';
+      return `${m[3].length === 2 ? '20' + m[3] : m[3]}-${String(mon + 1).padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+    }
+    // [first, last] date of the rows ('' when none has a readable date)
+    function vEventRange() {
+      const dates = V_SECTIONS.flatMap(sec => [...vBody(sec).rows]).map(tr => isoDate(tr.querySelector('td[data-field="date"]')?.textContent || '')).filter(Boolean).sort();
+      return [dates[0] || '', dates.at(-1) || ''];
+    }
+    let vShownRange = ['', ''];
+    function vSetPeriodBounds() {
+      const [min, max] = vEventRange();
+      const from = $v('vPeriodFrom'), to = $v('vPeriodTo');
+      // (a picked range that was the whole range follows the rows when they change)
+      if (!from.value || from.value === vShownRange[0] || from.value < min) from.value = min;
+      if (!to.value || to.value === vShownRange[1] || to.value > max) to.value = max;
+      if (from.value > to.value) from.value = to.value; // (typed in, not picked)
+      vShownRange = [min, max];
+      from.min = to.min = min;
+      from.max = to.max = max;
+      if (from.value) to.min = from.value;
+      if (to.value) from.max = to.value;
+    }
+    function vResetPeriod() {
+      $v('vPeriodFrom').value = $v('vPeriodTo').value = '';
+      vShownRange = ['', ''];
+    }
+    function vFilterByPeriod() {
+      const on = !!vJob;
+      vSetPeriodBounds();
+      const a = $v('vPeriodFrom').value, b = $v('vPeriodTo').value;
+      let shown = 0, all = 0;
+      for (const sec of V_SECTIONS) for (const tr of vBody(sec).rows) {
+        const d = isoDate(tr.querySelector('td[data-field="date"]')?.textContent || '');
+        tr.hidden = !!(on && d && ((a && d < a) || (b && d > b))); // a row without a readable date stays
+        all++;
+        if (!tr.hidden) shown++;
+      }
+      $v('vPeriodShown').textContent = on ? __('{shown} / {n} rows shown', { shown, n: all }) : '';
     }
     function vHideEmpty() {
       const rows = [...vBody('published').rows, ...vBody('planned').rows];
@@ -923,10 +1010,14 @@
     }
     document.querySelectorAll('[data-vadd]').forEach(b => b.addEventListener('click', () => vAddRow(b.dataset.vadd)));
     $v('vAllCols').addEventListener('change', vHideEmpty);
+    $v('vPeriodFrom').addEventListener('change', vFilterByPeriod);
+    $v('vPeriodTo').addEventListener('change', vFilterByPeriod);
+    $v('vPeriodReset').addEventListener('click', () => { vResetPeriod(); vFilterByPeriod(); });
     $v('vPrev').addEventListener('click', () => stepViewer(-1));
     $v('vNext').addEventListener('click', () => stepViewer(1));
     $v('vClose').addEventListener('click', closeViewer);
     viewer.addEventListener('mousedown', (e) => { if (e.target === viewer) closeViewer(); }); // a click outside the box
+    $v('vReport').addEventListener('click', () => openReport(vJob));
     $v('vReset').addEventListener('click', () => {
       const job = vJob;
       if (!job || job.suggestion) return;
@@ -963,7 +1054,7 @@
       });
     }
 
-    // Try to parse: the parser reads the file; its rows replace the table. Nothing read: the Report dialog.
+    // Try to parse: the parser reads the file; its rows replace the table. Nothing read: an error, the table stays.
     $v('vTryParse').addEventListener('click', async () => {
       const job = vJob, btn = $v('vTryParse');
       if (!job?.file || job.suggestion) return;
@@ -977,10 +1068,10 @@
         if (job !== vJob) return;
         if (!res.ok || !n) {
           vStatus('err', res.ok ? __('The parser could not read any row of this file.') : __('The parser could not read this file: {error}', { error: data.error || 'HTTP ' + res.status }));
-          openReport(job);
           return;
         }
         Object.assign(job, { draft: { published: data.published || [], planned: data.planned || [] }, draftDirty: false, draftBy: 'parser', parsedPeriod: data.period || null });
+        vResetPeriod(job);
         renderV(job.draft);
         showVBadge(job);
         vStatus('ok', __('The parser read {n} rows: check them against your roster, fix what is wrong, then click Submit this correction.', { n }));
@@ -1021,7 +1112,7 @@
       }
     });
 
-    // The Report dialog (over the popup): the file, a note and the user's email to the admins (/helpdesk)
+    // The Report parsing dialog (the Report button): the file, a note and the user's email to the admins (/helpdesk)
     let reportJob = null;
     function openReport(job) {
       if (!job || job.status !== 'done' || job.suggestion) return;

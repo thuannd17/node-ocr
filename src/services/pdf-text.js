@@ -27,8 +27,9 @@ export async function readPdfText(filePath) {
       const viewport = page.getViewport({ scale: 1 }); // applies the page's /Rotate
       const content = await page.getTextContent();
       const raw = [];
+      const shifted = shiftedFonts(content.items);
       for (const it of content.items) {
-        const text = (it.str || '').trim();
+        const text = (shifted.has(it.fontName) ? unshift(it.str || '') : (it.str || '')).trim();
         if (!text) continue;
         // Text matrix in display space: [a b c d e f], (e, f) = baseline start.
         const [a, b, , , e, f] = Util.transform(viewport.transform, it.transform);
@@ -58,6 +59,25 @@ export async function readPdfText(filePath) {
   }
   return dayFirstDates(superscriptDays(pages));
 }
+
+/**
+ * Fonts embedded without a character map, whose codes are the glyph numbers: each
+ * character 29 below the real one ("5HOHDVHG\u00035RVWHU" = "Released Roster",
+ * a space is \u0003, digits \u0013-\u001c). A font is read that way when its text
+ * has such control characters; on a page with one, a font with only characters
+ * the shift could have made (no lower case letters, nothing above "]") is too.
+ */
+const SHIFT = 29;
+function shiftedFonts(items) {
+  const fonts = new Set(items.filter(i => /[\u0003-\u001f]/.test(i.str || '')).map(i => i.fontName));
+  if (!fonts.size) return fonts;
+  const plain = new Set(items.filter(i => /[^\u0003-\]]/.test(i.str || '')).map(i => i.fontName));
+  for (const i of items) if (!plain.has(i.fontName)) fonts.add(i.fontName);
+  return fonts;
+}
+// pdf.js turns the codes that are white space ("&'()*" shifted: \t to \r) into a space or drops
+// them, so a space in such text is a lost bracket, not a space (that is \u0003): left out.
+const unshift = (s) => s.replace(/ /g, '').replace(/[\u0003-\u001f!-\]]/g, (c) => String.fromCharCode(c.charCodeAt(0) + SHIFT));
 
 // "02:12⁺¹": the day offset printed in superscript -> "02:12+1", like the other layouts write it.
 const SUPERSCRIPT = { '⁺': '+', '⁻': '-', '⁰': '0', '¹': '1', '²': '2', '³': '3', '⁴': '4', '⁵': '5', '⁶': '6', '⁷': '7', '⁸': '8', '⁹': '9' };
