@@ -20,11 +20,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ocrLines } from './paddle-ocr.js';
+import { ocrLines, ocrDevice, ocrServerHealth } from './paddle-ocr.js';
 import { listReviewedLabels, dataFile, labelFile, DATA_ROOT, LABELS_ROOT } from '../utils/data-files.js';
 import { groupByContent, pickCanonicalLabels } from '../utils/content-groups.js';
 import { ROOT } from '../utils/paths.js';
 import { activeRecId } from './rec-models.js';
+import { saveRun } from './benchmark-history.js';
+import { eachInPool, benchmarkConcurrency } from '../utils/pool.js';
 
 const DATA = DATA_ROOT;
 const LABELS = LABELS_ROOT;
@@ -127,20 +129,15 @@ function summarize(files) {
 
 /** Recognition model the OCR server runs (its /health; older servers do not say: the .env one). */
 async function recModel() {
-  const url = (process.env.OCR_SERVER_URL || 'http://127.0.0.1:8501').replace(/\/+$/, '');
-  try {
-    const h = await (await fetch(`${url}/health`, { signal: AbortSignal.timeout(3000) })).json();
-    if (h.rec) return h.rec;
-  } catch { /* server down: the run has already failed per file */ }
+  const h = await ocrServerHealth(); // null when down: the run has already failed per file
+  if (h?.rec) return h.rec;
   return `${process.env.OCR_CUSTOM_REC || activeRecId() || 'stock'} (MinIO models/rec/active.json)`;
 }
 
 export async function runOcrBenchmark({ onEvent, shouldStop } = {}) {
   const todo = labeledImages();
   onEvent?.({ type: 'start', total: todo.length });
-  const files = [];
-  for (const [i, name] of todo.entries()) {
-    if (shouldStop?.()) break;
+  const files = await eachInPool(todo, benchmarkConcurrency(), async (name) => {
     const t0 = Date.now();
     const entry = { file: name };
     try {
@@ -157,12 +154,13 @@ export async function runOcrBenchmark({ onEvent, shouldStop } = {}) {
       entry.error = e.message;
     }
     entry.ms = Date.now() - t0;
-    files.push(entry);
-    onEvent?.({ type: 'file', file: entry, progress: { current: i + 1, total: todo.length } });
-  }
+    return entry;
+  }, { shouldStop, onDone: (entry, done) => onEvent?.({ type: 'file', file: entry, progress: { current: done, total: todo.length } }) });
   const result = summarize(files);
   result.stopped = files.length < todo.length;
   result.ocrModel = await recModel();
+  result.ocrDevice = await ocrDevice(); // GPU or CPU (shown on /benchmark and in the history)
+  result.historyId = await saveRun('ocr', result); // /benchmark history (null: stopped part way)
   onEvent?.({ type: 'done', result });
   return result;
 }

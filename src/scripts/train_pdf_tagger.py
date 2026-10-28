@@ -24,7 +24,7 @@ import numpy as np
 from sklearn.metrics import classification_report
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from pdf_tagger import HEADER_WORDS, doc_features, fit, use_learned_header_words  # noqa: E402
+from pdf_tagger import HEADER_WORDS, Vocab, compact_doc, doc_features, fit, sort_columns, use_learned_header_words  # noqa: E402
 
 # Training words: PDFs (build-pdf-token-data.mjs), roster images (build-image-token-data.mjs) and
 # ACARS pictures (build-acars-token-data.mjs). --pdf-only: the PDFs alone.
@@ -51,8 +51,56 @@ def family(doc):
     return 'netline-2block' if head == 2 else 'netline-3block'
 
 
+# Words a file brings to training at most (sample_pages: from all over it).
+# Every layout weighs the same however many words it has (pdf_tagger.weights), so the pages past it of a
+# 243-page activity list teach little, but their features (a dict per word) took gigabytes and ran the
+# training out of memory. PDF_TAGGER_MAX_WORDS=0: no limit.
+MAX_WORDS = int(os.environ.get('PDF_TAGGER_MAX_WORDS') or 8000)
+
+
+def sample_pages(doc):
+    """
+    doc with up to MAX_WORDS words of it, taken from all over it (its first pages alone missed what only later
+    rows have: a 73k-word duty export's other duty types); the number of words left out. Pages are kept whole,
+    evenly spaced from the first; one long page (a spreadsheet's rows) keeps evenly spaced runs of its lines,
+    each run whole so that a word's neighbours above and below stay its own.
+    """
+    total = sum(len(p['tokens']) for p in doc['pages'])
+    if not MAX_WORDS or total <= MAX_WORDS:
+        return 0
+    pages = doc['pages']
+    if len(pages) > 1:
+        per = total / len(pages)
+        want = max(1, int(MAX_WORDS // max(per, 1)))
+        step = len(pages) / want
+        kept = [pages[int(k * step)] for k in range(want)]
+        kept = [p if len(p['tokens']) <= MAX_WORDS else long_page(p) for p in kept]
+    else:
+        kept = [long_page(pages[0])]
+    doc['pages'] = kept
+    return total - sum(len(p['tokens']) for p in kept)
+
+
+RUN_LINES = 40  # lines of a long page kept together
+
+
+def long_page(page):
+    """A page of more than MAX_WORDS words: evenly spaced runs of RUN_LINES lines, MAX_WORDS words in all."""
+    ys = sorted({round(t['y']) for t in page['tokens']})
+    per_line = len(page['tokens']) / max(len(ys), 1)
+    runs = max(1, int(MAX_WORDS / (per_line * RUN_LINES)))
+    step = len(ys) / runs
+    keep = {y for k in range(runs) for y in ys[int(k * step):int(k * step) + RUN_LINES]}
+    return {**page, 'tokens': [t for t in page['tokens'] if round(t['y']) in keep]}
+
+
 def load():
+    # Each document's features made a matrix at once (pdf_tagger.compact_doc): dicts for every word took GBs.
+    # The document itself is kept only for --predict (it writes the tags into it).
+    vocab = Vocab()
+    keep_doc = '--predict' in sys.argv
     docs = []
+    cut_words, cut_files = 0, 0
     for data in DATA:
         if not os.path.isdir(data):
             continue
@@ -60,9 +108,19 @@ def load():
             if name == 'summary.json':
                 continue
             doc = json.load(open(os.path.join(data, name), encoding='utf-8'))
+            cut = sample_pages(doc)
+            if cut:
+                cut_words += cut
+                cut_files += 1
             X, ctxs = doc_features(doc['pages'])
             y = [t['field'] for page in doc['pages'] for t in page['tokens']]
-            docs.append({'file': doc['file'], 'kind': doc.get('kind', 'pdf'), 'family': family(doc), 'X': X, 'y': y, 'ctx': ctxs, 'doc': doc})
+            docs.append(compact_doc({'file': doc['file'], 'kind': doc.get('kind', 'pdf'), 'family': family(doc), 'X': X, 'y': y, 'ctx': ctxs,
+                                     'doc': doc if keep_doc else None, 'vocab': vocab}, vocab))
+            del X, ctxs, doc
+    for d, m in zip(docs, sort_columns(vocab, [d['M'] for d in docs])):
+        d['M'] = m
+    if cut_words:
+        print(f'{cut_words} words of {cut_files} long files left out ({MAX_WORDS} words of each, from all over it: PDF_TAGGER_MAX_WORDS)', flush=True)
     return docs
 
 

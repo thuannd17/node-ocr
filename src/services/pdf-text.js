@@ -9,7 +9,7 @@
  * corner in points, y growing downwards like image pixels.
  */
 import fs from 'node:fs';
-import { getDocument, Util } from 'pdfjs-dist/legacy/build/pdf.mjs';
+import { getDocument, Util, OPS } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { readTableText, TABLE_EXTS } from './table-text.js';
 
 /** Text direction of an item in display space, snapped to 0/90/180/270 degrees. */
@@ -51,7 +51,14 @@ export async function readPdfText(filePath) {
         return { text: r.text, x, y: y - r.h, w: r.w, h: r.h };
       });
       const sideways = dir === 90 || dir === 270;
-      pages.push({ page: p, width: sideways ? H : W, height: sideways ? W : H, items });
+      const out = { page: p, width: sideways ? H : W, height: sideways ? W : H, items };
+      // a page without text: how much it draws (its text may be drawn as outlines: ~1000 paths a page; a blank or footer page a few hundred
+      // at most), so services/pdf-ocr.js ocrEmptyPages reads only the drawn ones. Not enumerable: never written out.
+      if (!items.length) {
+        const ops = await page.getOperatorList();
+        Object.defineProperty(out, 'drawnPaths', { value: ops.fnArray.filter(f => f === OPS.constructPath).length, enumerable: false });
+      }
+      pages.push(out);
       page.cleanup();
     }
   } finally {

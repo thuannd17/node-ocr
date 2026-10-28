@@ -73,8 +73,11 @@
     }
     .viewer-head .title b { white-space: nowrap; font-size: 14px; color: var(--nav-bg); }
     .viewer-head .pos { font-size: 12px; color: var(--muted); white-space: nowrap; }
+    .viewer-head .pos input { width: 56px; padding: 2px 4px; border: 1px solid #ddd; border-radius: 4px; font-size: 12px; text-align: right; }
     .viewer-head .close { background: transparent; color: #555; font-size: 22px; line-height: 1; padding: 2px 8px; }
     .viewer-head .close:hover { background: #eceff3; }
+    .viewer-head .del-current { background: #fff; color: #c62828; border: 1px solid #e5a3a3; }
+    .viewer-head .del-current:hover:not(:disabled) { background: #fdecea; }
     .viewer-body { --split: 42%; flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, var(--split)) 12px minmax(0, 1fr); padding: 10px; gap: 0; }
     .viewer-body > .panel { min-height: 0; overflow: auto; }
     /* the table side: the toolbar card stays put, the tables scroll under it */
@@ -146,7 +149,7 @@
     .empty-section { color: #999; font-style: italic; padding: 12px; text-align: center; border: 1px dashed #ddd; border-radius: 6px; }
     /* Embedded (benchmark popup): no page behind the viewer, no file stepping */
     html.embed, html.embed body { background: transparent; }
-    html.embed .topnav, html.embed main.page, html.embed #prev, html.embed #next, html.embed #viewerPos { display: none; }
+    html.embed .topnav, html.embed main.page, html.embed #prev, html.embed #next, html.embed #viewerPos, html.embed #delCurrent { display: none; }
 
     /* Review (?review=1): the AI model's reading compared with this label */
     .review-note { font-size: 12px; color: #5d4037; background: #fff8e1; border: 1px solid #ffe082; border-radius: 6px; padding: 6px 10px; }
@@ -207,9 +210,10 @@
           <span class="labeled-badge no" id="labeledBadge"></span>
           <span class="file-path" id="filePath"></span>
         </div>
-        <span class="pos" id="viewerPos"></span>
+        <span class="pos" id="viewerPos"><input type="number" id="posInput" min="1" title="Type a number and press Enter to open that file" aria-label="File number"> / <span id="posTotal"></span></span>
         <button class="secondary small" id="prev" title="Previous file (Alt+↑)"><i class="fa-solid fa-arrow-up" aria-hidden="true"></i> Previous</button>
         <button class="secondary small" id="next" title="Next file (Alt+↓)"><i class="fa-solid fa-arrow-down" aria-hidden="true"></i> Next</button>
+        <button class="small del-current" id="delCurrent" title="Remove this file from the data (with its label)"><i class="fa-solid fa-trash-can" aria-hidden="true"></i> Delete</button>
         <button class="close" id="closeViewer" title="Close (Esc)" aria-label="Close"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
       </div>
       <div class="viewer-body" id="viewerBody">
@@ -736,7 +740,7 @@
       if (folder && !folder.open) folder.open = true;
       f._el?.scrollIntoView({ block: 'nearest' });
       const vis = visibleFiles(), at = vis.indexOf(f);
-      $('viewerPos').textContent = at >= 0 ? `${at + 1} / ${vis.length}` : '';
+      showPos(at, vis.length);
       $('rosterImg').classList.remove('zoomed');
       document.querySelector('.preview-panel').classList.toggle('pdf', f.kind === 'pdf');
       document.body.classList.toggle('acars-file', f.kind === 'acars');
@@ -897,11 +901,43 @@
       }
     }
 
-    function step(delta) {
+    // The visible file `delta` places from the current one. The current file may have left the
+    // list (saved while "only unlabeled" is on, or just deleted): its place in the whole list counts then.
+    function neighbour(delta) {
       const vis = visibleFiles();
-      if (!vis.length) return;
+      if (!vis.length) return null;
       const at = current ? vis.findIndex(f => f.name === current.name) : -1;
-      const next = vis[Math.min(vis.length - 1, Math.max(0, at + delta))];
+      // past either end it goes round: Previous on the first file opens the last
+      const wrap = (k) => vis[((k % vis.length) + vis.length) % vis.length];
+      if (!current) return vis[delta > 0 ? 0 : vis.length - 1];
+      if (at >= 0) return wrap(at + delta);
+      const pos = (f) => files.findIndex(x => x.name === f.name);
+      const here = pos(current);
+      if (here < 0) return null;
+      const after = vis.findIndex(f => pos(f) > here); // where the current file would stand
+      return wrap((after < 0 ? vis.length : after) + (delta > 0 ? delta - 1 : delta));
+    }
+
+    // "12 / 140": the open file's number in the list; type another number + Enter to open that file
+    function showPos(at, total) {
+      $('posInput').value = at >= 0 ? at + 1 : '';
+      $('posInput').max = total;
+      $('posTotal').textContent = total;
+    }
+    function jumpTo() {
+      const vis = visibleFiles(), n = Math.round(Number($('posInput').value));
+      if (!vis.length) return;
+      if (!(n >= 1 && n <= vis.length)) { setStatus('err', __('Type a number from 1 to {n}.', { n: vis.length })); return; }
+      const f = vis[n - 1];
+      if (f === current) return;
+      if (!openFolders.has(folderOf(f))) { openFolders.add(folderOf(f)); renderTree(); }
+      selectFile(f);
+    }
+    $('posInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); jumpTo(); } });
+    $('posInput').addEventListener('blur', () => { const vis = visibleFiles(); showPos(current ? vis.findIndex(f => f.name === current.name) : -1, vis.length); });
+
+    function step(delta) {
+      const next = neighbour(delta);
       if (next && next !== current) {
         if (!openFolders.has(folderOf(next))) { openFolders.add(folderOf(next)); renderTree(); }
         selectFile(next);
@@ -995,10 +1031,18 @@
         const res = await fetch(`${f.kind === 'acars' ? '/api/acars/files' : '/api/files'}?name=${encodeURIComponent(f.name)}`, { method: 'DELETE' });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
-        if (open) { setDirty(false); closeViewer(); }
-        if (current && current.name === f.name) current = null;
+        // deleted from the viewer: go on with the next file (the previous one at the end of the list)
+        const after = open && !EMBED ? (neighbour(1) !== current ? neighbour(1) : neighbour(-1)) : null;
         await loadFiles(); // duplicates of this file are recomputed
+        if (open) setDirty(false);
+        const next = after && after.name !== f.name ? files.find(x => x.name === after.name) : null;
+        if (current && current.name === f.name) current = null;
+        if (open && !next) closeViewer();
         renderTree();
+        if (next) {
+          if (!openFolders.has(folderOf(next))) { openFolders.add(folderOf(next)); renderTree(); }
+          await selectFile(next, { force: true });
+        }
       } catch (e) {
         alert(__('Could not remove it: {error}', { error: e.message }));
       }
@@ -1032,6 +1076,7 @@
     });
     $('prev').onclick = () => step(-1);
     $('next').onclick = () => step(1);
+    $('delCurrent').onclick = () => current && deleteFile(current);
     $('saveBtn').onclick = saveLabel;
     $('autoFill').onclick = autoFill;
     $('engineSel').value = safeGet('label.engine') || 'parser';

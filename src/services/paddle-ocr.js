@@ -20,7 +20,7 @@ import sharp from 'sharp';
 import { parseRoster, analyzeExtractionQuality, cleanExtractionResult } from './roster-parser.js';
 import { TMP_DIR } from '../utils/paths.js';
 
-const OCR_SERVER_URL = (process.env.OCR_SERVER_URL || 'http://127.0.0.1:8501').replace(/\/+$/, '');
+export const OCR_SERVER_URL = (process.env.OCR_SERVER_URL || 'http://127.0.0.1:8501').replace(/\/+$/, '');
 const OCR_TIMEOUT_MS = Number(process.env.OCR_TIMEOUT_MS || 300000); // Increased to 5min for very large files
 
 const START_HINT = 'PaddleOCR server is not reachable. Start it first: npm run ocr:server '
@@ -30,15 +30,42 @@ const FAST_OCR_MAX_WIDTH = Number(process.env.OCR_FAST_OCR_MAX_WIDTH || 1600);
 const MAX_OCR_WIDTH = Number(process.env.OCR_MAX_WIDTH || (process.env.OCR_FAST_MODE ? FAST_OCR_MAX_WIDTH : 2000)); // Lower for faster OCR
 
 
+/** The OCR server's /health ({ device, gpuName, rec, ... }), or null when it does not answer. */
+export async function ocrServerHealth() {
+  try {
+    const res = await fetch(`${OCR_SERVER_URL}/health`, { signal: AbortSignal.timeout(3000) });
+    return res.ok ? await res.json() : null;
+  } catch {
+    return null;
+  }
+}
+
+/** What a /health says the server reads on: { device: 'gpu' | 'cpu', name } (name: the GPU's), or null. */
+export function deviceOf(h) {
+  if (!h?.device) return null;
+  const device = h.device.startsWith('gpu') ? 'gpu' : 'cpu';
+  return { device, name: device === 'gpu' ? h.gpuName || null : null };
+}
+
+// The OCR server on another machine (OCR_SEND_FILES=1: the app on Cloud Run, the server behind a tunnel): a file goes as
+// its bytes, not as a path, and OCR_SERVER_TOKEN as a bearer token (src/scripts/ocr_server.py checks both).
+const SEND_FILES = /^(1|true|yes)$/i.test(process.env.OCR_SEND_FILES || '');
+
+/** fetch() options of a POST /ocr for this file; `extra`: page, dpi, rotate of a PDF page. */
+export function ocrRequest(filePath, extra = {}) {
+  const headers = { 'content-type': 'application/json' };
+  if (process.env.OCR_SERVER_TOKEN) headers.authorization = `Bearer ${process.env.OCR_SERVER_TOKEN}`;
+  const file = SEND_FILES ? { data: fs.readFileSync(filePath).toString('base64'), name: path.basename(filePath) } : { path: path.resolve(filePath) };
+  return { method: 'POST', headers, body: JSON.stringify({ ...file, ...extra }) };
+}
+
+/** What the OCR server reads on now (deviceOf its /health), or null when it is down. */
+export const ocrDevice = async () => deviceOf(await ocrServerHealth());
+
 async function callOcrServer(filePath) {
   let res;
   try {
-    res = await fetch(`${OCR_SERVER_URL}/ocr`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ path: path.resolve(filePath) }),
-      signal: AbortSignal.timeout(OCR_TIMEOUT_MS),
-    });
+    res = await fetch(`${OCR_SERVER_URL}/ocr`, { ...ocrRequest(filePath), signal: AbortSignal.timeout(OCR_TIMEOUT_MS) });
   } catch (err) {
     if (err?.name === 'TimeoutError' || err?.name === 'AbortError') {
       throw new Error(`The OCR server gave no result after ${Math.round(OCR_TIMEOUT_MS / 1000)} s `

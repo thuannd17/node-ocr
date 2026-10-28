@@ -1,5 +1,5 @@
 // /api/models: every model of the reading pipeline, by family, for the /models page.
-//   GET    /api/models                     -> { families: [{ id, name, ..., versions: [...], training }] }
+//   GET    /api/models[?sync=0]            -> { families: [{ id, name, ..., versions: [...], training }] } (sync=0: skip the MinIO sync)
 //   POST   /api/models/:family/:id/activate
 //   DELETE /api/models/:family/:id         (never the active one)
 //   POST   /api/models/:family/train       (one run at a time per family; GET .../train follows it)
@@ -136,9 +136,10 @@ const familyOf = (req) => {
 };
 const fail = (res, e) => res.status(e.status || 500).json({ error: e.message });
 
+// ?sync=0: the mirror as it is, at once (the page shows it, then asks again with the MinIO sync, which can take seconds)
 router.get('/', async (req, res) => {
   try {
-    await Promise.all([syncModels(), syncRecModels()]).catch(e => console.warn(`[models] ${e.message}`)); // the models are in MinIO; show the mirror if it is down
+    if (req.query.sync !== '0') await Promise.all([syncModels(), syncRecModels()]).catch(e => console.warn(`[models] ${e.message}`)); // the models are in MinIO; show the mirror if it is down
     res.json({ families: ORDER.map(id => familyView(id, req.__)) });
   } catch (e) { fail(res, e); }
 });

@@ -22,10 +22,15 @@ services:
       OCR_SERVER_URL: http://ocr:8501
       MINIO_ENDPOINT: host.docker.internal
       ROSTER_WORK_DIR: /work
+      # the admin SDK key file of .env (a path on this machine), mounted read-only (login: services/auth.js)
+      GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/firebase-admin.json
+      # MongoDB on the host (the mongo-docker container's port 27017): API keys, plans, calls (services/accounts.js)
+      MONGODB_URI: ${MONGODB_URI_DOCKER:-mongodb://host.docker.internal:27017/rosterparser}
     ports:
       - "${APP_PORT:-3000}:3000"
     volumes:
       - work:/work
+      - ${GOOGLE_APPLICATION_CREDENTIALS:-/dev/null}:/run/secrets/firebase-admin.json:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:

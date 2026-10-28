@@ -11,19 +11,33 @@ import rosterApiRouter from './routes/roster-api.js';
 import suggestionsApiRouter from './routes/suggestions-api.js';
 import mediaApiRouter from './routes/media-api.js';
 import acarsApiRouter from './routes/acars-api.js';
+import authApiRouter, { gate } from './routes/auth-api.js';
+import accountApiRouter from './routes/account-api.js';
+import billingApiRouter from './routes/billing-api.js';
+import { flushUsage } from './services/accounts.js';
 import { syncMedia, acars } from './services/media-client.js';
 import { syncModels } from './services/ai-models.js';
 import { WORK_DIR } from './utils/paths.js';
 import i18n from './utils/i18n.js';
 
 const app = express();
-app.use(express.json({ limit: '2mb' }));
+// PayPal's webhook events are checked with PayPal as they came: their body is kept as received (routes/billing-api.js)
+app.use(express.json({ limit: '2mb', verify: (req, res, buf) => { if (req.originalUrl.startsWith('/api/billing/webhook')) req.rawBody = buf.toString('utf8'); } }));
 app.use(i18n); // UI language from the 'lang' cookie: req.__(), JSON errors translated
+// The proxies in front whose X-Forwarded-* are believed (req.ip for the per-IP limits, req.protocol): by default the
+// ones on this machine or its private network (cloudflared, Docker); TRUST_PROXY=1 / 2 = that many hops (Cloud Run).
+const trust = process.env.TRUST_PROXY || 'loopback, linklocal, uniquelocal';
+app.set('trust proxy', /^\d+$/.test(trust) ? Number(trust) : trust === 'true' ? true : trust === 'false' ? false : trust);
+// The public API needs an API key, an account or a page of this site; the admin side an admin (routes/auth-api.js)
+app.use(gate());
 
 // Views (HTML) — /, /roster, /label, /benchmark
 app.use('/', viewsRouter);
 
 // API (JSON) — /api/roster/upload (public), /api/ocr/upload (deprecated), /api/files, /api/raw, /api/labels, /api/predict, /api/benchmark
+app.use('/api', authApiRouter); // sign-in: /api/auth/config, me, session, logout
+app.use('/api', accountApiRouter); // /api/account (keys, usage), /api/users (admin)
+app.use('/api', billingApiRouter); // /api/billing: PayPal subscriptions, invoices (/pricing, /account, /billing)
 app.use('/api/pdf', pdfApiRouter); // NetLine duty-plan PDFs (before /api)
 app.use('/api/models', modelsApiRouter); // every model of the pipeline: versions, activate, delete, train (/models)
 app.use('/api/airports', airportsApiRouter); // airport search + details + 7-day weather (/airport)
@@ -59,3 +73,11 @@ syncModels({ force: true }).then(
 server.on('error', (err) => {
 	console.error('Server listen error:', err);
 });
+
+// Cloud Run / docker stop: write the API calls counted since the last write (services/accounts.js), then stop
+for (const sig of ['SIGTERM', 'SIGINT']) {
+	process.once(sig, () => {
+		flushUsage().catch(() => {}).finally(() => process.exit(0));
+		setTimeout(() => process.exit(0), 5000).unref();
+	});
+}

@@ -9,6 +9,8 @@
 //   trash/<YYYY-MM-DD>/<key>           files and labels deleted on /label, models deleted on /models (nothing is erased)
 //   models/ai/<id>/...                 a trained version of the AI roster model; models/ai/active.json: the one in use
 //   models/rec/<ver>/checkpoint/...    OCR training checkpoints kept for later (not needed to read)
+//   benchmarks/<kind>/<id>/summary.json  one finished benchmark run (kind ocr | model | acars): the scores to compare
+//   benchmarks/<kind>/<id>/result.json   ... and its whole result, to show it again on /benchmark
 //
 //   MEDIA_BACKEND = minio (default: MINIO_* settings) | fs (MEDIA_FS_DIR, a folder; tests / no MinIO)
 //
@@ -34,6 +36,8 @@ export const isDataName = (name) => !!name && /^[^/\\]+$/.test(name) && !name.st
 const isSuggestionId = (id) => /^[0-9A-Za-z-]{6,64}$/.test(String(id));
 /** A key of a model object: models/<part>/<part>..., plain parts only. */
 const isModelKey = (key) => /^models(\/[A-Za-z0-9_][A-Za-z0-9._-]*)+$/.test(String(key)) && !String(key).split('/').includes('..');
+const isBenchKind = (kind) => ['ocr', 'model', 'acars'].includes(kind);
+const isBenchId = (id) => /^\d{8}-\d{6}-[0-9a-z]{4,8}$/.test(String(id));
 const md5 = (buf) => crypto.createHash('md5').update(buf).digest('hex');
 const typeOf = (name) => TYPES[extOf(name)] || 'application/octet-stream';
 
@@ -242,6 +246,38 @@ export function createMedia(store, { flat = false } = {}) {
       await s.put(key, buf, key.endsWith('.json') ? 'application/json' : 'application/octet-stream');
       return { key, md5: md5(buf) };
     },
+    // ---- benchmark history (benchmarks/<kind>/<id>/summary.json + result.json) ----
+    /** [{ id, md5 }] of one kind's runs (md5 of summary.json, to cache it). */
+    async listBenchmarks(kind) {
+      if (!isBenchKind(kind)) throw httpError(400, `Invalid benchmark kind: ${kind}`);
+      const re = new RegExp(`^benchmarks/${kind}/([^/]+)/summary\\.json$`);
+      return (await s.list(`benchmarks/${kind}/`)).map(o => [re.exec(o.key)?.[1], o]).filter(([id]) => isBenchId(id))
+        .map(([id, o]) => ({ id, md5: o.etag }));
+    },
+    /** part 'summary' | 'result': the parsed JSON (null: none). */
+    async getBenchmark(kind, id, part = 'summary') {
+      if (!isBenchKind(kind) || !isBenchId(id) || !['summary', 'result'].includes(part)) throw httpError(404, 'Benchmark run not found');
+      const buf = await getOrNull(`benchmarks/${kind}/${id}/${part}.json`);
+      return buf && JSON.parse(buf.toString('utf8'));
+    },
+    /** result null: only the summary (a note changed). */
+    async putBenchmark(kind, id, summary, result = null) {
+      if (!isBenchKind(kind) || !isBenchId(id)) throw httpError(400, 'Invalid benchmark run');
+      if (result) await s.put(`benchmarks/${kind}/${id}/result.json`, Buffer.from(JSON.stringify(result)), 'application/json');
+      await s.put(`benchmarks/${kind}/${id}/summary.json`, Buffer.from(JSON.stringify(summary, null, 2)), 'application/json');
+    },
+    /** Moved to trash/<date>/ like everything else deleted. */
+    async deleteBenchmark(kind, id) {
+      if (!isBenchKind(kind) || !isBenchId(id)) throw httpError(404, 'Benchmark run not found');
+      const day = new Date().toISOString().slice(0, 10);
+      const objects = await s.list(`benchmarks/${kind}/${id}/`);
+      if (!objects.length) throw httpError(404, 'Benchmark run not found');
+      for (const o of objects) {
+        await s.put(`trash/${day}/${o.key}`, await s.get(o.key), 'application/json');
+        await s.remove(o.key);
+      }
+    },
+
     /** Move every object under a prefix ('models/ai/<id>/') to trash/<date>/. -> moved keys */
     async trashObjects(prefix) {
       if (!isModelKey(prefix.replace(/\/$/, ''))) throw httpError(400, `Invalid model key: ${prefix}`);

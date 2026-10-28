@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sign up</title>
+  <script src="/assets/i18n/vi.js"></script>
+  <script src="/assets/i18n.js"></script>
+  <link rel="stylesheet" href="/assets/app.css">
+  <link rel="stylesheet" href="/assets/fontawesome/css/all.min.css">
+  <style>
+    .perks { margin: 0 0 18px; padding-left: 18px; font-size: 13px; color: var(--muted); line-height: 1.6; }
+    .hint { font-size: 12px; color: var(--muted); }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <script src="/assets/nav.js"></script>
+  <main class="page">
+    <div class="card auth-card">
+      <h1><i class="fa-solid fa-user-plus" aria-hidden="true"></i> <span>Sign up</span></h1>
+      <p class="lead">A free account gives you API keys to use the RosterParser API in your own apps.</p>
+      <ul class="perks">
+        <li>API keys for your apps</li>
+        <li>Your usage of the day on your account page</li>
+        <li data-i18n>Every endpoint of the <a href="/api-docs">API Docs</a></li>
+      </ul>
+
+      <div id="loading" class="lead">checking…</div>
+
+      <div id="form" hidden>
+        <div class="providers">
+          <button type="button" class="auth-btn" data-provider="google" hidden><i class="fa-brands fa-google" aria-hidden="true"></i> <span>Sign up with Google</span></button>
+          <button type="button" class="auth-btn" data-provider="github" hidden><i class="fa-brands fa-github" aria-hidden="true"></i> <span>Sign up with GitHub</span></button>
+        </div>
+        <div id="passwordBox" hidden>
+          <div class="auth-or" id="orLine"><span>or</span></div>
+          <form id="passwordForm" class="auth-form">
+            <label><span>Name</span><input type="text" id="name" autocomplete="name" maxlength="80"></label>
+            <label><span>Email</span><input type="email" id="email" autocomplete="email" required></label>
+            <label><span>Password</span><input type="password" id="password" autocomplete="new-password" minlength="8" required>
+              <span class="hint">8 characters or more</span></label>
+            <button type="submit" class="auth-btn primary"><i class="fa-solid fa-user-plus" aria-hidden="true"></i> <span>Create account</span></button>
+          </form>
+        </div>
+        <p class="auth-foot"><span>Already have an account?</span> <a class="auth-link" id="toLogin" href="/login">Sign in</a></p>
+      </div>
+
+      <div id="msg" class="auth-msg" role="status" hidden></div>
+    </div>
+  </main>
+
+  <script type="module">
+    import { loadFirebase, describe, api, nextOf } from '/assets/firebase-auth.js';
+    const t = window.t;
+    const $ = (id) => document.getElementById(id);
+    const show = (text, kind = 'error') => { const m = $('msg'); m.textContent = text; m.className = `auth-msg ${kind}`; m.hidden = !text; };
+    const busy = (on) => document.querySelectorAll('#form button').forEach(b => { b.disabled = on; });
+    $('toLogin').href = `/login${location.search}`;
+
+    const [config, me] = await Promise.all([api('/api/auth/config'), api('/api/auth/me')]).catch((e) => { show(e.message); return []; });
+    $('loading').hidden = true;
+    if (!config) throw new Error('no config');
+    if (me.user) location.replace('/account');
+    if (!config.enabled) { show(t('Login is not set up on this server')); throw new Error('login off'); }
+
+    $('form').hidden = false;
+    for (const b of document.querySelectorAll('[data-provider]')) b.hidden = !config.providers.includes(b.dataset.provider);
+    $('passwordBox').hidden = !config.providers.includes('password');
+    $('orLine').hidden = !config.providers.some(p => p !== 'password');
+
+    const fb = await loadFirebase(config);
+
+    // Google / GitHub: the account is made by the first sign-in
+    for (const b of document.querySelectorAll('[data-provider]')) {
+      b.addEventListener('click', async () => {
+        busy(true); show('');
+        try {
+          const { user } = await fb.toSession(await fb.popup(b.dataset.provider));
+          location.replace(nextOf(user.role));
+        } catch (e) { show(e.code === 'email-not-verified' ? e.message : describe(e)); } finally { busy(false); }
+      });
+    }
+
+    // email + password: the account, its name, then the link that proves the email (signing in waits for it)
+    $('passwordForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      busy(true); show('');
+      const email = $('email').value.trim();
+      try {
+        const cred = await fb.fa.createUserWithEmailAndPassword(fb.auth, email, $('password').value);
+        const name = $('name').value.trim();
+        if (name) await fb.fa.updateProfile(cred.user, { displayName: name });
+        await fb.fa.sendEmailVerification(cred.user, { url: `${location.origin}/login${location.search}` });
+        $('passwordForm').reset();
+        $('form').hidden = true;
+        show(t('Almost done: we sent a link to {email}. Open it to verify your email, then sign in.', { email }), 'ok');
+      } catch (err) { show(describe(err)); } finally {
+        await fb.fa.signOut(fb.auth).catch(() => {});
+        busy(false);
+      }
+    });
+  </script>
+</body>
+</html>

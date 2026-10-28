@@ -73,6 +73,12 @@ OCR_WORKERS = 1
 # server answers 503 busy at once instead of making the caller wait N x ~3 s.
 # 0 = unlimited (old behaviour).
 OCR_MAX_QUEUE = max(0, int(os.environ.get("OCR_MAX_QUEUE", "4") or 0))
+# Reached from another machine (the app on Cloud Run, through a tunnel): OCR_SERVER_TOKEN set on both sides; every POST
+# and /stats then needs "Authorization: Bearer <token>", and a file comes as its bytes ("data", base64), never as a
+# path on this machine (only a request from this machine itself may still send a path).
+OCR_SERVER_TOKEN = os.environ.get("OCR_SERVER_TOKEN", "").strip()
+OCR_MAX_UPLOAD_MB = float(os.environ.get("OCR_MAX_UPLOAD_MB", "40") or 40)
+UPLOAD_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff", ".gif", ".pdf"}
 
 # Model config
 OCR_DET_MODEL = os.environ.get("OCR_DET_MODEL", "")
@@ -101,6 +107,7 @@ OCR_TEXT_DET_LIMIT_SIDE_LEN = _get_int_env("OCR_TEXT_DET_LIMIT_SIDE_LEN", 0)
 OCR_TEXT_RECOGNITION_BATCH_SIZE = _get_int_env("OCR_TEXT_RECOGNITION_BATCH_SIZE", 0)
 
 _engine = None
+_device = None  # "gpu" | "cpu": what the engine runs on (set when it starts)
 _engine_lock = threading.Lock()
 _predict_lock = threading.Lock()
 
@@ -108,7 +115,8 @@ _predict_lock = threading.Lock()
 # request's latency = time waiting for the lock (queueMs) + inference (inferMs).
 _stats_lock = threading.Lock()
 _stats = {"inflight": 0, "waiting": 0, "maxWaiting": 0, "served": 0, "failed": 0,
-          "queueMsTotal": 0, "inferMsTotal": 0, "maxQueueMs": 0, "rejectedBusy": 0}
+          "queueMsTotal": 0, "inferMsTotal": 0, "maxQueueMs": 0, "rejectedBusy": 0,
+          "oomRecovered": 0}  # images read again after freeing GPU memory (run_ocr)
 
 def _stat_add(**deltas):
     with _stats_lock:
@@ -132,6 +140,13 @@ def _detect_device():
         print(f"[ocr-server] GPU check failed: {e}")
     print("[ocr-server] ℹ️  No GPU available → using CPU")
     return "cpu"
+
+def _gpu_name():
+    try:
+        import paddle
+        return paddle.device.cuda.get_device_name(0)
+    except Exception:
+        return None
 
 def _resolve_fast_mode(device):
     if OCR_FAST_MODE_SET:
@@ -178,7 +193,7 @@ def _warmup_engine(engine, device):
 
 def get_engine():
     """Khởi tạo PaddleOCR an toàn nhất có thể."""
-    global _engine
+    global _engine, _device
     if _engine is not None:
         return _engine
     with _engine_lock:
@@ -243,6 +258,7 @@ def get_engine():
 
             print(f"[ocr-server] Initializing PaddleOCR with kwargs: {kwargs}")
             _engine = PaddleOCR(**kwargs)
+            _device = device
             _warmup_engine(_engine, device)
             print("[ocr-server] ✅ PaddleOCR engine ready!")
             return _engine
@@ -324,6 +340,40 @@ def render_pdf_page(path, page_no, dpi, rotate=0):
     finally:
         pdf.close()
 
+def _predict(engine, path, lines):
+    if hasattr(engine, "predict"):
+        # PaddleOCR 3.x khuyến nghị dùng predict() thay cho ocr().
+        results = engine.predict(path)
+        for page in results or []:
+            if _append_from_predict_page(page, lines):
+                continue
+            _append_from_legacy_page(page, lines)
+    else:
+        # PaddleOCR 2.x: dùng ocr() và parse kết quả legacy.
+        results = engine.ocr(path, cls=False)
+        for page in results or []:
+            _append_from_legacy_page(page, lines)
+
+def _is_gpu_oom(e):
+    msg = str(e)
+    return "ResourceExhausted" in msg or "out of memory" in msg.lower()
+
+def _shrink_gpu_memory(engine):
+    """Gives the GPU memory the predictors hold but do not use back (Paddle Inference try_shrink_memory).
+    -> how many predictors were shrunk (0: an engine whose predictors are not found, e.g. PaddleOCR 3.x)."""
+    n = 0
+    for name in ("text_detector", "text_recognizer", "text_classifier"):
+        p = getattr(getattr(engine, name, None), "predictor", None)
+        if p is None or not hasattr(p, "try_shrink_memory"):
+            continue
+        try:
+            p.clear_intermediate_tensor()
+            p.try_shrink_memory()
+            n += 1
+        except Exception as e:
+            print(f"[ocr-server] could not free the {name} memory: {e}")
+    return n
+
 def run_ocr(path):
     engine = get_engine()
     width = height = None
@@ -354,18 +404,19 @@ def run_ocr(path):
         timing["queueMs"] = int((time.time() - t_wait) * 1000)
         t_infer = time.time()
         try:
-            if hasattr(engine, "predict"):
-                # PaddleOCR 3.x khuyến nghị dùng predict() thay cho ocr().
-                results = engine.predict(path)
-                for page in results or []:
-                    if _append_from_predict_page(page, lines):
-                        continue
-                    _append_from_legacy_page(page, lines)
-            else:
-                # PaddleOCR 2.x: dùng ocr() và parse kết quả legacy.
-                results = engine.ocr(path, cls=False)
-                for page in results or []:
-                    _append_from_legacy_page(page, lines)
+            try:
+                _predict(engine, path, lines)
+            except Exception as e:
+                # GPU full: the predictors' pools only grow (to ~3 GB over varied image sizes), so when other
+                # programs hold VRAM too an image fails and, untreated, every one after it. Hand the unused
+                # chunks back and read it again (2026-10-23: 95/95 images with 2.4 GB held elsewhere; shrinking
+                # after every image instead was ~55% slower).
+                if not _is_gpu_oom(e) or not _shrink_gpu_memory(engine):
+                    raise
+                print(f"[ocr-server] GPU memory full on {os.path.basename(path)}: freed the unused memory, reading it again")
+                _stat_add(oomRecovered=1)
+                lines.clear()
+                _predict(engine, path, lines)
         finally:
             _predict_lock.release()
             timing["inferMs"] = int((time.time() - t_infer) * 1000)
@@ -386,6 +437,65 @@ def run_ocr(path):
             except: pass
     return lines, width, height, timing
 
+# A page much taller than wide (a whole roster web page printed as one page, 1275 x 12314 pt) is read in strips:
+# rendered whole it is over OpenCV's 32767 px limit, and detection would shrink it until its text is unreadable.
+TALL_PAGE_RATIO = 2.5   # height / width above which a page is read in strips
+STRIP_RATIO = 1.3       # a strip's height / its width
+STRIP_OVERLAP_PT = 40   # strips overlap so a line cut by one strip's edge is whole in the next
+
+def pdf_page_size(path, page_no):
+    import pypdfium2 as pdfium
+    pdf = pdfium.PdfDocument(path)
+    try:
+        count = len(pdf)
+        if not 1 <= page_no <= count:
+            raise ValueError(f"page {page_no} out of range 1..{count}")
+        w, h = pdf[page_no - 1].get_size()
+        return w, h, count
+    finally:
+        pdf.close()
+
+def ocr_tall_pdf_page(path, page_no, dpi):
+    """OCR of a tall page strip by strip (rendered with a crop each), its lines back in the whole page's pixels.
+    A line found in two strips (the overlap) is kept from the strip where it stands farther from the edge.
+    Returns (lines, width, height, timing, count, scale) like one page."""
+    import pypdfium2 as pdfium
+    w, h, count = pdf_page_size(path, page_no)
+    scale = dpi / 72.0
+    strip = w * STRIP_RATIO
+    lines, timing = [], {"queueMs": 0, "inferMs": 0}
+    top = 0.0
+    while top < h:
+        bottom = min(h, top + strip)
+        pdf = pdfium.PdfDocument(path)
+        try:
+            image = pdf[page_no - 1].render(scale=scale, crop=(0, h - bottom, 0, top)).to_pil().convert("RGB")
+        finally:
+            pdf.close()
+        fd, png = tempfile.mkstemp(suffix=".png")
+        os.close(fd)
+        try:
+            image.save(png, "PNG")
+            part, _, _, t = run_ocr(png)
+        finally:
+            try: os.remove(png)
+            except OSError: pass
+        timing["queueMs"] += t["queueMs"]
+        timing["inferMs"] += t["inferMs"]
+        # keep a line whose middle is in this strip's own part (the overlap is shared half and half)
+        lo = 0 if top == 0 else STRIP_OVERLAP_PT / 2
+        hi = (bottom - top) if bottom >= h else (bottom - top) - STRIP_OVERLAP_PT / 2
+        for line in part:
+            ys = [p[1] / scale for p in line["box"]]
+            mid = (min(ys) + max(ys)) / 2
+            if lo <= mid < hi:
+                line["box"] = [[p[0], p[1] + top * scale] for p in line["box"]]
+                lines.append(line)
+        if bottom >= h:
+            break
+        top = bottom - STRIP_OVERLAP_PT
+    return lines, int(round(w * scale)), int(round(h * scale)), timing, count, scale
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "PaddleOCRServer/1.0"
     def _send(self, code, payload):
@@ -395,17 +505,36 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+    def _is_local(self):
+        # a tunnel (cloudflared) connects from this machine too: its forwarding headers tell it apart
+        forwarded = any(self.headers.get(h) for h in ("X-Forwarded-For", "Cf-Connecting-Ip", "Forwarded"))
+        return self.client_address[0] in ("127.0.0.1", "::1", "::ffff:127.0.0.1") and not forwarded
+    def _authorized(self):
+        if not OCR_SERVER_TOKEN:
+            return True
+        import hmac
+        given = (self.headers.get("Authorization") or "").removeprefix("Bearer ").strip()
+        if hmac.compare_digest(given.encode(), OCR_SERVER_TOKEN.encode()):
+            return True
+        self._send(401, {"ok": False, "error": "Missing or wrong OCR server token (OCR_SERVER_TOKEN)"})
+        return False
     def do_GET(self):
         if self.path.rstrip("/") == "/stats":
+            if not self._authorized():
+                return
             with _stats_lock:
                 self._send(200, {"ok": True, **_stats})
             return
         if self.path.rstrip("/") in ("/health", ""):
             import paddle
             gpu_ok = paddle.device.is_compiled_with_cuda() and paddle.device.cuda.device_count() > 0
+            # the engine's device once it runs; before that the one it will pick
+            device = _device or os.environ.get("OCR_DEVICE", "").lower() or ("gpu" if gpu_ok else "cpu")
             self._send(200, {
                 "ok": True,
-                "device": "gpu" if gpu_ok else "cpu",
+                "device": device,
+                "gpuName": _gpu_name() if device.startswith("gpu") else None,
+                "engineReady": _engine is not None,
                 "paddle_version": paddle.__version__,
                 "cuda_compiled": paddle.device.is_compiled_with_cuda(),
                 "workers": 1,
@@ -419,6 +548,8 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self._send(404, {"ok": False, "error": "Not found"})
     def do_POST(self):
+        if not self._authorized():
+            return
         if self.path.rstrip("/") == "/stats/reset":
             with _stats_lock:
                 for k in _stats:
@@ -432,19 +563,50 @@ class Handler(BaseHTTPRequestHandler):
             return
         try:
             length = int(self.headers.get("Content-Length") or 0)
+            if length > OCR_MAX_UPLOAD_MB * 1.4 * 1024 * 1024:  # base64 is 4/3 of the file
+                self._send(413, {"ok": False, "error": f"File too large for the OCR server (over {OCR_MAX_UPLOAD_MB:g} MB)"})
+                return
             raw = self.rfile.read(length) if length else b"{}"
             req = json.loads(raw.decode("utf-8") or "{}")
         except Exception as e:
             self._send(400, {"ok": False, "error": f"Invalid JSON body: {e}"})
             return
-        img_path = req.get("path")
-        if not img_path:
-            self._send(400, {"ok": False, "error": "Missing 'path' in request body"})
-            return
-        img_path = os.path.abspath(img_path)
-        if not os.path.isfile(img_path):
-            self._send(404, {"ok": False, "error": f"File not found: {img_path}"})
-            return
+        upload_path = None
+        if req.get("data"):
+            # {"data": <base64>, "name": "x.pdf"}: the file itself, kept in a temp file while it is read
+            import base64
+            ext = os.path.splitext(str(req.get("name") or ""))[1].lower() or ".png"
+            if ext not in UPLOAD_EXTS:
+                self._send(400, {"ok": False, "error": f"Not an image or PDF: {ext}"})
+                return
+            try:
+                blob = base64.b64decode(req["data"], validate=True)
+            except Exception:
+                self._send(400, {"ok": False, "error": "'data' is not base64"})
+                return
+            fd, upload_path = tempfile.mkstemp(prefix="ocr-upload-", suffix=ext)
+            with os.fdopen(fd, "wb") as f:
+                f.write(blob)
+            img_path = upload_path
+        else:
+            img_path = req.get("path")
+            if not img_path:
+                self._send(400, {"ok": False, "error": "Missing 'path' or 'data' in request body"})
+                return
+            if OCR_SERVER_TOKEN and not self._is_local():
+                self._send(403, {"ok": False, "error": "Send the file itself ('data'): paths are only read for requests from this machine"})
+                return
+            img_path = os.path.abspath(img_path)
+            if not os.path.isfile(img_path):
+                self._send(404, {"ok": False, "error": f"File not found: {img_path}"})
+                return
+        try:
+            self._ocr(req, img_path)
+        finally:
+            if upload_path and os.path.exists(upload_path):
+                try: os.remove(upload_path)
+                except OSError: pass
+    def _ocr(self, req, img_path):
         t0 = time.time()
         with _stats_lock:
             busy = OCR_MAX_QUEUE and _stats["inflight"] >= 1 + OCR_MAX_QUEUE
@@ -462,13 +624,20 @@ class Handler(BaseHTTPRequestHandler):
         pdf_png = None
         try:
             ocr_path = img_path
+            tall = None
             if img_path.lower().endswith(".pdf"):
                 # {"path": "x.pdf", "page": 1, "dpi": 200, "rotate": 0}: OCR one rendered page.
                 rotate = int(req.get("rotate") or 0)
-                pdf_png, count, scale = render_pdf_page(img_path, int(req.get("page") or 1), int(req.get("dpi") or 200), rotate)
-                ocr_path = pdf_png
-                pdf_info = {"page": int(req.get("page") or 1), "pageCount": count, "scale": scale, "rotate": rotate}
-            lines, width, height, timing = run_ocr(ocr_path)
+                page_no, dpi = int(req.get("page") or 1), int(req.get("dpi") or 200)
+                pw, ph, _ = pdf_page_size(img_path, page_no)
+                if not rotate % 360 and ph > pw * TALL_PAGE_RATIO:
+                    tall = ocr_tall_pdf_page(img_path, page_no, dpi)
+                    pdf_info = {"page": page_no, "pageCount": tall[4], "scale": tall[5], "rotate": 0, "strips": True}
+                else:
+                    pdf_png, count, scale = render_pdf_page(img_path, page_no, dpi, rotate)
+                    ocr_path = pdf_png
+                    pdf_info = {"page": page_no, "pageCount": count, "scale": scale, "rotate": rotate}
+            lines, width, height, timing = tall[:4] if tall else run_ocr(ocr_path)
             elapsed = int((time.time() - t0) * 1000)
             with _stats_lock:
                 _stats["served"] += 1

@@ -45,7 +45,18 @@
     .msg.ok { color: #2e7d32; background: #e8f5e9; }
     .train-log { font-family: ui-monospace, Consolas, monospace; font-size: 12px; background: #1e1e1e; color: #ddd; padding: 10px 12px; border-radius: 6px; max-height: 220px; overflow: auto; white-space: pre-wrap; margin: 0 16px 12px; display: none; }
     .train-log.visible { display: block; }
+    /* A training run's progress: where it is (step, file / field) and a bar over the whole run */
+    .train-progress { margin: 0 16px 10px; font-size: 12px; color: #555; }
+    .train-progress .bar { height: 8px; background: #eceff3; border-radius: 4px; overflow: hidden; margin-bottom: 4px; }
+    .train-progress .bar span { display: block; height: 100%; width: 0; background: #2e7d32; transition: width .4s; }
+    .train-progress .where { overflow-wrap: anywhere; }
     .table-wrap { overflow-x: auto; }
+    /* Placeholders while /api/models answers */
+    .skeleton-line { height: 12px; border-radius: 4px; margin: 0 16px 10px; background: linear-gradient(90deg, #eceff3 25%, #f6f7f9 50%, #eceff3 75%); background-size: 200% 100%; animation: shimmer 1.2s infinite; }
+    .skeleton-line.short { width: 35%; } .skeleton-line.wide { height: 90px; margin-bottom: 16px; }
+    @keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+    .syncing { font-size: 12px; color: #888; margin: 8px 0 0; display: flex; gap: 6px; align-items: center; }
+    .syncing[hidden] { display: none; }
     @media (max-width: 700px) { .actions { justify-content: flex-start; } .train-box .note { flex-basis: 100%; } }
   </style>
 </head>
@@ -58,6 +69,7 @@
     </div>
 
     <div class="card pipeline" id="pipeline"></div>
+    <div class="syncing" id="syncing" hidden><i class="fa-solid fa-rotate fa-spin" aria-hidden="true"></i> <span></span></div>
     <div id="msg" class="msg"></div>
     <div id="families"></div>
   </main>
@@ -122,6 +134,7 @@
           <span class="note" id="train-status-${f.id}">${escapeHtml(f.trainNote)}</span>
         </div>
         ${f.applyNote ? `<div class="apply-note"><i class="fa-solid fa-circle-info" aria-hidden="true"></i> ${escapeHtml(f.applyNote)}</div>` : ''}
+        <div class="train-progress" id="train-progress-${f.id}" hidden><div class="bar"><span></span></div><div class="where"></div></div>
         <div class="train-log" id="train-log-${f.id}"></div>
         <div class="table-wrap"><table class="stack-sm">
           <thead><tr><th>${__('Version')}</th><th>${__('Created')}</th><th>${__('Training data')}</th><th>${__('Accuracy')}</th><th>${__('Size')}</th><th></th></tr></thead>
@@ -137,9 +150,20 @@
       for (const id of watching) $(`train-log-${id}`)?.classList.add('visible');
     }
 
-    async function load() {
+    // Cards with their titles at once; the versions fill in when /api/models answers.
+    const SKELETON = [['roster', 'fa-brain', 'Roster AI'], ['rec', 'fa-font', 'OCR text recognition'], ['detect', 'fa-vector-square', 'OCR text detection']];
+    function renderSkeleton() {
+      $('pipeline').innerHTML = '<div class="skeleton-line" style="margin:0;width:100%"></div>';
+      $('families').innerHTML = SKELETON.map(([id, icon, name]) => `<section class="card family" id="family-${id}">
+        <div class="family-head"><h2><i class="fa-solid ${icon}" aria-hidden="true"></i> ${escapeHtml(__(name))}</h2></div>
+        <div class="skeleton-line short"></div><div class="skeleton-line wide"></div>
+      </section>`).join('');
+    }
+
+    // sync=false: the app's copy at once; otherwise the server checks MinIO for new versions first (can take seconds).
+    async function load({ sync = true } = {}) {
       try {
-        const res = await fetch('/api/models');
+        const res = await fetch(sync ? '/api/models' : '/api/models?sync=0');
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || res.statusText);
         families = data.families;
@@ -147,6 +171,17 @@
       } catch (e) {
         showMsg(__('Could not load the models: {error}', { error: e.message }), 'error');
       }
+    }
+
+    async function firstLoad() {
+      renderSkeleton();
+      const quick = load({ sync: false });
+      const box = $('syncing');
+      box.querySelector('span').textContent = __('Checking MinIO…');
+      box.hidden = false;
+      await quick;
+      await load();
+      box.hidden = true;
     }
 
     const fail = async (res) => { const d = await res.json().catch(() => ({})); return d.error || res.statusText; };
@@ -179,6 +214,22 @@
       }
     });
 
+    // "Step 1/4: Training words from the labels · PDF 305/381 cc37fb75…pdf · 23m 10s", and the bar
+    const PART_NAMES = { PDF: 'PDF files', pictures: 'Roster pictures', ACARS: 'ACARS pictures', fit: 'Fit', fields: 'Field' };
+    function showProgress(family, t) {
+      const box = $(`train-progress-${family}`);
+      const p = t?.progress;
+      if (!box) return;
+      box.hidden = !p;
+      if (!p) return;
+      box.querySelector('.bar span').style.width = `${Math.round(p.fraction * 100)}%`;
+      const mins = Math.floor((((t.finishedAt ? new Date(t.finishedAt) : new Date()) - new Date(t.startedAt)) / 1000));
+      const parts = [__('Step {step}/{steps}: {title}', { step: p.step, steps: p.steps, title: __(p.title) })];
+      if (t.running && p.part) parts.push(`${__(PART_NAMES[p.part] || p.part)}${p.fit ? ` (${__('fit')} ${p.fit})` : ''} ${p.done}/${p.total}${p.item ? ` ${p.item}` : ''}`);
+      parts.push(`${Math.floor(mins / 60)}m ${String(mins % 60).padStart(2, '0')}s`, `${Math.round(p.fraction * 100)}%`);
+      box.querySelector('.where').textContent = parts.join(' · ');
+    }
+
     // Follow one family's training run until it ends, then reload the versions.
     async function watchTraining(family) {
       if (watching.has(family)) return;
@@ -191,6 +242,7 @@
           log.textContent = (t.log || []).join('\n');
           log.scrollTop = log.scrollHeight;
           status.textContent = t.running ? __('Training (since {time})…', { time: fmtDate(t.startedAt) }) : t.ok ? __('Training finished.') : __('Training stopped or failed: see the log.');
+          showProgress(family, t);
         }
         if (!t || !t.running) break;
         await new Promise(r => setTimeout(r, 3000));
@@ -200,9 +252,10 @@
       $(`train-log-${family}`)?.classList.add('visible'); // keep the finished run's log in view
       const t = await fetch(`/api/models/${family}/train`).then(r => r.json()).catch(() => null);
       if (t) $(`train-log-${family}`).textContent = (t.log || []).join('\n');
+      showProgress(family, t);
     }
 
-    load();
+    firstLoad();
   </script>
 </body>
 </html>

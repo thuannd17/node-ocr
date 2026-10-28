@@ -1,0 +1,9 @@
+{
+  "hosting": {
+    "public": "firebase/public",
+    "ignore": ["**/.*"],
+    "rewrites": [
+      { "source": "**", "run": { "serviceId": "rosterparser", "region": "asia-southeast1" } }
+    ]
+  }
+}

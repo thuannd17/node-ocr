@@ -4,6 +4,7 @@
  *   ROSTER_WORK_DIR (default: <system temp>/roster-ocr-work)
  *     media/       mirror of the roster files + labels in MinIO (MEDIA_CACHE_DIR, utils/data-files.js)
  *     models/      mirror of the trained models in MinIO (models/ai/..., services/ai-models.js)
+ *     site/        mirror of the public site data in MinIO (airports.json, services/site-data.js)
  *     cache/       OCR / parse results kept to run faster again (ocr, parsed, rec-lines, ...)
  *     exports/     datasets built from the data for training (ocr-lines, pdf-tokens, recognition-groundtruth, ...)
  *     uploads/     files being read right now (removed afterwards)
@@ -18,7 +19,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-/** The project folder (package.json, .env, .venv, models/, data/, docs/); the code is in SRC_DIR. */
+/** The project folder (package.json, .env, .venv, models/, docs/); the code is in SRC_DIR. */
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 export const SRC_DIR = path.join(ROOT, 'src');
 export const SCRIPTS_DIR = path.join(SRC_DIR, 'scripts');
@@ -26,6 +27,7 @@ export const WORK_DIR = path.resolve(process.env.ROSTER_WORK_DIR || path.join(os
 process.env.ROSTER_WORK_DIR = WORK_DIR;
 
 export const MODELS_MIRROR = path.join(WORK_DIR, 'models');
+export const SITE_MIRROR = path.join(WORK_DIR, 'site');
 export const CACHE_DIR = path.join(WORK_DIR, 'cache');
 export const EXPORTS_DIR = path.join(WORK_DIR, 'exports');
 export const UPLOADS_DIR = path.join(WORK_DIR, 'uploads');

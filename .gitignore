@@ -48,3 +48,6 @@ models/rec/*/
 models/pdf-tagger*/
 models/ai/
 __pycache__/
+
+# ---- Firebase CLI ----
+.firebase/

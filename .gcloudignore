@@ -1,0 +1,7 @@
+# What `gcloud run deploy --source .` uploads to Cloud Build: the same as the Docker build context
+# (no .env, no roster data, no node_modules), plus the Firebase files the image does not need.
+#!include:.dockerignore
+firebase/
+firebase.json
+.firebaserc
+.firebase/

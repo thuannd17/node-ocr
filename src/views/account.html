@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>My account</title>
+  <script src="/assets/i18n/vi.js"></script>
+  <script src="/assets/i18n.js"></script>
+  <link rel="stylesheet" href="/assets/app.css">
+  <link rel="stylesheet" href="/assets/fontawesome/css/all.min.css">
+  <style>
+    .btn { background: var(--primary); color: #fff; border: none; padding: 7px 12px; border-radius: 6px; cursor: pointer; font: inherit; font-size: 13px; white-space: nowrap; display: inline-flex; gap: 6px; align-items: center; text-decoration: none; }
+    .btn:hover:not(:disabled) { background: var(--primary-dark); }
+    .btn:disabled { background: #ccc; cursor: not-allowed; }
+    .btn.secondary { background: #fff; color: var(--primary); border: 1px solid var(--primary); }
+    .btn.secondary:hover:not(:disabled) { background: #eef4ff; }
+    .btn.danger { background: #fff; color: var(--danger); border: 1px solid var(--danger); }
+    .btn.danger:hover:not(:disabled), .btn.danger.sure { background: var(--danger); color: #fff; }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
+    .grid2 > .card { margin-bottom: 0; }
+    .row { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+    .row .field { flex: 1; min-width: 180px; }
+    dl.facts { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; margin: 0 0 14px; font-size: 14px; }
+    dl.facts dt { color: var(--muted); }
+    dl.facts dd { margin: 0; overflow-wrap: anywhere; }
+    .badge { display: inline-block; font-size: 12px; padding: 2px 8px; border-radius: 10px; background: #eef4ff; color: #24527a; font-weight: 600; }
+    .badge.admin { background: #fff3e0; color: #8a4b00; }
+    .meter { margin: 0 0 14px; }
+    .meter .top { display: flex; justify-content: space-between; font-size: 14px; margin-bottom: 4px; gap: 8px; }
+    .meter .top span:last-child { color: var(--muted); white-space: nowrap; }
+    .bar { height: 8px; border-radius: 4px; background: #edf0f4; overflow: hidden; }
+    .bar > i { display: block; height: 100%; background: var(--primary); border-radius: 4px; }
+    .bar > i.high { background: #e0a100; }
+    .bar > i.full { background: var(--danger); }
+    .note { font-size: 13px; color: var(--muted); margin: 6px 0 0; }
+    table.keys { width: 100%; border-collapse: collapse; font-size: 14px; }
+    table.keys th { text-align: left; font-size: 12px; color: var(--muted); font-weight: 600; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+    table.keys td { padding: 8px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+    table.keys td:last-child { text-align: right; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12.5px; }
+    .newkey { border: 1px solid #c8e6c9; background: #f1f8f1; border-radius: 8px; padding: 12px 14px; margin-top: 14px; }
+    .newkey .val { display: flex; gap: 8px; align-items: center; margin: 8px 0 4px; }
+    .newkey code { flex: 1; background: #fff; border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; overflow-wrap: anywhere; user-select: all; }
+    pre.example { background: #1f2633; color: #e8edf5; border-radius: 8px; padding: 12px 14px; overflow-x: auto; margin: 8px 0 0; white-space: pre; }
+    .tabs { display: flex; gap: 6px; margin-top: 4px; }
+    .tabs button { font: inherit; font-size: 13px; padding: 4px 10px; border-radius: 6px; border: 1px solid var(--border); background: #fff; cursor: pointer; }
+    .tabs button.on { background: var(--nav-bg); color: #fff; border-color: var(--nav-bg); }
+    table.plans { width: 100%; border-collapse: collapse; font-size: 14px; }
+    table.plans th, table.plans td { padding: 7px 8px; border-bottom: 1px solid var(--border); text-align: left; }
+    table.plans th { font-size: 12px; color: var(--muted); }
+    table.plans tr.mine td { background: #f4f8ff; font-weight: 600; }
+    .empty { color: var(--muted); font-size: 14px; padding: 8px 0; }
+    [hidden] { display: none !important; }
+    @media (max-width: 800px) { .grid2 { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <script src="/assets/nav.js"></script>
+  <main class="page">
+    <div class="page-header">
+      <h1><i class="fa-solid fa-circle-user" aria-hidden="true"></i> My account</h1>
+      <p class="subtitle">Your API keys, your usage of the day and your plan.</p>
+    </div>
+
+    <div id="loadError" class="auth-msg error block" hidden></div>
+
+    <div id="content" hidden>
+      <div class="grid2">
+        <section class="card">
+          <h2>Profile</h2>
+          <dl class="facts">
+            <dt>Email</dt><dd id="email"></dd>
+            <dt>Signed in with</dt><dd id="provider"></dd>
+            <dt>Role</dt><dd id="role"></dd>
+            <dt>Plan</dt><dd id="plan"></dd>
+          </dl>
+          <form class="row" id="nameForm">
+            <label class="field"><span>Name</span><input type="text" id="name" maxlength="80" autocomplete="name"></label>
+            <button type="submit" class="btn secondary"><i class="fa-solid fa-floppy-disk" aria-hidden="true"></i> Save</button>
+          </form>
+          <div class="row" style="margin-top:12px">
+            <button type="button" class="btn secondary" id="resetPassword" hidden><i class="fa-solid fa-key" aria-hidden="true"></i> Change my password</button>
+            <button type="button" class="btn secondary" id="signOut"><i class="fa-solid fa-right-from-bracket" aria-hidden="true"></i> Sign out</button>
+          </div>
+          <div id="profileMsg" class="auth-msg block" hidden></div>
+        </section>
+
+        <section class="card">
+          <h2>Usage today</h2>
+          <div class="meter"><div class="top"><span>Requests</span><span id="reqText"></span></div><div class="bar"><i id="reqBar"></i></div></div>
+          <div class="meter"><div class="top"><span>Files read (rosters, ACARS)</span><span id="readText"></span></div><div class="bar"><i id="readBar"></i></div></div>
+          <p class="note" id="resetNote"></p>
+          <p class="note">Every call of the API counts as a request; reading a file with the AI model also counts as a file read. The limits start again at 00:00 UTC.</p>
+        </section>
+      </div>
+
+      <section class="card">
+        <h2>API keys</h2>
+        <p class="note" style="margin:0 0 12px">A key lets your app call the API as this account. Keep it secret: anyone with it uses your limits. Revoke a key you no longer use or that may have leaked.</p>
+        <form class="row" id="keyForm">
+          <label class="field"><span>Name of the new key (e.g. the app that uses it)</span><input type="text" id="keyName" maxlength="60" placeholder="My crew app"></label>
+          <button type="submit" class="btn" id="createKey"><i class="fa-solid fa-plus" aria-hidden="true"></i> Create key</button>
+        </form>
+        <div class="newkey" id="newKey" hidden>
+          <strong><i class="fa-solid fa-circle-check" aria-hidden="true"></i> <span>Your new key</span></strong>
+          <div class="val"><code id="newKeyValue"></code><button type="button" class="btn secondary" id="copyKey"><i class="fa-regular fa-copy" aria-hidden="true"></i> Copy</button></div>
+          <div class="note">Copy it now: it is shown only this once. We keep only a fingerprint of it.</div>
+        </div>
+        <div id="keyMsg" class="auth-msg block" hidden></div>
+        <div style="overflow-x:auto; margin-top:14px">
+          <table class="keys stack-sm" id="keys">
+            <thead><tr><th>Name</th><th>Key</th><th>Created</th><th>Last used</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="empty" id="noKeys" hidden>No API key yet.</div>
+      </section>
+
+      <section class="card">
+        <h2>Call the API</h2>
+        <p class="note" style="margin:0" data-i18n>Send your key in the <code>Authorization</code> header (or <code>X-API-Key</code>). Every endpoint is described on <a href="/api-docs">API Docs</a>, where <b>Authorize</b> takes your key to try them.</p>
+        <div class="tabs" role="tablist">
+          <button type="button" class="on" data-ex="curl">curl</button>
+          <button type="button" data-ex="js">JavaScript</button>
+          <button type="button" data-ex="py">Python</button>
+        </div>
+        <pre class="example" id="example"></pre>
+        <p class="note" data-i18n>Each answer has the headers <code>X-RateLimit-Remaining</code> and <code>X-RateLimit-Reads-Remaining</code>; past a limit the API answers <code>429</code> with <code>Retry-After</code>.</p>
+      </section>
+
+      <section class="card" id="subscription">
+        <h2>Subscription</h2>
+        <div id="subMsg" class="auth-msg block" hidden style="margin:0 0 12px"></div>
+        <dl class="facts" id="subFacts"></dl>
+        <div class="row" id="subActions">
+          <a class="btn" id="upgrade" href="/pricing" hidden><i class="fa-solid fa-arrow-up" aria-hidden="true"></i> <span>Move to Pro</span></a>
+          <button type="button" class="btn danger" id="cancelSub" hidden><i class="fa-solid fa-ban" aria-hidden="true"></i> <span>Cancel my subscription</span></button>
+        </div>
+        <h3 style="font-size:15px;margin:20px 0 6px">Invoices</h3>
+        <div style="overflow-x:auto">
+          <table class="keys stack-sm" id="invoices">
+            <thead><tr><th>Invoice</th><th>Date</th><th>Period</th><th>Amount</th><th>Status</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="empty" id="noInvoices">No invoice yet.</div>
+      </section>
+
+      <section class="card">
+        <h2>Plans</h2>
+        <table class="plans">
+          <thead><tr><th>Plan</th><th>Requests a day</th><th>Files read a day</th></tr></thead>
+          <tbody id="plans"></tbody>
+        </table>
+        <p class="note" data-i18n>See <a href="/pricing">Pricing</a> to move to Pro.</p>
+      </section>
+
+      <section class="card" id="danger">
+        <h2>Delete my account</h2>
+        <p class="note" style="margin:0 0 12px">Deletes your sign-in and revokes your API keys at once. Apps that use them stop working.</p>
+        <button type="button" class="btn danger" id="deleteAccount"><i class="fa-solid fa-trash" aria-hidden="true"></i> <span>Delete my account</span></button>
+        <div id="deleteMsg" class="auth-msg block" hidden></div>
+      </section>
+    </div>
+  </main>
+
+  <script type="module">
+    import { api, loadFirebase, describe } from '/assets/firebase-auth.js';
+    const t = window.t;
+    const $ = (id) => document.getElementById(id);
+    const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+    const show = (id, text, kind = 'error') => { const m = $(id); m.textContent = text; m.className = `auth-msg block ${kind}`; m.hidden = !text; };
+    // dates and numbers in the page's language, not the browser's
+    const LOCALE = window.I18N?.lang === 'vi' ? 'vi-VN' : 'en-GB';
+    const when = (iso) => (iso ? new Date(iso).toLocaleString(LOCALE, { dateStyle: 'medium', timeStyle: 'short' }) : t('never'));
+    const PROVIDERS = { 'google.com': 'Google', 'github.com': 'GitHub', password: t('Email and password') };
+    const num = (n) => (n == null ? '∞' : Number(n).toLocaleString(LOCALE));
+
+    // "Sure?" on a second click, back after 4 s (no browser dialog)
+    function twoStep(btn, label, act) {
+      const span = btn.querySelector('span') || btn;
+      const plain = span.textContent;
+      let timer;
+      btn.addEventListener('click', async () => {
+        if (!btn.classList.contains('sure')) {
+          btn.classList.add('sure'); span.textContent = t(label);
+          timer = setTimeout(() => { btn.classList.remove('sure'); span.textContent = plain; }, 4000);
+          return;
+        }
+        clearTimeout(timer);
+        btn.disabled = true;
+        try { await act(); } finally { btn.disabled = false; btn.classList.remove('sure'); span.textContent = plain; }
+      });
+    }
+
+    let me;
+    async function load() {
+      me = await api('/api/account');
+      const { user, limits, usage } = me;
+      $('email').textContent = user.email || '—';
+      $('provider').textContent = PROVIDERS[user.provider] || user.provider || '—';
+      $('role').innerHTML = user.role === 'admin' ? `<span class="badge admin">${esc(t('Admin'))}</span>` : `<span class="badge">${esc(t('User'))}</span>`;
+      $('plan').innerHTML = `<span class="badge">${esc(t(limits.label))}</span>`;
+      $('name').value = user.name || '';
+      $('resetPassword').hidden = user.provider !== 'password';
+      $('danger').hidden = user.role === 'admin';
+      meter('req', usage.requests, limits.requests);
+      meter('read', usage.reads, limits.reads);
+      const reset = new Date(Date.UTC(...me.day.split('-').map((v, i) => (i === 1 ? v - 1 : +v))) + 86400_000);
+      $('resetNote').textContent = t('Starts again {when} (your time).', { when: reset.toLocaleString(LOCALE, { dateStyle: 'medium', timeStyle: 'short' }) });
+      $('plans').innerHTML = me.plans.map(p => `<tr class="${p.id === limits.plan ? 'mine' : ''}"><td>${esc(t(p.label))}${p.id === limits.plan ? ` <span class="badge">${esc(t('your plan'))}</span>` : ''}</td><td>${num(p.requests)}</td><td>${num(p.reads)}</td></tr>`).join('')
+        + `<tr><td>${esc(t(me.anonymous.label))}</td><td>${num(me.anonymous.requests)} ${esc(t('an hour, per address'))}</td><td>${num(me.anonymous.reads)} ${esc(t('an hour, per address'))}</td></tr>`;
+      await loadKeys();
+    }
+    function meter(id, used, limit) {
+      $(`${id}Text`).textContent = limit == null ? t('{used} (no limit)', { used: num(used) }) : `${num(used)} / ${num(limit)}`;
+      const pct = limit ? Math.min(100, (used / limit) * 100) : 0;
+      const bar = $(`${id}Bar`);
+      bar.style.width = `${pct}%`;
+      bar.className = pct >= 100 ? 'full' : pct >= 80 ? 'high' : '';
+    }
+
+    async function loadKeys() {
+      const { keys, maxKeys } = await api('/api/account/keys');
+      const tbody = $('keys').querySelector('tbody');
+      tbody.innerHTML = keys.map(k => `<tr data-id="${esc(k.id)}">
+        <td data-label="${esc(t('Name'))}">${esc(k.name)}</td><td data-label="${esc(t('Key'))}"><code>${esc(k.hint)}</code></td>
+        <td data-label="${esc(t('Created'))}">${esc(when(k.createdAt))}</td><td data-label="${esc(t('Last used'))}">${esc(when(k.lastUsedAt))}</td>
+        <td><button type="button" class="btn danger revoke"><i class="fa-solid fa-ban" aria-hidden="true"></i> <span>${esc(t('Revoke'))}</span></button></td></tr>`).join('');
+      $('keys').hidden = !keys.length;
+      $('noKeys').hidden = !!keys.length;
+      $('createKey').disabled = keys.length >= maxKeys;
+      if (keys.length >= maxKeys) show('keyMsg', t('An account can have {n} API keys: revoke one first', { n: maxKeys }), 'info');
+      for (const tr of tbody.querySelectorAll('tr')) {
+        twoStep(tr.querySelector('.revoke'), 'Sure? Revoke', async () => {
+          try {
+            await api(`/api/account/keys/${encodeURIComponent(tr.dataset.id)}`, null, 'DELETE');
+            show('keyMsg', t('The key is revoked: apps that use it get 401 from now on.'), 'ok');
+            await loadKeys();
+          } catch (e) { show('keyMsg', e.message); }
+        });
+      }
+    }
+
+    // examples with the new key, else a placeholder
+    let shownKey = '';
+    const EX = {
+      curl: (k) => `curl -X POST ${location.origin}/api/roster/upload \\\n  -H "Authorization: Bearer ${k}" \\\n  -F "file=@roster.pdf"`,
+      js: (k) => `const form = new FormData();\nform.append('file', fileInput.files[0]);\nconst res = await fetch('${location.origin}/api/roster/upload', {\n  method: 'POST',\n  headers: { Authorization: 'Bearer ${k}' },\n  body: form,\n});\nconst { published, planned } = await res.json();`,
+      py: (k) => `import requests\n\nres = requests.post(\n    "${location.origin}/api/roster/upload",\n    headers={"Authorization": "Bearer ${k}"},\n    files={"file": open("roster.pdf", "rb")},\n)\nprint(res.json()["published"])`,
+    };
+    let ex = 'curl';
+    const renderExample = () => { $('example').textContent = EX[ex](shownKey || 'rp_YOUR_KEY'); };
+    document.querySelector('.tabs').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-ex]');
+      if (!b) return;
+      ex = b.dataset.ex;
+      document.querySelectorAll('.tabs button').forEach(x => x.classList.toggle('on', x === b));
+      renderExample();
+    });
+
+    $('keyForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      $('createKey').disabled = true; show('keyMsg', '');
+      try {
+        const k = await api('/api/account/keys', { name: $('keyName').value.trim() });
+        shownKey = k.key;
+        $('newKeyValue').textContent = k.key;
+        $('newKey').hidden = false;
+        $('keyName').value = '';
+        renderExample();
+        await loadKeys();
+      } catch (err) { show('keyMsg', err.message); } finally { $('createKey').disabled = false; }
+    });
+    $('copyKey').addEventListener('click', async () => {
+      try { await navigator.clipboard.writeText($('newKeyValue').textContent); $('copyKey').innerHTML = `<i class="fa-solid fa-check" aria-hidden="true"></i> ${esc(t('Copied'))}`; } catch { /* select it by hand */ }
+    });
+
+    $('nameForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      try { await api('/api/account', { name: $('name').value.trim() }, 'PATCH'); show('profileMsg', t('Saved'), 'ok'); } catch (err) { show('profileMsg', err.message); }
+    });
+    $('signOut').addEventListener('click', async () => { await api('/api/auth/logout', {}).catch(() => {}); location.assign('/'); });
+    $('resetPassword').addEventListener('click', async () => {
+      try {
+        const fb = await loadFirebase();
+        await fb.fa.sendPasswordResetEmail(fb.auth, me.user.email);
+        show('profileMsg', t('A link to set a new password is on its way to {email}.', { email: me.user.email }), 'ok');
+      } catch (e) { show('profileMsg', describe(e)); }
+    });
+    // the subscription (PayPal) and the invoices
+    const SUB_STATUS = { ACTIVE: 'Active', SUSPENDED: 'Suspended: a payment failed', APPROVAL_PENDING: 'Waiting for approval', CANCELLED: 'Cancelled', EXPIRED: 'Expired' };
+    const money = (v, c) => new Intl.NumberFormat(LOCALE, { style: 'currency', currencyDisplay: 'narrowSymbol', currency: c || 'USD' }).format(v || 0);
+    const day = (iso) => (iso ? new Date(iso).toLocaleDateString(LOCALE, { dateStyle: 'medium' }) : '—');
+    let currentSub = null;
+    function renderBilling(b, subscribed) {
+      if (!b) { $('subscription').hidden = true; return; }
+      const sub = b.subscriptions.find(s => ['ACTIVE', 'SUSPENDED'].includes(s.status)) || b.subscriptions.find(s => s.status !== 'APPROVAL_PENDING');
+      currentSub = sub && ['ACTIVE', 'SUSPENDED'].includes(sub.status) ? sub : null;
+      const facts = [[t('Plan'), t(b.plan === 'pro' ? 'Pro' : 'Free')]];
+      if (b.planSource === 'admin' && b.plan !== 'free') facts.push([t('Given by'), t('an admin')]);
+      else if (b.planUntil && b.plan !== 'free') facts.push([t('Paid until'), day(b.planUntil)]);
+      if (sub) {
+        facts.push([t('Subscription'), `${t(SUB_STATUS[sub.status] || sub.status)} · ${money(sub.price, sub.currency)} / ${t(sub.interval === 'year' ? 'year' : 'month')}`]);
+        if (sub.status === 'ACTIVE') facts.push([t('Next payment'), day(sub.nextBillingAt)]);
+        if (sub.cancelledAt) facts.push([t('Cancelled on'), day(sub.cancelledAt)]);
+      }
+      $('subFacts').innerHTML = facts.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('');
+      $('upgrade').hidden = b.plan !== 'free' || !!currentSub;
+      $('cancelSub').hidden = !currentSub;
+      if (subscribed) show('subMsg', b.plan === 'pro' ? t('Thank you! Your account is on Pro now.') : t('Thank you! PayPal is still confirming the payment: this page shows Pro once it has.'), b.plan === 'pro' ? 'ok' : 'info');
+      else if (!b.enabled && b.plan === 'free') show('subMsg', t('Payments are not open yet. Ask an admin for Pro.'), 'info');
+      const tbody = $('invoices').querySelector('tbody');
+      tbody.innerHTML = b.invoices.map(i => `<tr>
+        <td data-label="${esc(t('Invoice'))}"><a href="/invoice?id=${encodeURIComponent(i.number)}">${esc(i.number)}</a></td>
+        <td data-label="${esc(t('Date'))}">${esc(day(i.paidAt))}</td>
+        <td data-label="${esc(t('Period'))}">${esc(day(i.periodStart))} – ${esc(day(i.periodEnd))}</td>
+        <td data-label="${esc(t('Amount'))}">${esc(money(i.amount, i.currency))}</td>
+        <td data-label="${esc(t('Status'))}">${esc(t({ paid: 'Paid', refunded: 'Refunded', 'partially refunded': 'Partly refunded' }[i.status] || i.status))}</td></tr>`).join('');
+      $('invoices').hidden = !b.invoices.length;
+      $('noInvoices').hidden = !!b.invoices.length;
+    }
+    twoStep($('cancelSub'), 'Sure? Cancel it', async () => {
+      if (!currentSub) return;
+      try {
+        await api(`/api/billing/subscriptions/${encodeURIComponent(currentSub.id)}/cancel`, { reason: 'Cancelled by the customer on /account' });
+        const b = await api('/api/billing/me');
+        renderBilling(b);
+        show('subMsg', t('Cancelled. You keep Pro until {date}, then the account moves to Free.', { date: day(b.planUntil) }), 'ok');
+      } catch (e) { show('subMsg', e.message); }
+    });
+
+    twoStep($('deleteAccount'), 'Sure? Delete it for good', async () => {
+      try { await api('/api/account', null, 'DELETE'); location.assign('/'); } catch (e) { show('deleteMsg', e.message); }
+    });
+
+    try {
+      // back from PayPal: ask PayPal first, so the plan and the limits below are the new ones
+      const subscribed = new URLSearchParams(location.search).has('subscribed');
+      const billing = await api(`/api/billing/me${subscribed ? '?refresh=1' : ''}`).catch(() => null);
+      if (subscribed) history.replaceState(null, '', location.pathname);
+      await load();
+      renderBilling(billing, subscribed);
+      renderExample();
+      $('content').hidden = false;
+    } catch (e) {
+      show('loadError', e.status === 401 ? t('Please sign in') : e.message);
+      if (e.status === 401) location.replace(`/login?next=${encodeURIComponent(location.pathname)}`);
+    }
+  </script>
+</body>
+</html>

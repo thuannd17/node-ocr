@@ -10,7 +10,8 @@ import { alignRows, normalizeField, compareSection } from '../services/benchmark
 import { runModelBenchmark, labeledCounts, FILE_TYPES } from '../services/model-benchmark.js';
 import { runOcrBenchmark } from '../services/ocr-benchmark.js';
 import { runAcarsBenchmark, labeledAcars } from '../services/acars-benchmark.js';
-import { ocrLines, extractWithPaddleOCR } from '../services/paddle-ocr.js';
+import * as history from '../services/benchmark-history.js';
+import { ocrLines, extractWithPaddleOCR, ocrServerHealth, deviceOf, OCR_SERVER_URL } from '../services/paddle-ocr.js';
 import { extractImageWithModel, modelInfo } from '../services/pdf-ai-extract.js';
 import { saveLabelResult, savePredictedResult } from '../services/result-cache.js';
 import { syncMedia, localFile, readLabel, saveLabel, deleteFile, mediaIndex, mediaErrorStatus, acars } from '../services/media-client.js';
@@ -461,6 +462,15 @@ router.get('/benchmark/types', async (req, res) => {
   }
 });
 
+// The OCR server's status for /benchmark: { url, running, device: { device: 'gpu' | 'cpu', name } | null, rec, inflight, waiting }
+router.get('/benchmark/ocr-server', async (req, res) => {
+  const h = await ocrServerHealth();
+  res.json({
+    url: OCR_SERVER_URL, running: !!h, device: deviceOf(h),
+    rec: h?.rec || null, inflight: h?.inflight ?? 0, waiting: h?.waiting ?? 0,
+  });
+});
+
 // Benchmarks read the local mirror of MinIO: bring it up to date first.
 // Text recognition alone: PaddleOCR on every labeled image (services/ocr-benchmark.js).
 router.get('/benchmark/ocr/stream', (req, res) => streamBenchmark(req, res, async (opts) => { await syncMedia({ force: true }); return runOcrBenchmark(opts); }));
@@ -475,5 +485,21 @@ router.get('/benchmark/model/stream', (req, res) => {
 
 // AI model over the labeled ACARS pictures, as /acars reads them (services/acars-benchmark.js).
 router.get('/benchmark/acars/stream', (req, res) => streamBenchmark(req, res, async (opts) => { await acars.syncMedia({ force: true }); return runAcarsBenchmark(opts); }));
+
+// History of the finished runs (services/benchmark-history.js), to compare them on /benchmark.
+//   GET /api/benchmark/history/:kind -> { runs: [summary] } (newest first; kind ocr | model | acars)
+//   GET /api/benchmark/history/:kind/:id -> { summary, result }; PATCH { note }; DELETE (to MinIO's trash)
+router.get('/benchmark/history/:kind', async (req, res) => {
+  try { res.json({ runs: await history.listRuns(req.params.kind) }); } catch (e) { mediaFail(res, e, '/api/benchmark/history'); }
+});
+router.get('/benchmark/history/:kind/:id', async (req, res) => {
+  try { res.json(await history.getRun(req.params.kind, req.params.id)); } catch (e) { mediaFail(res, e, '/api/benchmark/history'); }
+});
+router.patch('/benchmark/history/:kind/:id', async (req, res) => {
+  try { res.json({ summary: await history.setNote(req.params.kind, req.params.id, req.body?.note) }); } catch (e) { mediaFail(res, e, '/api/benchmark/history'); }
+});
+router.delete('/benchmark/history/:kind/:id', async (req, res) => {
+  try { await history.deleteRun(req.params.kind, req.params.id); res.json({ ok: true }); } catch (e) { mediaFail(res, e, '/api/benchmark/history'); }
+});
 
 export default router;

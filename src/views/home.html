@@ -107,16 +107,16 @@
     <a class="card" href="/api-docs">
       <div class="icon"><i class="fa-solid fa-book" aria-hidden="true"></i></div>
       <h2>API Docs</h2>
-      <p>The public API for other apps: read rosters, export .ics, airports and weather, night time (OpenAPI).</p>
+      <p>The public API for other apps: read rosters, export .ics, airports and weather, night time (OpenAPI). Sign up for a free API key.</p>
       <span class="url">/api-docs</span>
       <span class="badge blue">OpenAPI</span>
     </a>
     </div>
   </section>
 
-  <section class="group admin">
+  <section class="group admin" id="adminGroup" hidden>
     <h2 class="group-title"><i class="fa-solid fa-user-gear" aria-hidden="true"></i> Administration</h2>
-    <p class="group-note">Managing the data and the models. These pages will need an account with the right permissions; for now they are only kept apart.</p>
+    <p class="group-note">Managing the data and the models. These pages need an admin sign-in.</p>
     <div class="grid">
     <a class="card" href="/label">
       <div class="icon"><i class="fa-solid fa-tags" aria-hidden="true"></i></div>
@@ -146,6 +146,18 @@
       <span class="url">/media</span>
       <span class="badge orange">Data</span>
     </a>
+    <a class="card" href="/users">
+      <div class="icon"><i class="fa-solid fa-users" aria-hidden="true"></i></div>
+      <h2>Users</h2>
+      <p>Every account: role, plan and limits of the API, today's calls and API keys.</p>
+      <span class="url">/users</span>
+    </a>
+    <a class="card" href="/billing">
+      <div class="icon"><i class="fa-solid fa-file-invoice-dollar" aria-hidden="true"></i></div>
+      <h2>Billing</h2>
+      <p>The paid plans: PayPal subscriptions, invoices, refunds and the revenue of each month.</p>
+      <span class="url">/billing</span>
+    </a>
     <a class="card" href="/helpdesk">
       <div class="icon"><i class="fa-solid fa-headset" aria-hidden="true"></i></div>
       <h2>Helpdesk</h2>
@@ -156,7 +168,11 @@
     </div>
   </section>
 
-  <footer><span data-i18n>Building on RosterParser? See the <a href="/api-docs">API documentation</a> (<a href="/api/openapi.json">OpenAPI JSON</a>).</span></footer>
+  <footer><span data-i18n>Building on RosterParser? See the <a href="/api-docs">API documentation</a> (<a href="/api/openapi.json">OpenAPI JSON</a>) and <a href="/signup">sign up</a> for an API key.</span></footer>
   </main>
+  <script>
+    // the administration cards: for admins (or this machine with login off) only
+    fetch('/api/auth/me').then(r => r.json()).then((me) => { document.getElementById('adminGroup').hidden = !(me.user?.role === 'admin' || me.local); }).catch(() => {});
+  </script>
 </body>
 </html>

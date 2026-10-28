@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Invoice</title>
+  <script src="/assets/i18n/vi.js"></script>
+  <script src="/assets/i18n.js"></script>
+  <link rel="stylesheet" href="/assets/app.css">
+  <link rel="stylesheet" href="/assets/fontawesome/css/all.min.css">
+  <style>
+    .bar { max-width: 800px; margin: 0 auto 12px; display: flex; gap: 8px; justify-content: space-between; align-items: center; flex-wrap: wrap; }
+    .bar a, .bar button { font: inherit; font-size: 14px; display: inline-flex; gap: 6px; align-items: center; padding: 7px 12px; border-radius: 6px; border: 1px solid var(--primary); color: var(--primary); background: #fff; cursor: pointer; text-decoration: none; }
+    .bar button.primary { background: var(--primary); color: #fff; }
+    .sheet { max-width: 800px; margin: 0 auto; background: #fff; border-radius: var(--radius); box-shadow: var(--shadow); padding: 40px 44px; position: relative; color: #222; }
+    .top { display: flex; justify-content: space-between; gap: 20px; flex-wrap: wrap; margin-bottom: 30px; }
+    .brand { font-size: 22px; font-weight: 700; color: var(--nav-bg); }
+    .seller { font-size: 13px; color: #555; white-space: pre-line; margin-top: 4px; }
+    .title { text-align: right; }
+    .title h1 { margin: 0; font-size: 26px; letter-spacing: 2px; color: var(--nav-bg); }
+    .title .no { font-size: 15px; font-weight: 600; margin-top: 4px; }
+    .meta { display: grid; grid-template-columns: max-content auto; gap: 4px 14px; font-size: 13px; margin-top: 8px; justify-content: end; }
+    .meta dt { color: #777; }
+    .meta dd { margin: 0; }
+    .to h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: #777; margin: 0 0 4px; }
+    .to div { font-size: 14px; }
+    table.items { width: 100%; border-collapse: collapse; margin: 26px 0 10px; font-size: 14px; }
+    table.items th { text-align: left; font-size: 12px; color: #777; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 2px solid #222; padding: 8px 6px; }
+    table.items td { padding: 12px 6px; border-bottom: 1px solid #ddd; vertical-align: top; }
+    table.items .r { text-align: right; white-space: nowrap; }
+    table.items td small { color: #777; display: block; margin-top: 2px; }
+    .totals { margin-left: auto; width: min(300px, 100%); font-size: 14px; }
+    .totals div { display: flex; justify-content: space-between; padding: 5px 6px; }
+    .totals .grand { border-top: 2px solid #222; font-weight: 700; font-size: 16px; margin-top: 4px; padding-top: 8px; }
+    .stamp { position: absolute; top: 120px; right: 50px; transform: rotate(-12deg); border: 3px solid; border-radius: 8px; padding: 4px 14px; font-size: 22px; font-weight: 800; letter-spacing: 3px; opacity: 0.75; }
+    .stamp.paid { color: #2e7d32; }
+    .stamp.refunded { color: #c62828; }
+    .foot { margin-top: 34px; font-size: 12px; color: #777; line-height: 1.6; }
+    [hidden] { display: none !important; }
+    @media (max-width: 600px) { .sheet { padding: 24px 18px; } .title { text-align: left; } .meta { justify-content: start; } .stamp { top: 16px; right: 16px; font-size: 16px; } }
+    @media print {
+      body { background: #fff; }
+      .topnav, .bar, .page-msg { display: none !important; }
+      .page { padding: 0 !important; }
+      .sheet { box-shadow: none; padding: 0; max-width: none; }
+    }
+  </style>
+</head>
+<body>
+  <script src="/assets/nav.js"></script>
+  <main class="page">
+    <div class="bar">
+      <a href="/account" id="back"><i class="fa-solid fa-arrow-left" aria-hidden="true"></i> <span>My account</span></a>
+      <button type="button" class="primary" id="print"><i class="fa-solid fa-print" aria-hidden="true"></i> <span>Print or save as PDF</span></button>
+    </div>
+    <div class="auth-msg error block page-msg" id="msg" hidden style="max-width:800px;margin:0 auto 12px"></div>
+
+    <article class="sheet" id="sheet" hidden>
+      <div class="stamp" id="stamp"></div>
+      <div class="top">
+        <div>
+          <div class="brand" id="sellerName"></div>
+          <div class="seller" id="seller"></div>
+        </div>
+        <div class="title">
+          <h1>INVOICE</h1>
+          <div class="no" id="number"></div>
+          <dl class="meta">
+            <dt>Date</dt><dd id="date"></dd>
+            <dt>Paid</dt><dd id="paidWith"></dd>
+          </dl>
+        </div>
+      </div>
+      <div class="to">
+        <h2>Billed to</h2>
+        <div id="billTo"></div>
+      </div>
+      <table class="items">
+        <thead><tr><th>Description</th><th class="r">Qty</th><th class="r">Amount</th></tr></thead>
+        <tbody><tr><td><span id="item"></span><small id="period"></small></td><td class="r">1</td><td class="r" id="lineAmount"></td></tr></tbody>
+      </table>
+      <div class="totals">
+        <div><span>Subtotal</span><span id="subtotal"></span></div>
+        <div class="grand"><span>Total</span><span id="total"></span></div>
+        <div id="refundRow" hidden><span>Refunded</span><span id="refunded"></span></div>
+      </div>
+      <div class="foot" id="foot"></div>
+    </article>
+  </main>
+
+  <script type="module">
+    import { api } from '/assets/firebase-auth.js';
+    const t = window.t;
+    const $ = (id) => document.getElementById(id);
+    const LOCALE = window.I18N?.lang === 'vi' ? 'vi-VN' : 'en-GB';
+    const date = (iso) => (iso ? new Date(iso).toLocaleDateString(LOCALE, { dateStyle: 'long' }) : '—');
+    const id = new URLSearchParams(location.search).get('id') || '';
+    $('print').addEventListener('click', () => window.print());
+    if (document.referrer.includes('/billing')) { $('back').href = '/billing'; $('back').querySelector('span').textContent = t('Billing'); }
+
+    try {
+      const inv = await api(`/api/billing/invoices/${encodeURIComponent(id)}`);
+      const money = (v) => new Intl.NumberFormat(LOCALE, { style: 'currency', currencyDisplay: 'narrowSymbol', currency: inv.currency }).format(v);
+      document.title = `${t('Invoice')} ${inv.number}`;
+      $('sellerName').textContent = inv.seller?.name || 'RosterParser';
+      $('seller').textContent = [inv.seller?.address, inv.seller?.email, inv.seller?.taxId && `${t('Tax ID')}: ${inv.seller.taxId}`].filter(Boolean).join('\n');
+      $('number').textContent = inv.number;
+      $('date').textContent = date(inv.paidAt);
+      $('paidWith').textContent = `PayPal · ${inv.transactionId}`;
+      $('billTo').innerHTML = [inv.name, inv.email, inv.payer && inv.payer !== inv.email ? `${t('PayPal')}: ${inv.payer}` : ''].filter(Boolean).map(s => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])).join('<br>');
+      $('item').textContent = t('RosterParser API, {plan} plan ({interval})', { plan: t(inv.label), interval: t(inv.interval === 'year' ? 'yearly' : 'monthly') });
+      $('period').textContent = t('Period: {from} – {to}', { from: date(inv.periodStart), to: date(inv.periodEnd) });
+      for (const k of ['lineAmount', 'subtotal', 'total']) $(k).textContent = money(inv.amount);
+      const refunded = inv.status !== 'paid';
+      $('stamp').textContent = t(refunded ? 'REFUNDED' : 'PAID');
+      $('stamp').className = `stamp ${refunded ? 'refunded' : 'paid'}`;
+      if (refunded) { $('refundRow').hidden = false; $('refunded').textContent = inv.status === 'refunded' ? money(inv.amount) : t('in part'); }
+      $('foot').textContent = t('Paid in full through PayPal (subscription {sub}). Thank you!', { sub: inv.subscriptionId });
+      $('sheet').hidden = false;
+    } catch (e) {
+      $('msg').textContent = e.status === 404 ? t('No such invoice') : e.message;
+      $('msg').hidden = false;
+      if (e.status === 401) location.replace(`/login?next=${encodeURIComponent(location.pathname + location.search)}`);
+    }
+  </script>
+</body>
+</html>

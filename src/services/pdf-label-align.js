@@ -37,11 +37,11 @@ const looseText = s => s.toUpperCase().replace(/[.,;:)]+$/, '').replace(/^[(]+/,
 /** A word printed as this value word (exactly; for OCR text also with confusable characters). */
 const same = (t, w) => t === w || (FUZZY && w.length >= 2 && looseText(t) === looseText(w));
 
-/** Does a word print this time? "0800", "08:00", "!0800", "2100-1", "!0054+1". */
+/** Does a word print this time? "0800", "08:00", "!0800", "2100-1", "!0054+1", "08:00:00". */
 function wordIsTime(tok, time) {
   let t = typeof tok === 'string' ? tok : tok.t;
   if (FUZZY) t = t.replace(/^[(]/, '').replace(/[)Z.,]+$/, '');
-  const m = /^!?(\d{2}):?(\d{2})([+-]\d)?$/.exec(t);
+  const m = /^!?(\d{2}):?(\d{2})(?::\d{2})?([+-]\d)?$/.exec(t);
   return !!m && m[1] + m[2] === time.hhmm && (m[3] || '') === time.off;
 }
 
@@ -83,6 +83,13 @@ export function alignLabel(tagPages, label, { ocr = false } = {}) {
       for (let k = 0; k < toks.length; k++) {
         if (test) {
           if (k + words.length <= toks.length && words.every((w, j) => free(toks[k + j]) && test(toks[k + j], w))) return toks.slice(k, k + words.length);
+          // a time printed in pieces, "18" ":" "05" (":" "00"): all of them
+          if (test === wordIsTime && /^\d{2}$/.test(toks[k].t)) {
+            const p = toks.slice(k, k + 5);
+            if (p.length >= 3 && p.slice(0, 3).every(free) && p[1].t === ':' && wordIsTime(`${p[0].t}:${p[2].t}`, words[0])) {
+              return p[3]?.t === ':' && /^\d{2}$/.test(p[4]?.t || '') && free(p[3]) && free(p[4]) ? p : p.slice(0, 3);
+            }
+          }
           continue;
         }
         let joined = '';
@@ -105,8 +112,12 @@ export function alignLabel(tagPages, label, { ocr = false } = {}) {
   const WINDOW = 60; // lines a row may be after the previous one
   const NEAR = 6; // lines a day's first row may be after its date
   let prevDate = null;
+  let afterCi = false, floor = 0; // (the previous row a C/I found by its time; the line of the last other row)
   for (const row of rows) {
     const { r } = row;
+    // A C/I found by its time printed under its duty's first leg ("AD4366 01JAN21 POA FLN" / "09:15 09:54 10:49"):
+    // that leg is on the line above, not the next leg with the same number further down.
+    if (afterCi) cursor = Math.max(floor, cursor - 2);
     // A new day: its row starts at its date (when printed), not at the same code earlier ("URLAUB" every day).
     const d = labelDate(r.date);
     const start = cursor;
@@ -164,13 +175,17 @@ export function alignLabel(tagPages, label, { ocr = false } = {}) {
     row.line = lineOf.get(found[0]);
     row.anchorField = field;
     cursor = row.line;
+    afterCi = derivedCiCo && field === 'ci';
+    if (!afterCi) floor = row.line;
   }
 
   // 2. Each row's lines: its anchor line up to the next anchored row's line (the same line when they share it).
   const anchored = rows.filter(r => r.line != null);
   anchored.forEach((row, k) => {
     const next = anchored[k + 1];
-    row.last = next ? Math.max(row.line, next.line - (next.line > row.line ? 1 : 0)) : Math.min(row.line + 3, lines.length - 1);
+    // (a C/O found by its time shares its line with the last leg's times: "13:51 14:50 15:20")
+    const shared = next?.derivedCiCo && next.anchorField === 'co';
+    row.last = next ? Math.max(row.line, next.line - (next.line > row.line && !shared ? 1 : 0)) : Math.min(row.line + 3, lines.length - 1);
   });
 
   // 3. Values of each row.
@@ -188,7 +203,7 @@ export function alignLabel(tagPages, label, { ocr = false } = {}) {
       if (row.anchorField === field) return;
       for (const tm of timesOf(value)) {
         const got = findWords([tm], from, to, wordIsTime);
-        if (got) take(got[0], as, sec, i); else missed.push(field);
+        if (got) got.forEach(t => take(t, as, sec, i)); else missed.push(field);
       }
     };
     if (!row.derivedCiCo && !row.hotelName) {
@@ -212,7 +227,8 @@ export function alignLabel(tagPages, label, { ocr = false } = {}) {
     if (d && (key !== lastDateKey || ownLine)) {
       lastDateKey = key;
       const prev = anchored[anchored.indexOf(row) - 1];
-      const start = ownLine ? from : prev ? prev.line : Math.max(0, from - 3);
+      // (a C/I before it found on the line under it: its own line)
+      const start = ownLine ? from : prev ? Math.min(prev.line, from) : Math.max(0, from - 3);
       let hit = null;
       for (let li = from; li >= start && !hit; li--) {
         const cand = lines[li].tokens.find(t => free(t) && isDate(t));

@@ -75,12 +75,12 @@
         <a href="#/Night%20time/calcNightTime"><i class="fa-solid fa-moon" aria-hidden="true"></i><span><b>Night time of a flight</b><code>POST /api/night-time/calc</code></span></a>
       </div>
       <div class="facts">
-        <span class="k">Authentication</span><span>None for now</span>
+        <span class="k">Authentication</span><span data-i18n>An API key: <a href="/signup">sign up</a>, make a key on <a href="/account">your account</a>, send <code>Authorization: Bearer rp_...</code></span>
         <span class="k">Format</span><span data-i18n>JSON (UTF-8); uploads as <code>multipart/form-data</code>; times in ISO 8601</span>
-        <span class="k">Errors</span><span data-i18n>HTTP status 4xx / 5xx with <code>{ "error": "message" }</code>; send the cookie <code>lang=vi</code> for Vietnamese messages</span>
-        <span class="k">Limits</span><span data-i18n>Uploads up to 10 MB; one OCR queue for everyone (<code>503</code> + <code>busy: true</code> = retry in a few seconds); weather cached 30 minutes</span>
+        <span class="k">Errors</span><span data-i18n>HTTP status 4xx / 5xx with <code>{ "error": "message" }</code>; send <code>X-UI-Lang: vi</code> for Vietnamese messages</span>
+        <span class="k">Limits</span><span data-i18n>Your plan&#39;s requests and file reads a day (<code>429</code> past them, see <code>X-RateLimit-Remaining</code>); uploads up to 10 MB; one OCR queue for everyone (<code>503</code> + <code>busy: true</code> = retry in a few seconds)</span>
       </div>
-      <p class="note" data-i18n><i class="fa-solid fa-circle-info" aria-hidden="true"></i> Uploaded rosters are only read, not kept; a roster stays on the server only when it is sent as a correction suggestion. The administration endpoints (labels, benchmarks, models, suggestions) are not part of the public API and will require an account. The reference below is in English; "Try it out" sends real requests to this server.</p>
+      <p class="note" data-i18n><i class="fa-solid fa-circle-info" aria-hidden="true"></i> Uploaded rosters are only read, not kept; a roster stays on the server only when it is sent as a correction suggestion. The administration endpoints (labels, benchmarks, models, suggestions) are not part of the public API. The reference below is in English; "Try it out" sends real requests to this server and counts against your limits (<b>Authorize</b> takes your key).</p>
     </div>
 
     <div class="card" id="swagger"><div class="msg muted"><i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i> Loading…</div></div>
@@ -137,6 +137,7 @@
         docExpansion: 'list',
         defaultModelsExpandDepth: 0,
         tryItOutEnabled: false,
+        persistAuthorization: true, // the key given to Authorize stays for the next visit (this browser only)
         displayRequestDuration: true,
       });
       // Quick links: open the operation in the reference and scroll to it (Swagger UI only reads the hash on load).

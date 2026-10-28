@@ -20,7 +20,7 @@ import { wordsOf, plainTokens } from './pdf-tokens.js';
 import { assembleRows } from './pdf-row-assembler.js';
 import { findPeriod, findNotices, parseNetlinePdf } from './pdf-roster-parser.js';
 import { readPdfText, hasTextLayer } from './pdf-text.js';
-import { ocrPdfPages, ocrPdfAsImage } from './pdf-ocr.js';
+import { ocrPdfPages, ocrPdfAsImage, ocrEmptyPages } from './pdf-ocr.js';
 import { ocrWordPages } from './ocr-tokens.js';
 import { acarsWordPages, assembleAcars } from './acars.js';
 import { ROOT } from '../utils/paths.js';
@@ -28,8 +28,8 @@ import { activeModelDir } from './ai-models.js';
 
 export const PYTHON = path.join(ROOT, '.venv', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python');
 
-export function modelInfo() {
-  const dir = activeModelDir();
+/** The active version, or the one in `dir` (a new version checked before it is used). */
+export function modelInfo(dir = activeModelDir()) {
   if (!dir || !fs.existsSync(path.join(dir, 'tagger.joblib'))) return { ready: false };
   let meta = {};
   try { meta = JSON.parse(fs.readFileSync(path.join(dir, 'meta.json'), 'utf8')); } catch { /* trained by hand: no meta */ }
@@ -40,21 +40,61 @@ function conventions(dir) {
   try { return JSON.parse(fs.readFileSync(path.join(dir, 'conventions.json'), 'utf8')); } catch { return {}; }
 }
 
-/** Runs a Python script with JSON on stdin, returns its parsed stdout. */
-export function runPython(script, args, input, { timeoutMs = 120000 } = {}) {
+/**
+ * The tagger kept running (scripts/pdf_tagger_server.py): a fresh Python per file spent ~2-3 s on its
+ * imports alone. One request per line, answered by id; a crash or a stuck request ends the process
+ * and the next call starts another. Unref'd, so a CLI run still exits (a pending request's timer
+ * keeps it alive while it waits).
+ */
+let tagger = null;
+let nextId = 1;
+
+function startTagger() {
+  const child = spawn(PYTHON, ['-I', path.join(ROOT, 'src', 'scripts', 'pdf_tagger_server.py')], { cwd: ROOT, windowsHide: true });
+  const t = { child, pending: new Map(), err: '' };
+  let buf = '';
+  child.stdout.on('data', (d) => {
+    buf += d;
+    let nl;
+    while ((nl = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, nl);
+      buf = buf.slice(nl + 1);
+      let msg;
+      try { msg = JSON.parse(line); } catch { continue; }
+      const p = t.pending.get(msg.id);
+      if (!p) continue;
+      t.pending.delete(msg.id);
+      clearTimeout(p.timer);
+      if (msg.error) p.reject(new Error(`pdf_tagger_server.py: ${msg.error}`));
+      else p.resolve(msg.fields);
+    }
+  });
+  child.stderr.on('data', (d) => { t.err = (t.err + d).slice(-4000); });
+  const fail = (why) => {
+    if (tagger === t) tagger = null;
+    for (const p of t.pending.values()) { clearTimeout(p.timer); p.reject(new Error(why)); }
+    t.pending.clear();
+  };
+  child.on('error', (e) => fail(`pdf_tagger_server.py: ${e.message}`));
+  child.on('close', (code) => fail(`pdf_tagger_server.py stopped (${code}): ${t.err.split('\n').filter(l => l && !/Warning/.test(l)).slice(-3).join(' | ')}`));
+  child.stdin.on('error', () => { /* it stopped: 'close' rejects what is pending */ });
+  child.unref();
+  for (const s of [child.stdin, child.stdout, child.stderr]) s.unref?.();
+  return t;
+}
+
+/** [[field per token] per page] from the model in dir. */
+export function tagWords(dir, pages, { timeoutMs = 120000 } = {}) {
+  tagger ||= startTagger();
+  const t = tagger, id = nextId++;
   return new Promise((resolve, reject) => {
-    const child = spawn(PYTHON, ['-I', path.join(ROOT, 'src', 'scripts', script), ...args], { cwd: ROOT, windowsHide: true });
-    let out = '', err = '';
-    const timer = setTimeout(() => { child.kill(); reject(new Error(`${script}: no answer after ${timeoutMs / 1000} s`)); }, timeoutMs);
-    child.stdout.on('data', (d) => { out += d; });
-    child.stderr.on('data', (d) => { err += d; });
-    child.on('error', (e) => { clearTimeout(timer); reject(e); });
-    child.on('close', (code) => {
-      clearTimeout(timer);
-      if (code !== 0) return reject(new Error(`${script} failed (${code}): ${err.split('\n').filter(l => l && !/Warning/.test(l)).slice(-3).join(' | ')}`));
-      try { resolve(JSON.parse(out)); } catch { reject(new Error(`${script}: not JSON: ${out.slice(0, 200)}`)); }
-    });
-    child.stdin.end(JSON.stringify(input));
+    const timer = setTimeout(() => {
+      t.pending.delete(id);
+      reject(new Error(`pdf_tagger_server.py: no answer after ${timeoutMs / 1000} s`));
+      t.child.kill(); // stuck: the next call starts a new one
+    }, timeoutMs);
+    t.pending.set(id, { resolve, reject, timer });
+    t.child.stdin.write(`${JSON.stringify({ id, dir, pages })}\n`);
   });
 }
 
@@ -62,7 +102,7 @@ export function runPython(script, args, input, { timeoutMs = 120000 } = {}) {
 export async function extractWithModel(pages, dir = activeModelDir()) {
   if (!dir || !fs.existsSync(path.join(dir, 'tagger.joblib'))) throw new Error('No AI model yet: label a few files, then click "Train" on /models.');
   const tagPages = plainTokens(wordsOf(pages));
-  const { fields } = await runPython('pdf_tagger_predict.py', [dir], { pages: tagPages });
+  const fields = await tagWords(dir, tagPages);
   tagPages.forEach((p, i) => p.tokens.forEach((t, k) => { t.field = fields[i][k]; }));
   const rows = assembleRows(tagPages, pages, conventions(dir));
   return {
@@ -88,7 +128,11 @@ export async function extractWithModel(pages, dir = activeModelDir()) {
  */
 export async function readPdfWithModel(filePath, dir = activeModelDir()) {
   const pages = await readPdfText(filePath);
-  if (hasTextLayer(pages)) return { ...(await extractWithModel(pages, dir)), source: 'model', readMode: 'text' };
+  if (hasTextLayer(pages)) {
+    // pages without text beside pages with text (drawn as outlines): OCR'd when the OCR server answers, else left out
+    const all = await ocrEmptyPages(filePath, pages).catch(() => pages);
+    return { ...(await extractWithModel(all, dir)), source: 'model', readMode: all.some(p => p.ocr) ? 'text+ocr' : 'text' };
+  }
   const plan = parseNetlinePdf(await ocrPdfPages(filePath));
   if (plan.published.length + plan.planned.length) return { ...plan, source: 'parser', readMode: 'ocr' };
   const { lines, width, height } = await ocrPdfAsImage(filePath);
@@ -98,7 +142,7 @@ export async function readPdfWithModel(filePath, dir = activeModelDir()) {
 export async function extractImageWithModel(lines, width, height, dir = activeModelDir()) {
   if (!dir || !fs.existsSync(path.join(dir, 'tagger.joblib'))) throw new Error('No AI model yet: label a few files, then click "Train" on /models.');
   const pages = ocrWordPages(lines, width, height);
-  const { fields } = await runPython('pdf_tagger_predict.py', [dir], { pages });
+  const fields = await tagWords(dir, pages);
   pages.forEach((p, i) => p.tokens.forEach((t, k) => { t.field = fields[i][k]; }));
   const rows = assembleRows(pages, [], { ...conventions(dir), ocr: true });
   return {
@@ -122,7 +166,7 @@ export async function extractAcarsWithModel(lines, width, height, dir = activeMo
     throw Object.assign(new Error('The AI model in use was not trained on ACARS pictures: label some under "ACARS files" on /label, then train a new version on /models.'), { status: 409 });
   }
   const pages = acarsWordPages(lines, width, height);
-  const { fields } = await runPython('pdf_tagger_predict.py', [dir], { pages });
+  const fields = await tagWords(dir, pages);
   pages.forEach((p, i) => p.tokens.forEach((t, k) => { t.field = fields[i][k]; }));
   return { format: 'acars-model', fields: assembleAcars(pages) };
 }

@@ -7,10 +7,13 @@
 import { alignRows } from './benchmark.js';
 import { readPdfText, hasTextLayer } from './pdf-text.js';
 import { parseNetlinePdf } from './pdf-roster-parser.js';
-import { ocrPdfPages, ocrPdfAsImage } from './pdf-ocr.js';
+import { ocrPdfPages, ocrPdfAsImage, ocrEmptyPages } from './pdf-ocr.js';
 import { parseRoster, cleanExtractionResult } from './roster-parser.js';
 
 export const PDF_FIELDS = ['date', 'day', 'dc', 'duty', 'registration', 'dep', 'begin', 'takeoff', 'landing', 'end', 'arr', 'ac', 'crew', 'info'];
+/** The fields every roster has (as on pictures): a row right on these is "core right"
+ * even when its extras (info, crew, registration...) are written differently. */
+export const CORE_FIELDS = ['date', 'day', 'duty', 'dep', 'begin', 'end', 'arr'];
 
 const norm = (v) => String(v ?? '').trim().replace(/\s+/g, ' ');
 
@@ -21,7 +24,11 @@ const norm = (v) => String(v ?? '').trim().replace(/\s+/g, ' ');
  */
 export async function parsePdfFile(filePath) {
   const pages = await readPdfText(filePath);
-  if (hasTextLayer(pages)) return { ...parseNetlinePdf(pages), readMode: 'text' };
+  if (hasTextLayer(pages)) {
+    // pages without any text (drawn as outlines) beside pages with text: those read by OCR
+    const all = await ocrEmptyPages(filePath, pages);
+    return { ...parseNetlinePdf(all), readMode: all.some(p => p.ocr) ? 'text+ocr' : 'text' };
+  }
   const plan = { ...parseNetlinePdf(await ocrPdfPages(filePath)), readMode: 'ocr' };
   if (plan.published.length + plan.planned.length) return plan;
   const { lines } = await ocrPdfAsImage(filePath);
@@ -39,10 +46,11 @@ const toPdfRow = (r) => Object.fromEntries(PDF_FIELDS.map(f => [f, String(r?.[f]
 export function compareRows(predRows = [], expRows = []) {
   const perField = Object.fromEntries(PDF_FIELDS.map(f => [f, { matches: 0, total: 0 }]));
   const errors = [];
-  let rowMatches = 0;
+  let rowMatches = 0, coreRowMatches = 0;
   for (const { pred, exp } of alignRows(predRows, expRows)) {
     if (!exp) { errors.push({ kind: 'extra', pred }); continue; }
     let ok = !!pred;
+    if (pred && CORE_FIELDS.every(f => norm(pred[f]) === norm(exp[f]))) coreRowMatches += 1;
     for (const f of PDF_FIELDS) {
       perField[f].total += 1;
       const same = !!pred && norm(pred[f]) === norm(exp[f]);
@@ -52,7 +60,7 @@ export function compareRows(predRows = [], expRows = []) {
     if (!pred) errors.push({ kind: 'missing', exp });
     if (ok) rowMatches += 1;
   }
-  return { rowMatches, rowTotal: expRows.length, predCount: predRows.length, perField, errors };
+  return { rowMatches, coreRowMatches, rowTotal: expRows.length, predCount: predRows.length, perField, errors };
 }
 
 export const PDF_SECTIONS = ['published', 'planned'];

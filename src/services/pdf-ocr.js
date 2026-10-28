@@ -12,8 +12,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { dayFirstDates } from './pdf-text.js';
+import { OCR_SERVER_URL, ocrRequest } from './paddle-ocr.js';
 
-const OCR_SERVER_URL = (process.env.OCR_SERVER_URL || 'http://127.0.0.1:8501').replace(/\/+$/, '');
 const DPI = 200;
 const DAYS = { Mo: 'Mon', Tu: 'Tue', We: 'Wed', Th: 'Thu', Fr: 'Fri', Sa: 'Sat', Su: 'Sun' };
 // Column offsets from the "duty" header in a NetLine block, in units of the
@@ -38,9 +38,7 @@ async function ocrPage(filePath, page, rotate = 0) {
 
 async function ocrPageNow(filePath, page, rotate = 0) {
   const res = await fetch(`${OCR_SERVER_URL}/ocr`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ path: path.resolve(filePath), page, dpi: DPI, ...(rotate ? { rotate } : {}) }),
+    ...ocrRequest(filePath, { page, dpi: DPI, ...(rotate ? { rotate } : {}) }),
     signal: AbortSignal.timeout(Number(process.env.OCR_TIMEOUT_MS || 300000)),
   }).catch((e) => { throw new Error(`The OCR server is not responding (${OCR_SERVER_URL}): ${e.cause?.code || e.message}. This PDF has no text layer, so it needs OCR: npm run ocr:server`); });
   const data = await res.json().catch(() => null);
@@ -183,6 +181,24 @@ export async function ocrPdfPages(filePath) {
   const results = [first];
   for (let p = 2; p <= (first.pageCount || 1); p += 1) results.push(await ocrUpright(filePath, p));
   return dayFirstDates(results.map((data, i) => ocrDataToPage(data, i + 1)));
+}
+
+// A page without text drawing at least this many paths has its text drawn as outlines (Crew Access prints: 839-1366);
+// blank pages, logos and footers draw far fewer (0-387 seen).
+const DRAWN_TEXT_PATHS = 600;
+
+/**
+ * A PDF with a text layer on some pages only (a print whose other pages have their text drawn as outlines): those
+ * pages read by OCR, the others kept (blank pages too). Pages of a text file (CSV, Excel) are never empty this way.
+ */
+export async function ocrEmptyPages(filePath, pages) {
+  const drawn = (p) => !p.items.length && !p.fromTextFile && (p.drawnPaths || 0) >= DRAWN_TEXT_PATHS;
+  if (!pages.some(p => p.items.length) || !pages.some(drawn)) return pages;
+  const out = [];
+  for (const [k, p] of pages.entries()) {
+    out.push(drawn(p) ? dayFirstDates([ocrDataToPage(await ocrUpright(filePath, k + 1), k + 1)])[0] : p);
+  }
+  return out;
 }
 
 /**

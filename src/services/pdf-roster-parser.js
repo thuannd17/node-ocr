@@ -266,7 +266,9 @@ function findBlocks(page) {
   const dates = page.items.filter(i => i.text === 'date');
   if (!dates.length) return null;
   const headerY = Math.min(...dates.map(d => d.y));
-  const row = page.items.filter(i => Math.abs(i.y - headerY) <= 1.5);
+  // the header line's words are not all level: one "date" sat 1.5 pt above the rest (451bf660…, Dec 2024),
+  // and with a 1.5 pt tolerance its plan lost the first two of its three columns; lines are ~9 pt apart
+  const row = page.items.filter(i => Math.abs(i.y - headerY) <= 3);
   if (row.some(i => i.text === 'stops') && row.some(i => i.text === 'req')) {
     const col = { kind: 'ryr' };
     for (const name of RYR_COLS) {
@@ -289,7 +291,9 @@ function findBlocks(page) {
       // between date and duty, as under H in the full layout; times sit nearer dep.
       const dep = row.find(i => i.text === 'dep' && i.x >= x0 - 1 && i.x < x1 - 1);
       if (col['R dep'] == null && dep && col.duty != null && col.arr != null) {
-        Object.assign(col, { kind: 'compact', 'R dep': dep.x, H: col.date + 20, info: Infinity });
+        // C/I sits 24-26 pt right of "date" (24.2 in 451bf660…'s first column); a day ("Sun01") is ~19 pt wide:
+        // duty from date + 20 (columnOf: H + 5)
+        Object.assign(col, { kind: 'compact', 'R dep': dep.x, H: col.date + 15, info: Infinity });
       }
       return { x0, x1, col };
     }),
@@ -2047,7 +2051,13 @@ function parseBrHoursReport(pages) {
       rows.push(r);
       first = first == null ? day : Math.min(first, day);
       last = last == null ? day : Math.max(last, day);
-      for (const [f, c] of [['date', 'Data'], ['duty', cols.some(k => k.name === 'Prog') ? 'Prog' : 'Vôo'], ['route', 'Etapa'], ['begin', 'Partida'], ['end', 'Cheg.'], ['ac', 'Frota'], ['registration', 'Aeronave'], ['info', 'Total']]) mark(r, f, cell[c]);
+      for (const [f, c] of [['date', 'Data'], ['duty', cols.some(k => k.name === 'Prog') ? 'Prog' : 'Vôo'], ['begin', 'Partida'], ['end', 'Cheg.'], ['ac', 'Frota'], ['registration', 'Aeronave']]) mark(r, f, cell[c]);
+      // "RAO GRU" as one item (its words dep and arr) or two
+      const etapa = cell.Etapa || [];
+      if (etapa.length === 2) { mark(r, 'dep', etapa[0]); mark(r, 'arr', etapa[1]); } else mark(r, 'route', etapa);
+      // the cells its info is made of (a flight's hours, another activity's type)
+      const flight = pay && r.dep && r.arr;
+      for (const c of !pay ? ['Total', 'Noturna', 'IFR', 'VFR', 'Simulador', 'Função'] : flight ? ['Total', 'Not.'] : ['Tipo Atividade']) mark(r, 'info', cell[c]);
     }
   }
   const fmt = (t) => { const x = new Date(t); return `${String(x.getUTCDate()).padStart(2, '0')}${MONTHS[x.getUTCMonth()]}${String(x.getUTCFullYear() % 100).padStart(2, '0')}`; };
@@ -2321,6 +2331,10 @@ const isAimsIndividual = (page) => page.items.some(i => /^(Individual (Roster|Re
  * Jeppesen's "Current Roster Report" ("Planning Period: 28JUN2024-11SEP2024") is alike: dates "JUL 24WED", a hotel's values
  * a column right of their headers, then "Crew Onboard" ("Jul 24Wed Y41820 FA: P.YAZMIN CP: J.DOE" -> the flight's crew
  * "[FA - P.YAZMIN][CP - J.DOE]") and "Hotel information" (arrival, departure, name -> the hotel row's info).
+ * Sabre's "Individual Roster" (d7d2281f…) has, after the days: "Crew onboard" ("2021-02-02 XK776 CDB:GYE CC:GDI" -> crew
+ * "[CDB - GYE][CC - GDI]"), "Day notes" ("2021-02-15 cel" -> "[Memo: cel]" on the day's events but C/I and C/O), "Hotel
+ * information" ("11FEB21 - 12FEB21 A MADONETTA FSC") and "Information" ("RS7 = RESERVE" -> "[RS7: RESERVE]" on the rows of
+ * that duty or DD). A hotel printed again on the next day's line, times and all ("HOT FSC 20:15 FSC 10:50"), is the same night.
  */
 function parseAimsIndividual(pages) {
   const trace = startTrace();
@@ -2335,17 +2349,28 @@ function parseAimsIndividual(pages) {
   const dayRow = (t) => { const d = new Date(t); return { date: `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${String(d.getUTCFullYear() % 100).padStart(2, '0')}`, day: WEEKDAYS[d.getUTCDay()] }; };
   const TIME = /^\d{2}:\d{2}$/;
   const min = (t) => (TIME.test(t) ? +t.slice(0, 2) * 60 + +t.slice(3) : null);
-  // the crew of each flight, the hotels (Current Roster Report)
-  const crewOf = new Map(), hotels = [];
+  // the crew of each flight, the hotels (Current Roster Report), the day notes and the legend (Sabre)
+  const crewOf = new Map(), hotels = [], memos = new Map(), legend = new Map();
+  const SECTION = /^(crew onboard|day notes|hotel information|document expire|information)$/i;
+  const titleMon = (t) => t[0] + t.slice(1).toLowerCase();
   let part = '';
   for (const page of pages) {
     for (const line of toLines(page.items, 3)) {
       const text = line.items.map(i => i.text).join(' ').trim();
-      if (/^(Crew Onboard|Hotel information|Document expire)$/.test(text)) { part = text; continue; }
-      const c = part === 'Crew Onboard' && /^([A-Z][a-z]{2}) (\d{2})[A-Z][a-z]{2} (\S+) (.+)$/.exec(text);
-      if (c) crewOf.set(`${+c[2]} ${c[1]}|${c[3]}`, [...c[4].matchAll(/([A-Z]{2,3}): (.+?)(?= [A-Z]{2,3}: |$)/g)].map(m => `[${m[1]} - ${m[2]}]`).join(''));
-      const h = part === 'Hotel information' && /^(\d{2})([A-Z][a-z]{2})(\d{2}) \d{2}[A-Z][a-z]{2}\d{2} (.+)$/.exec(text);
-      if (h) hotels.push({ date: `${+h[1]} ${h[2]} ${h[3]}`, name: h[4] });
+      if (SECTION.test(text)) { part = text.toLowerCase(); continue; }
+      // "Jul 26Fri XX202 FA: P.ANN CP: J.DOE", "2021-02-02 XK776 CDB:GYE CC:GDI" (a flight twice a day: its crews in turn)
+      const c = part === 'crew onboard' && (/^([A-Z][a-z]{2}) (\d{2})[A-Z][a-z]{2} (\S+) (.+)$/.exec(text)
+        || ((m) => m && [m[0], MONTHS[+m[2] - 1], m[3], m[4], m[5]])(/^(\d{4})-(\d{2})-(\d{2}) (\S+) (.+)$/.exec(text)));
+      if (c) {
+        const key = `${+c[2]} ${c[1]}|${c[3]}`;
+        crewOf.set(key, [...(crewOf.get(key) || []), [...c[4].matchAll(/([A-Z]{2,3}): ?(.+?)(?= [A-Z]{2,3}:|$)/g)].map(m => `[${m[1]} - ${m[2]}]`).join('')]);
+      }
+      const h = part === 'hotel information' && /^(\d{2})([A-Za-z]{3})(\d{2})(?: - | )\d{2}[A-Za-z]{3}\d{2} (.+)$/.exec(text);
+      if (h) hotels.push({ date: `${+h[1]} ${titleMon(h[2])} ${h[3]}`, name: h[4] });
+      const n = part === 'day notes' && /^(\d{4})-(\d{2})-(\d{2}) (.+)$/.exec(text);
+      if (n) { const k = `${+n[3]} ${MONTHS[+n[2] - 1]} ${n[1].slice(2)}`; memos.set(k, [...(memos.get(k) || []), n[4]]); }
+      const l = part === 'information' && /^(\S+) = (.+)$/.exec(text);
+      if (l) legend.set(l[1], l[2]);
     }
   }
   let day = null, dutyDay = null;
@@ -2358,7 +2383,7 @@ function parseAimsIndividual(pages) {
     // a value sits from just left of its header to the next one
     const colOf = (x) => [...cols].reverse().find(c => x >= c.x - 6)?.name || cols[0].name;
     for (const line of toLines(page.items.filter(i => i.y > act.y + 4), 3)) {
-      if (/^(Crew Onboard|Hotel information)$/.test(line.items.map(i => i.text).join(' ').trim())) break;
+      if (SECTION.test(line.items.map(i => i.text).join(' ').trim())) break;
       const cell = {};
       for (const it of line.items) (cell[colOf(it.x)] ||= []).push(it);
       const get = (c) => (cell[c] || []).map(i => i.text).join(' ').trim();
@@ -2400,6 +2425,9 @@ function parseAimsIndividual(pages) {
         continue;
       }
       if (day == null || !activity || !/^[A-Z0-9][\w/-]*$/.test(activity)) continue;
+      // the night printed again on the next day's line
+      const last = rows.at(-1);
+      if (last && last.duty === activity && last.t != null && last.t < day && last.dep === get('Orig') && last.begin === std && last.end === `${sta}+1`) continue;
       if (TIME.test(get('C/I'))) {
         dutyDay = day;
         const ci = { section: 'published', ...dayRow(day), duty: 'C/I', dep: get('Orig'), begin: get('C/I'), notes: [] };
@@ -2413,8 +2441,8 @@ function parseAimsIndividual(pages) {
         notes: [/^\d+:\d{2}$/.test(get('BLH')) && /[1-9]/.test(get('BLH')) && `[Block: ${get('BLH')}]`].filter(Boolean),
       };
       const [dd, mm, yy] = r.date.split(' ');
-      r.crew = crewOf.get(`${dd} ${mm}|${activity}`) || '';
-      const hotel = activity === 'HTL' && hotels.find(x => x.date === `${dd} ${mm} ${yy}`);
+      r.crew = crewOf.get(`${dd} ${mm}|${activity}`)?.shift() || '';
+      const hotel = (activity === 'HTL' || /h[oô]tel/i.test(legend.get(activity) || '')) && hotels.find(x => x.date === `${dd} ${mm} ${yy}`);
       if (hotel) r.notes.push(hotel.name);
       rows.push(r);
       for (const [f, c] of [['date', TIME.test(get('C/I')) ? null : 'Date'], ['dc', 'DD'], ['duty', 'Activity'], ['dep', 'Orig'], ['arr', 'Dest'], ['begin', 'STD'], ['end', 'STA'], ['ac', 'AC'], ['info', 'BLH']]) if (c) mark(r, f, cell[c]);
@@ -2433,6 +2461,11 @@ function parseAimsIndividual(pages) {
     }
   }
   const p = `${per[1]}${MONTHS[mon(per[2])]}${per[3]} - ${per[4]}${MONTHS[mon(per[5])]}${per[6]}`;
+  for (const r of rows) {
+    if (r.duty === 'C/I' || r.duty === 'C/O') continue;
+    for (const code of [r.duty, r.dc]) if (code && legend.has(code)) r.notes.push(`[${code}: ${legend.get(code)}]`);
+    for (const memo of memos.get(r.date) || []) r.notes.push(`[Memo: ${memo}]`);
+  }
   const out = rows.map(({ t, ...r }) => outputRow({ ...r, info: r.notes.join(' ') }, zone));
   return { format: 'aims-individual', period: p, notices: [], recognized: out.length > 0, published: out, planned: [], _trace: trace, _rows: rows };
 }
@@ -2831,7 +2864,7 @@ function parseCrewRosterByPeriod(pages) {
   const TIME = /^\d{1,2}:\d{2}$/;
   const TYPES = ['Ground Act.', 'Duty Flight', 'DHD Flt', 'Begin Duty', 'End Duty', 'End Rest', 'HOTAC', 'Hotel', 'Transfert', 'Train', 'Rail', 'Shuttle'];
   const entries = [];
-  let date = null, stop = false;
+  let date = null, dateItem = null, stop = false;
   for (const page of pages) {
     const head = toLines(page.items).find(l => l.items.some(i => i.text === 'Activity') && l.items.some(i => i.text === 'Type'));
     if (!head || stop) continue;
@@ -2857,8 +2890,9 @@ function parseCrewRosterByPeriod(pages) {
       const d = /^([A-Za-zéû]{2,4}\.?) (\d{2})[./](\d{2})[./](\d{4})$/.exec(texts[0] || '');
       if (d) {
         date = dmy(d[2], d[3], d[4]);
+        dateItem = line.items[0];
         const rest = line.items.slice(1);
-        if (rest.length) entries.push({ type: 'Day', date, dateItem: line.items[0], act: rest.map(i => i.text).join(' '), items: { act: rest } });
+        if (rest.length) entries.push({ type: 'Day', date, dateItem, act: rest.map(i => i.text).join(' '), items: { act: rest } });
         continue;
       }
       if (date == null) continue;
@@ -2867,7 +2901,7 @@ function parseCrewRosterByPeriod(pages) {
       const get = (c) => (cell[c] || []).map(i => i.text).join(' ').trim();
       let entry = null;
       if (TYPES.includes(get('type'))) {
-        entry = { type: get('type'), date, from: get('from'), to: get('to'), act: get('act'), fct: get('fct'), ac: get('ac'), blk: get('blk'), training: get('training'),
+        entry = { type: get('type'), date, dateItem, from: get('from'), to: get('to'), act: get('act'), fct: get('fct'), ac: get('ac'), blk: get('blk'), training: get('training'),
           routing: [], remark: [], crew: [], items: { ...cell } };
         entries.push(entry);
       }
@@ -2915,7 +2949,9 @@ function parseCrewRosterByPeriod(pages) {
   const min = (t) => (TIME.test(t) ? +t.split(':')[0] * 60 + +t.split(':')[1] : null);
   let dutyDate = null, lastArr = '', crew = '', pendingCI = null;
   const crewText = (list) => list.map(([role, t]) => { const m = /^©?(.*?)\s*\(([A-Z]{2,4})\)$/.exec(t.replace(/^©/, '')); return m ? `[${role} - ${m[2]} - ${m[1].trim()}]` : `[${role} - ${t.replace(/^©/, '')}]`; }).join('');
+  const starts = []; // [first row index, entry]: which rows an entry made
   for (const e of entries) {
+    starts.push([rows.length, e]);
     const base = { section: 'published', ...dayRow(e.date), notes: [] };
     if (e.type === 'Day') { const r = { ...base, duty: e.act }; rows.push(r); mark(r, 'duty', e.items.act); continue; }
     if (e.type === 'Begin Duty') {
@@ -2973,8 +3009,16 @@ function parseCrewRosterByPeriod(pages) {
       };
       rows.push(r);
       for (const [f, c] of [['duty', 'act'], ['begin', 'from'], ['end', 'to'], ['info', 'routing']]) mark(r, f, e.items[c]);
+      if (vct) mark(r, 'info', (e.items.remark || []).filter(i => /DUTY=/.test(i.text)));
     }
   }
+  // the day line ("Sun 07/04/2024"): the date of the first row on that day (not a C/O of the day before)
+  const dated = new Set();
+  starts.forEach(([i, e], k) => {
+    const day = e.dateItem && dayRow(e.date).date;
+    const r = day && !dated.has(e.dateItem) && rows.slice(i, starts[k + 1]?.[0] ?? rows.length).find(x => x.date === day);
+    if (r) { dated.add(e.dateItem); mark(r, 'date', e.dateItem); }
+  });
   const p = per && `${String(new Date(dmy(per[1], per[2], per[3])).getUTCDate()).padStart(2, '0')}${MONTHS[new Date(dmy(per[1], per[2], per[3])).getUTCMonth()]}${per[3].slice(2)} - ${String(new Date(dmy(per[4], per[5], per[6])).getUTCDate()).padStart(2, '0')}${MONTHS[new Date(dmy(per[4], per[5], per[6])).getUTCMonth()]}${per[6].slice(2)}`;
   const out = rows.map(r => outputRow({ ...r, info: r.notes.join(' ') }, 'Z'));
   return { format: 'crew-roster-by-period', period: p || null, notices: [], recognized: out.length > 0, published: out, planned: [], _trace: trace, _rows: rows };
@@ -3833,13 +3877,16 @@ function parseLogBookReport(pages) {
   };
 }
 
-const DAYBLOCK_DATE_RE = /^[a-záéíóú]{2}\.\s+(\d{1,2})\s+([a-z]{3})\.?$/i; // "mi. 01 dic.", "sá. 04 dic."
-const DAYBLOCK_PERIOD_RE = /Periodo\s+(\d{2})\/(\d{2})\/(\d{4})\s*-\s*(\d{2})\/(\d{2})\/(\d{4})/;
+// "mi. 01 dic.", "sá. 04 dic.", "sa., 01 nov."; in English "Wed 01-May-2024"
+const DAYBLOCK_DATE_RE = /^(?:[a-záéíóú]{2}\.,?\s+(\d{1,2})\s+([a-z]{3})\.?|[A-Z][a-z]{2}\s+(\d{1,2})-([A-Za-z]{3})-\d{4})$/i;
+// "Periodo 01/12/2021 - 01/01/2022", "Period 01/11/2025 - 30/11/2025", "From 2024-05-01 to 2024-05-31"
+const DAYBLOCK_PERIOD_RE = /Periodo?\s+(\d{2})\/(\d{2})\/(\d{4})\s*-\s*(\d{2})\/(\d{2})\/(\d{4})|From (\d{4})-(\d{2})-(\d{2}) to (\d{4})-(\d{2})-(\d{2})/;
+const DAYBLOCK_HEAD_RE = /^(Descr\.\s*C[oó]digo|Code Descr\.|Fleet)$/;
 
-/** The day-block columns of a page: x of each "Descr. Código" header (Air Nostrum style crew schedule). */
+/** The day-block columns of a page: x of each "Descr. Código" header ("Code Descr.", "Fleet" in English; Air Nostrum style crew schedule). */
 function findDayBlockHeader(page) {
-  const heads = page.items.filter(i => /^Descr\.\s*C[oó]digo$/.test(i.text));
-  if (!heads.length || !page.items.some(i => i.text === 'Fecha:') || !page.items.some(i => /^Tripulaci[oó]n$/.test(i.text))) return null;
+  const heads = page.items.filter(i => DAYBLOCK_HEAD_RE.test(i.text));
+  if (!heads.length || !page.items.some(i => /^(Fecha|Date):$/.test(i.text)) || !page.items.some(i => /^(Tripulaci[oó]n|(FA )?Crew)$/.test(i.text))) return null;
   return { y: Math.min(...heads.map(h => h.y)), starts: heads.map(h => h.x).sort((a, b) => a - b) };
 }
 
@@ -3856,39 +3903,56 @@ function findDayBlockHeader(page) {
  * dc DHD); anything else -> duty = its code (VV, LCA8, LBR...), with its times unless "0:00 - 0:00" (all
  * day). No C/O: the schedule prints no sign-off time. Times are UTC; the year comes from the period.
  * The column right of the last day is the legend: no "Fecha:" there, so nothing is read from it.
+ * The English prints are alike: "From 2024-05-01 to 2024-05-31 - UTC time", Code Descr. | Flight | DEP-ARR | STD - STA | Crew,
+ * "Date: Wed 01-May-2024  Signin: 8:40", "Totals : Blq"; or Fleet | Flight "IB 2262" | DEP-ARR | STD - STA | Block T. | FA Crew,
+ * "Date: sa., 01 nov.  Sign in Time: 10:45 LT" (a local time), "Pos flt IB" positioning. A flight of the next day starts with
+ * that day ("lu. 27 may. ATM IB8383 ..."); a simulator's report and release around its times ("SCOI [04:30] 6:00 - 10:00
+ * [11:00]") make C/I and C/O rows.
  */
 function parseDayBlocks(pages) {
   const trace = startTrace();
   const rows = [];
   const per = pages.flatMap(p => p.items).map(i => DAYBLOCK_PERIOD_RE.exec(i.text)).find(Boolean);
-  const from = per ? { m: Number(per[2]) - 1, y: Number(per[3]) } : null;
+  // [day, month, year] of the period's first and last day
+  const ends = per && (per[1] ? [[per[1], per[2], per[3]], [per[4], per[5], per[6]]] : [[per[9], per[8], per[7]], [per[12], per[11], per[10]]]);
+  const from = ends ? { m: Number(ends[0][1]) - 1, y: Number(ends[0][2]) } : null;
   const hhmm = (t) => { const m = /^(\d{1,2}):(\d{2})$/.exec(t); return m ? `${m[1].padStart(2, '0')}${m[2]}` : ''; };
+  const dayOf = (dd, monText) => {
+    const mon = monthIndex(monText.slice(0, 3));
+    if (mon < 0 || !from) return null;
+    const year = from.y + (mon < from.m ? 1 : 0); // "01 ene." after December: the next year
+    return { date: `${Number(dd)} ${MONTHS[mon]} ${String(year).slice(2)}`, day: WEEKDAYS[new Date(year, mon, Number(dd)).getDay()] };
+  };
   const days = [];
   for (const page of pages) {
     const header = findDayBlockHeader(page);
     if (!header) continue;
-    const groupOf = (x) => header.starts.filter(st => x >= st - 6).length - 1;
+    // ("Date:" stands up to ~16 pt left of "Fleet")
+    const groupOf = (x) => header.starts.filter(st => x >= st - 20).length - 1;
     const groups = header.starts.map(() => []);
     for (const it of page.items) if (it.y > header.y + 2 && groupOf(it.x) >= 0) groups[groupOf(it.x)].push(it);
     for (const [g, items] of groups.entries()) {
       const x0 = header.starts[g];
-      // from the header words (Vuelo +42, ORI-DES +72, STD - STA +101, Tripulación +132); values start up to ~5 pt left of them
-      const colOf = (x) => { const dx = x - x0; return dx < 38 ? 'descr' : dx < 67 ? 'code' : dx < 95 ? 'route' : dx < 127 ? 'times' : 'crew'; };
+      // the columns from the header's words (Vuelo / Flight, ORI-DES / DEP-ARR, STD - STA, Block T., Tripulación / Crew); values start up to
+      // ~5 pt left of them
+      const hx = (re, dx) => page.items.find(i => re.test(i.text) && Math.abs(i.y - header.y) < 3 && i.x > x0 && i.x < x0 + 160)?.x ?? x0 + dx;
+      const bounds = [['code', hx(/^(Vuelo|Flight)$/, 42)], ['route', hx(/^(ORI-DES|DEP-ARR)$/, 72)], ['times', hx(/^STD - STA$/, 101)],
+        ['block', hx(/^Block T\.$/, Infinity)], ['crew', hx(/^(Tripulaci[oó]n|(FA )?Crew)$/, 132)]].sort((a, b) => a[1] - b[1]);
+      const colOf = (x) => bounds.reduce((c, [name, bx]) => (x >= bx - 5 ? name : c), 'descr');
       let day = null;
       for (const line of toLines(items, 3)) {
         const texts = line.items.map(i => i.text);
-        const fi = texts.indexOf('Fecha:');
+        const fi = texts.findIndex(t => /^(Fecha|Date):$/.test(t));
         if (fi >= 0) {
           const d = DAYBLOCK_DATE_RE.exec(texts[fi + 1] || '');
-          const mon = d ? monthIndex(d[2]) : -1;
-          if (d && mon >= 0 && from) {
-            const year = from.y + (mon < from.m ? 1 : 0); // "01 ene." after December: the next year
-            const dd = Number(d[1]);
-            day = { date: `${dd} ${MONTHS[mon]} ${String(year).slice(2)}`, day: WEEKDAYS[new Date(year, mon, dd).getDay()], items: [line.items[fi], line.items[fi + 1]], ci: null };
+          const at = d && dayOf(d[1] || d[3], d[2] || d[4]);
+          if (at) {
+            day = { ...at, items: [line.items[fi], line.items[fi + 1]], ci: null };
             days.push(day);
-            const firma = texts.indexOf('Firma:');
+            const firma = texts.findIndex(t => /^(Firma|Signin|Sign in Time):$/.test(t));
             if (firma >= 0 && hhmm(texts[firma + 1] || '')) {
-              day.ci = { section: 'published', date: day.date, day: day.day, duty: 'C/I', begin: hhmm(texts[firma + 1]), notes: [] };
+              // ("10:45 LT": local, not UTC like the rest)
+              day.ci = { section: 'published', date: day.date, day: day.day, duty: 'C/I', begin: `${texts[firma + 2] === 'LT' ? '!' : ''}${hhmm(texts[firma + 1])}`, notes: [] };
               rows.push(day.ci);
               mark(day.ci, 'ci', [line.items[firma + 1]]);
             }
@@ -3896,30 +3960,41 @@ function parseDayBlocks(pages) {
           continue;
         }
         if (!day) continue;
-        if (texts.some(t => /^Totales/.test(t))) continue;
+        if (texts.some(t => /^Total(es|s)?\b/.test(t))) continue;
         const cell = {};
         for (const it of line.items) (cell[colOf(it.x)] ||= []).push(it);
         const get = (c) => (cell[c] || []).map(i => i.text).join(' ').replace(/\s+/g, ' ').trim();
-        const code = get('code');
-        if (!code) continue;
-        const times = /^(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})$/.exec(get('times'));
+        const code = get('code').replace(/^([A-Z0-9]{2}) (\d{1,4})$/, '$1$2'); // "IB 2262"
+        if (!code || code === '-' || /\s/.test(code)) continue; // (not the legend's sentences beside the last days)
+        // a simulator's report and release in brackets: "[04:30] 6:00 - 10:00 [11:00]"
+        const brackets = line.items.filter(i => /^\[\d{1,2}:\d{2}\]$/.test(i.text));
+        const timeText = (cell.times || []).filter(i => !brackets.includes(i)).map(i => i.text).join(' ');
+        const times = /^(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})$/.exec(timeText.trim());
         const [begin, end] = times ? [hhmm(times[1]), hhmm(times[2])] : ['', ''];
-        const route = /^([A-Z]{3})-([A-Z]{3})$/.exec(get('route'));
+        const route = /^([A-Z]{3})[A-Z0-9]?-([A-Z]{3})[A-Z0-9]?$/.exec(get('route')); // ("NCE-MAD1", "MADS-CMN": a terminal after the code)
         const crew = get('crew');
         const flight = !!route;
         const allDay = begin === '0000' && end === '0000';
+        // a flight of the next day: "lu. 27 may. ATM"
+        const next = /^[a-záéíóú]{2}\.,?\s+(\d{1,2})\s+([a-z]{3})\.\s*(.*)$/i.exec(get('descr'));
+        const when = (next && dayOf(next[1], next[2])) || day;
+        const descr = next ? next[3] : get('descr');
+        const dh = /^(Situaci[oó]n|Pos flt\b)/i.test(crew);
+        const [rep, rel] = brackets.map(i => hhmm(i.text.slice(1, -1)));
+        if (rep) { const c = { section: 'published', date: when.date, day: when.day, duty: 'C/I', begin: rep, notes: [] }; rows.push(c); mark(c, 'ci', brackets[0]); }
         const row = {
-          section: 'published', date: day.date, day: day.day, duty: code, notes: [],
+          section: 'published', date: when.date, day: when.day, duty: code, notes: [],
           dep: route ? route[1] : '', arr: route ? route[2] : '',
           begin: allDay ? '' : begin, end: allDay ? '' : `${end}${end && begin && end < begin ? '+1' : ''}`,
-          ac: flight && /^[A-Z0-9]{3}$/.test(get('descr')) ? get('descr') : '',
-          dc: flight && /^Situaci[oó]n$/i.test(crew) ? 'DHD' : '',
-          crew: flight && !/^Situaci[oó]n$/i.test(crew) ? crew : '',
+          ac: flight && /^[A-Z0-9]{3}$/.test(descr) ? descr : '',
+          dc: flight && dh ? 'DHD' : '',
+          crew: flight && !dh ? crew : '',
         };
         rows.push(row);
+        if (rel) { const c = { section: 'published', date: when.date, day: when.day, duty: 'C/O', end: `${rel}${rel < (rep || begin) ? '+1' : ''}`, notes: [] }; rows.push(c); mark(c, 'co', brackets[1]); }
         if (day.ci && !day.ci.dep && row.dep) day.ci.dep = row.dep;
         if (day.items) { mark(row, 'date', day.items); day.items = null; }
-        for (const [f, c] of [['duty', 'code'], ['dep', 'route'], ['arr', 'route'], ['begin', 'times'], ['end', 'times'], ['ac', 'descr'], ['crew', 'crew']]) mark(row, f, cell[c]);
+        for (const [f, c] of [['duty', 'code'], ['dep', 'route'], ['arr', 'route'], ['begin', 'times'], ['end', 'times'], ['ac', 'descr'], ['crew', 'crew']]) mark(row, f, cell[c]?.filter(i => !brackets.includes(i)));
       }
     }
   }
@@ -3927,9 +4002,9 @@ function parseDayBlocks(pages) {
   const t = (r) => { const [d, mon, yy] = r.date.split(' '); return Date.UTC(2000 + Number(yy), MONTHS.indexOf(mon), Number(d)); };
   const ordered = rows.map((r, i) => [r, i]).sort((a, b) => t(a[0]) - t(b[0]) || a[1] - b[1]).map(([r]) => r);
   const out = ordered.map(r => outputRow({ ...r, info: r.notes.join(' ') }));
-  const pad = (d, m, y) => `${d}${MONTHS[Number(m) - 1]}${y.slice(2)}`;
+  const pad = ([d, m, y]) => `${d}${MONTHS[Number(m) - 1]}${y.slice(2)}`;
   return {
-    format: 'day-blocks', period: per ? `${pad(per[1], per[2], per[3])} - ${pad(per[4], per[5], per[6])}` : null,
+    format: 'day-blocks', period: ends ? `${pad(ends[0])} - ${pad(ends[1])}` : null,
     notices: [], recognized: out.length > 0, published: out, planned: [], _trace: trace, _rows: ordered,
   };
 }
@@ -5276,6 +5351,3239 @@ export function parseNetlinePdf(pages, { trace = false } = {}) {
   }
 }
 
+/** A piece of an item ("RPT:03:40" -> its "03:40"), traced back to the item it was cut from. */
+const pieceOf = (it, off, len) => ({ ...it, text: it.text.slice(off, off + len), _src: it._src || it, _off: (it._off || 0) + off });
+
+const QR_DAY_RE = /^(\d{2})([A-Z][a-z]{2})$/;
+const isQatarScheduleReport = (page) => page.items.some(i => i.text === 'Crew Schedule Report')
+  && page.items.some(i => /^Period: \d{1,2}-[A-Z][a-z]{2}-\d{4} - \d{1,2}-[A-Z][a-z]{2}-\d{4}/.test(i.text))
+  && page.items.filter(i => QR_DAY_RE.test(i.text)).length >= 7;
+
+/**
+ * "Crew Schedule Report" (Qatar Airways; "Period: 01-Feb-2025 - 28-Feb-2025 | Published"/"Actual",
+ * "All times are in UTC except for OFF & Leave"): a column per day ("01Feb" over "Sat"), its events stacked
+ * one item a line:
+ *   "RPT:03:40" the report (C/I; "24-JAN*" on the next line: reported the day before), then per flight
+ *   number, dep, STD, arr, STA ("14:05(+1)"), and in any order the aircraft "(351)" and indicators ("PIC",
+ *   "PA,elt", "IR", "DH" = deadheading -> dc DH); a duty with times ("SBY" DOH 04:00 10:00, "77LP", "PSBY");
+ *   a day code with its station ("OFF" DOH, "DOFF" "(LGW)", "LVE", "REST").
+ * No C/O is printed. The daily "DH:"/"BH:" lines under the grid end it. Codes of the ABBREVIATION list go to
+ * info ("[OFF: Day Off]", "[PIC: Pilot in Command]"); HOTEL DETAILS give a hotel row (HT) per stay date.
+ */
+function parseQatarScheduleReport(pages) {
+  const trace = startTrace();
+  const rows = [];
+  const all = pages.flatMap(p => p.items);
+  const per = all.map(i => /^Period: (\d{1,2})-([A-Z][a-z]{2})-(\d{4}) - (\d{1,2})-([A-Z][a-z]{2})-(\d{4})/.exec(i.text)).find(Boolean);
+  per[1] = per[1].padStart(2, '0');
+  per[4] = per[4].padStart(2, '0');
+  const y0 = +per[3], m0 = monthIndex(per[2]);
+  const ymdOf = (dd, mon) => { const m = monthIndex(mon); return Date.UTC(y0 + (m < m0 - 6 ? 1 : 0), m, +dd); };
+  const dayRow = (t) => { const d = new Date(t); return { date: `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${String(d.getUTCFullYear() % 100).padStart(2, '0')}`, day: WEEKDAYS[d.getUTCDay()], t }; };
+  // ABBREVIATION: "CODE" | "Description", under ACTIVITY CODE/INDICATOR
+  const legend = new Map();
+  for (const page of pages) {
+    const head = page.items.find(i => i.text === 'ACTIVITY CODE/INDICATOR');
+    const desc = head && page.items.find(i => i.text === 'DESCRIPTION' && Math.abs(i.y - head.y) < 3);
+    if (!desc) continue;
+    const codes = page.items.filter(i => i.y > head.y + 3 && Math.abs(i.x - head.x) < 6);
+    for (const c of codes) {
+      const d = page.items.filter(i => Math.abs(i.y - c.y) < 2 && Math.abs(i.x - desc.x) < 6).map(i => i.text).join(' ');
+      if (d) legend.set(c.text, d);
+    }
+  }
+  const legendNote = (code) => {
+    const d = legend.get(code) ?? legend.get(code.toUpperCase());
+    return d ? `[${code}: ${d}]` : `[${code}]`;
+  };
+  const isTime = (t) => /^\d{2}:\d{2}(\(\+\d\))?$/.test(t || '');
+  const isStation = (t) => /^[A-Z]{3}$/.test(t || '');
+  const time = (t) => t.replace(/\((\+\d)\)$/, '$1');
+  for (const page of pages) {
+    const days = page.items.filter(i => QR_DAY_RE.test(i.text) && MONTHS.includes(QR_DAY_RE.exec(i.text)[2]));
+    if (days.length < 7) continue;
+    const top = days[0].y;
+    const cols = days.filter(i => Math.abs(i.y - top) < 3).sort((a, b) => a.x - b.x).map(i => ({ item: i, cx: i.x + (i.w || 0) / 2 }));
+    const pitch = (cols.at(-1).cx - cols[0].cx) / Math.max(1, cols.length - 1);
+    const stop = page.items.find(i => /^DH:/.test(i.text) && i.y > top)?.y ?? page.height;
+    const grid = page.items.filter(i => i.y > top + 5 && i.y < stop - 2 && !WEEKDAYS.includes(i.text));
+    for (const col of cols) {
+      const [, dd, mon] = QR_DAY_RE.exec(col.item.text);
+      const today = ymdOf(dd, mon);
+      const items = grid.filter(i => Math.abs(i.x + (i.w || 0) / 2 - col.cx) < pitch / 2).sort((a, b) => a.y - b.y || a.x - b.x);
+      let last = null, firstOfDay = true;
+      const add = (r, marks, t = today) => {
+        const row = { section: 'published', ...dayRow(t), notes: [], ...r };
+        rows.push(row);
+        for (const [f, it] of marks) if (it) mark(row, f, it);
+        if (firstOfDay) { mark(row, 'date', col.item); firstOfDay = false; }
+        return row;
+      };
+      for (let k = 0; k < items.length; k++) {
+        const it = items[k], tx = it.text, nx = items[k + 1]?.text;
+        // "RPT:03:40", or "RPT:" with its time on the next line
+        const rpt = /^RPT:(\d{2}:\d{2})?$/.exec(tx);
+        if (rpt && (rpt[1] || isTime(nx))) {
+          const timeItem = rpt[1] ? pieceOf(it, 4, 5) : items[++k];
+          // "24-JAN*" under it: reported the day before
+          const prev = /^(\d{2})-([A-Z]{3})\*$/.exec(items[k + 1]?.text || '');
+          const t = prev ? ymdOf(prev[1], prev[2]) : today;
+          last = add({ duty: 'C/I', begin: timeItem.text }, [['ci', timeItem]], t);
+          last.ci = true;
+          if (prev) { mark(last, 'date', items[k + 1]); k += 1; }
+          continue;
+        }
+        // an event: a code with its station
+        const codeLike = /^[A-Z0-9]{2,6}$/.test(tx);
+        if (codeLike && (isStation(nx) || /^\([A-Z]{3}\)$/.test(nx || ''))) {
+          const dep = items[k + 1];
+          let j = k + 2;
+          const t1 = isTime(items[j]?.text) ? items[j++] : null;
+          let arr = null, t2 = null;
+          if (t1 && isStation(items[j]?.text) && isTime(items[j + 1]?.text)) { arr = items[j++]; t2 = items[j++]; }
+          else if (t1 && isTime(items[j]?.text)) t2 = items[j++];
+          const ci = rows.at(-1)?.ci ? rows.at(-1) : null;
+          if (ci && !ci.dep) { ci.dep = dep.text; ci.ci = false; }
+          last = add({ duty: tx, dep: dep.text.replace(/[()]/g, ''), arr: arr?.text || '', begin: t1 ? time(t1.text) : '', end: t2 ? time(t2.text) : '' },
+            [['duty', it], ['dep', dep], ['begin', t1], ['arr', arr], ['end', t2]]);
+          if (!t1 && legend.has(tx)) last.notes.push(legendNote(tx));
+          else if (t1 && !arr && legend.has(tx)) last.notes.push(legendNote(tx));
+          k = j - 1;
+          continue;
+        }
+        if (codeLike && !last) { last = add({ duty: tx }, [['duty', it]]); if (legend.has(tx)) last.notes.push(legendNote(tx)); continue; }
+        if (!last || last.duty === 'C/I') continue;
+        const ac = /^\(([A-Z0-9]{3,4})\)$/.exec(tx);
+        if (ac) { last.ac = ac[1]; mark(last, 'ac', pieceOf(it, 1, ac[1].length)); continue; }
+        // indicators: "PIC", "PA,elt", "DH"
+        if (/^[A-Za-z]{1,5}(,[A-Za-z]{1,5})*$/.test(tx)) {
+          for (const c of tx.split(',')) {
+            if (c === 'DH') last.dc = 'DH';
+            else last.notes.push(legendNote(c));
+          }
+          mark(last, 'info', it);
+        }
+      }
+    }
+  }
+  // HOTEL DETAILS: STAY DATE | LOCATION | HOTEL NAME | HOTEL ADDRESS (may wrap) | CONTACT NAME | TELEPHONE
+  for (const page of pages) {
+    const head = page.items.find(i => i.text === 'STAY DATE');
+    if (!head) continue;
+    // cells are centred under their headers: an item goes to the header nearest its centre
+    const NAMES = ['STAY DATE', 'LOCATION', 'HOTEL NAME', 'HOTEL ADDRESS', 'CONTACT NAME', 'TELEPHONE'];
+    const heads = NAMES.map(t => page.items.find(i => i.text === t && Math.abs(i.y - head.y) < 3));
+    if (heads.some(h => !h)) continue;
+    const centre = (i) => i.x + (i.w || 0) / 2;
+    const abbrX = page.items.find(i => i.text === 'ACTIVITY CODE/INDICATOR' && Math.abs(i.y - head.y) < 3)?.x ?? Infinity;
+    const colOf = (i) => heads.reduce((b, h, k) => (Math.abs(centre(h) - centre(i)) < Math.abs(centre(heads[b]) - centre(i)) ? k : b), 0);
+    const starts = page.items.filter(i => i.y > head.y + 3 && i.x < abbrX - 5 && /^\d{2}-[A-Z]{3}-\d{4}$/.test(i.text) && colOf(i) === 0).sort((a, b) => a.y - b.y);
+    const seen = new Set();
+    starts.forEach((s, n) => {
+      const yEnd = starts[n + 1]?.y ?? s.y + 30;
+      const cellItems = (k) => page.items.filter(i => i.y > s.y - 2 && i.y < yEnd - 2 && i.x < abbrX - 5 && i !== s && colOf(i) === k);
+      const cell = (k) => cellItems(k).map(i => i.text).join(' ');
+      const loc = cell(1);
+      const name = cell(2);
+      const addr = cell(3).replace(/[，‚]/g, ',').replace(/(\s*,)+/g, ',').replace(/[\s,]+$/, '');
+      const tel = cell(5);
+      const key = `${s.text}|${loc}|${name}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      const [dd, mon, yyyy] = s.text.split('-');
+      const t = Date.UTC(+yyyy, monthIndex(mon[0] + mon.slice(1).toLowerCase()), +dd);
+      const at = rows.findIndex(r => r.t > t);
+      const row = { section: 'published', ...dayRow(t), duty: 'H', dep: loc, notes: [[name, addr, tel && `Tel ${tel}`].filter(Boolean).join(', ')] };
+      rows.splice(at < 0 ? rows.length : at, 0, row);
+      mark(row, 'date', s);
+      mark(row, 'dep', cellItems(1));
+      mark(row, 'info', [...cellItems(2), ...cellItems(3), ...cellItems(5)]);
+    });
+  }
+  const p = `${per[1]}${MONTHS[monthIndex(per[2])]}${per[3].slice(2)} - ${per[4]}${MONTHS[monthIndex(per[5])]}${per[6].slice(2)}`;
+  const out = rows.map(({ t, ci, ...r }) => outputRow({ ...r, info: r.notes.join(' ') }, 'Z'));
+  return { format: 'qatar-schedule-report', period: p, notices: [], recognized: out.length > 0, published: out, planned: [], _trace: trace, _rows: rows };
+}
+
+const SWISS_COLS = {
+  Date: 'date', Report: 'report', Tags: 'tags', Pos: 'pos', IFF: 'iff', Activity: 'activity', From: 'from', To: 'to', Dep: 'dep', Arr: 'arr', 'A/C': 'ac', A: 'ac',
+  Layover: 'layover', 'LN*': 'ln', LN: 'ln', Flt: 'flt', Fit: 'flt', DP: 'dp',
+  // Widerøe: Date | Check In | Training | Pos | Activity | From | To | Start | End | Check Out | A/C | Layover | Trip ID
+  'Check In': 'report', Training: 'tags', Start: 'dep', End: 'arr', 'Check Out': 'co', 'Trip ID': 'trip',
+  // Lufthansa CityLine "Released Roster": Date | Report (UTC) | Tags | Pos | Activity | From | To | Start (UTC) | End (UTC) | A/C | Layover | Trip ID
+  'Report (UTC)': 'report', 'Start (UTC)': 'dep', 'End (UTC)': 'arr',
+};
+const isSwissRoster = (page) => {
+  const words = page.items.flatMap(wordsIn).map(w => w.text);
+  return words.some(w => /^[Rr]oster$/.test(w)) && words.some(w => /^([Pp]ublished|Released)$/.test(w)) && ['Activity', 'Layover'].every(t => words.includes(t))
+    && (words.includes('Report') || page.items.some(i => i.text === 'Check In')) && !page.items.some(i => /Blocktime/.test(i.text));
+};
+
+/**
+ * Swiss "Published roster" / "Historical published roster" ("Period: September 2024", "All times local"), a line per event:
+ *   Date | Report | Tags | Pos | IFF | Activity | From | To | Dep | Arr | A/C | Layover / Rest at HB | LN* | Flt hrs 28d/12m | DP hrs 7d/28d
+ *   "03 Tue" 15:30 | CM | LX2032 ZRH MAD 16:35 19:00 223 ... ; following legs of the day without a date
+ *   "05 Fri" 16:35 RP V LX180 ZRH 18:00 77W  +  "06 Sat" RP BKK 10:45 49:00 (a flight arriving on a later day: end "+1")
+ *   "07 Sun" "Layover: BKK" (a hotel row), "14 Sat" LTFD, "16 Mon" SBY ZRH 05:00 17:00 (day codes, with times or not).
+ * Prints come with whole cells, a word per item, or a character run per item ("07" ":" "28", lines a few points apart):
+ * cells are rebuilt from the header words' x. Report -> a C/I row; Pos DH -> dc DH; IFF -> "[IFF: V]"; Layover / Rest
+ * at HB (time to the next duty) on a duty's last leg -> "[Rest: 16:00]"; LN* -> "[Local nights: 3]". The cumulated
+ * flight / duty hours are not read. No C/O is printed. Days run on into the next month.
+ * Widerøe prints the same roster as Date | Check In | Training | Pos | Activity | From | To | Start | End | Check Out |
+ * A/C | Layover | Trip ID ("Planning period: November 2025"): Check In / Out give the C/I and C/O rows, Layover
+ * "[Layover: 16:50]"; the totals under the days ("01Jan-31Jan2026", "Work Days", "Block time") are not read.
+ */
+function parseSwissRoster(pages) {
+  const trace = startTrace();
+  const rows = [];
+  const all = pages.flatMap(p => p.items.flatMap(wordsIn));
+  const periodWord = all.find(w => /^[Pp]eriod:?$/.test(w.text));
+  const near = periodWord ? all.filter(w => Math.abs(w.y - periodWord.y) < 8).map(w => w.text) : [];
+  const monName = near.find(t => monthIndex(t.slice(0, 3)) >= 0 && /^[A-Za-z]{3,}$/.test(t));
+  const yearTxt = near.find(t => /^\d{4}$/.test(t));
+  if (!monName || !yearTxt) return { format: 'swiss-roster', period: null, notices: [], recognized: false, published: [], planned: [], _trace: trace, _rows: [] };
+  let month = monthIndex(monName.slice(0, 3)), year = +yearTxt, lastDay = null;
+  const dayRow = (t) => { const d = new Date(t); return { date: `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${String(d.getUTCFullYear() % 100).padStart(2, '0')}`, day: WEEKDAYS[d.getUTCDay()], t }; };
+  let today = null, pendingCi = null, openFlight = null, firstMark = null;
+  const add = (r, marks, t = today) => {
+    const row = { section: 'published', ...dayRow(t), notes: [], ...r };
+    rows.push(row);
+    for (const [f, it] of marks) if (it && [].concat(it).length) mark(row, f, it);
+    if (firstMark && t === today) { mark(row, 'date', firstMark); firstMark = null; }
+    return row;
+  };
+  for (const page of pages) {
+    const words = page.items.flatMap(wordsIn);
+    const dateHead = words.find(w => w.text === 'Date' && words.some(o => o.text === 'Activity' && Math.abs(o.y - w.y) < 8));
+    if (!dateHead) continue;
+    // header words over up to three lines
+    const band = (i) => i.y > dateHead.y - 4 && i.y < dateHead.y + 12;
+    const heads = [
+      ...page.items.filter(i => band(i) && / /.test(i.text) && SWISS_COLS[i.text]).map(i => ({ col: SWISS_COLS[i.text], x: i.x })), // "Check In"
+      ...words.filter(w => band(w) && SWISS_COLS[w.text]).map(w => ({ col: SWISS_COLS[w.text], x: w.x - (w._off ? 8 : 0) })), // a word of a run ("Activity From To"): x from an average char width
+    ];
+    const cols = [...new Map(heads.sort((a, b) => a.x - b.x).map(h => [h.col, h])).values()].sort((a, b) => a.x - b.x);
+    const colOf = (w) => cols.reduce((c, h) => (h.x <= w.x + 4 ? h.col : c), 'date');
+    // the days start at the first "01" / "01 Mon" under Date (the header runs over one to three lines)
+    const firstDay = words.filter(w => w.y > dateHead.y + 3 && Math.abs(w.x - dateHead.x) < 6 && /^\d{2}$/.test(w.text)).sort((a, b) => a.y - b.y)[0];
+    if (!firstDay) continue;
+    const body = words.filter(w => w.y > firstDay.y - 3).sort((a, b) => a.y - b.y);
+    // the notes / totals under the days: "(*): Local nights", Widerøe's "01Jan-31Jan2026" | "Work Days" | "Block time"
+    const stopY = body.find(w => /^\(\*\):?$/.test(w.text) || w.text === 'Created' || /^\d{2}[A-Z][a-z]{2}-\d{2}[A-Z][a-z]{2}\d{4}$/.test(w.text)
+      || (w.text === 'Work' && Math.abs(w.x - dateHead.x) < 6))?.y ?? Infinity;
+    const layoverTag = words.some(w => band(w) && w.text === 'Rest') ? 'Rest' : 'Layover'; // Swiss "Layover / Rest at HB"; Widerøe, CityLine "Layover"
+    // lines: items less than 3.5pt below the one before belong to the same line (split prints)
+    const lines = [];
+    for (const w of body.filter(i => i.y < stopY - 1)) {
+      const l = lines.at(-1);
+      if (l && w.y - l.yLast <= 3.5) { l.items.push(w); l.yLast = w.y; } else lines.push({ items: [w], yLast: w.y });
+    }
+    for (const line of lines) {
+      const cells = {};
+      const its = {};
+      const sorted = [...line.items].sort((a, b) => a.x - b.x);
+      for (const w of sorted) {
+        const c = /^Layover:$/.test(w.text) || its.layoverAt ? 'layoverAt' : colOf(w); // "Layover: BKK" runs over the columns
+        (its[c] ||= []).push(w);
+      }
+      for (const [c, list] of Object.entries(its)) {
+        let s = '', end = null;
+        for (const w of list) { s += (end != null && w.x - end > 1.5 ? ' ' : '') + w.text; end = w.x + (w.w || 0); }
+        cells[c] = s.trim();
+      }
+      // the date cell: "03 Tue" (weekday may be its own word)
+      const dm = /^(\d{2})\s*(Mon|Tue|Wed|Thu|Fri|Sat|Sun)?/.exec(cells.date || '');
+      let report = cells.date && /(\d{2}:\d{2})$/.exec(cells.date)?.[1]; // "08 Mon 12:15" printed as one item
+      if (dm) {
+        const n = +dm[1];
+        if (lastDay == null && dm[2]) {
+          // the first day may be the month before ("31 Sat" in a September roster)
+          const prev = new Date(Date.UTC(year, month - 1, n));
+          if (WEEKDAYS[new Date(Date.UTC(year, month, n)).getUTCDay()] !== dm[2] && WEEKDAYS[prev.getUTCDay()] === dm[2]) { month = prev.getUTCMonth(); year = prev.getUTCFullYear(); }
+        } else if (lastDay != null && n < lastDay) { month += 1; if (month > 11) { month = 0; year += 1; } }
+        lastDay = n;
+        today = Date.UTC(year, month, n);
+        firstMark = its.date;
+      }
+      if (today == null) continue;
+      report ||= /^\d{2}:\d{2}$/.test(cells.report || '') ? cells.report : null;
+      if (report) {
+        pendingCi = add({ duty: 'C/I', begin: report }, [['ci', its.report || its.date?.filter(w => /:/.test(w.text))]]);
+      }
+      const act = cells.activity;
+      const time = (s) => (/^\d{2}:\d{2}$/.test(s || '') ? s : '');
+      const notes = [];
+      if (cells.iff) notes.push(`[IFF: ${cells.iff}]`);
+      if (/^\d+:\d{2}$/.test(cells.layover || '')) notes.push(`[${layoverTag}: ${cells.layover.padStart(5, '0')}]`);
+      if (/^\d+$/.test(cells.ln || '')) notes.push(`[Local nights: ${cells.ln}]`);
+      if (cells.layoverAt) {
+        const at = /([A-Z]{3})$/.exec(cells.layoverAt);
+        if (at) add({ duty: 'H', dep: at[1] }, [['dep', its.layoverAt.filter(w => w.text.endsWith(at[1]))]]);
+        continue;
+      }
+      // the arrival of yesterday's flight printed with its number again ("1654" "OTP" "23:05", no From)
+      const sameOpen = act && openFlight && !cells.from && act.replace(/\s/g, '') === openFlight.duty;
+      if (act && !sameOpen) {
+        const isFlight = /^[A-Z0-9]{2}\s?\d{1,4}[A-Z]?$/.test(act) && (cells.to || time(cells.arr) || openFlight == null);
+        const r = add({
+          duty: act.replace(/\s/g, ''), dc: cells.pos === 'DH' ? 'DH' : '', dep: cells.from || '', arr: cells.to || '',
+          begin: time(cells.dep), end: time(cells.arr), ac: cells.ac?.replace(/\s/g, '') || '', notes,
+        }, [['duty', its.activity], ['dep', its.from], ['arr', its.to], ['begin', its.dep], ['end', its.arr], ['ac', its.ac], ['info', [...(its.iff || []), ...(its.layover || []), ...(its.ln || [])]]]);
+        if (pendingCi) { if (!pendingCi.dep) pendingCi.dep = r.dep; pendingCi = null; }
+        if (isFlight) openFlight = r.arr && r.end ? null : r;
+        if (time(cells.co)) add({ duty: 'C/O', arr: r.arr, end: cells.co }, [['co', its.co]]);
+        continue;
+      }
+      if (openFlight && (cells.to || time(cells.arr))) {
+        // the arrival of a flight from an earlier day
+        const days = Math.round((today - openFlight.t) / 86400000);
+        openFlight.arr = cells.to || openFlight.arr;
+        openFlight.end = time(cells.arr) + (days > 0 ? `+${days}` : '');
+        openFlight.notes.push(...notes);
+        for (const [f, it] of [['arr', its.to], ['end', its.arr], ['info', [...(its.layover || []), ...(its.ln || [])]]]) if (it?.length) mark(openFlight, f, it);
+        openFlight = null;
+      }
+    }
+  }
+  // "Report (UTC)", "Start (UTC)" (Lufthansa CityLine "Released Roster"): UTC; else local
+  const zone = pages.some(p => p.items.some(i => /^(Report|Start|End) \(UTC\)$/.test(i.text))) ? 'Z' : 'L';
+  const p = `01${MONTHS[monthIndex(monName.slice(0, 3))]}${yearTxt.slice(2)}`;
+  const out = rows.map(({ t, ...r }) => outputRow({ ...r, info: r.notes.join(' ') }, zone));
+  return { format: 'swiss-roster', period: `${p} - ${new Date(Date.UTC(+yearTxt, monthIndex(monName.slice(0, 3)) + 1, 0)).getUTCDate()}${p.slice(2)}`, notices: [], recognized: out.length > 0, published: out, planned: [], _trace: trace, _rows: rows };
+}
+
+/** French month names, as printed ("nov.", "AOÛT", "févr.") -> 0..11, else -1. */
+const frenchMonth = (t) => {
+  const s = String(t).toLowerCase().replace(/\.$/, '').normalize('NFD').replace(/[̀-ͯ]/g, '');
+  const i = ['janv', 'fevr', 'mars', 'avr', 'mai', 'juin', 'juil', 'aout', 'sept', 'oct', 'nov', 'dec'].findIndex(m => s.startsWith(m));
+  return i >= 0 ? i : (s === 'fev' ? 1 : s === 'jan' ? 0 : -1);
+};
+const PN_COLS = { Date: 'date', Acti: 'acti', Depa: 'dep', Arri: 'arr', CheckIn: 'ci', Hdep: 'begin', Harr: 'end', CheckOut: 'co', BLH: 'blh', HDV: 'blh', TSV: 'tsv', TS: 'ts',
+  'TSV Max': 'tsvMax', TpsEqF: 'tpsEqF', StdBy: 'stdBy', 'Rep. avant': 'repAvant', 'Rep. après': 'repApres', Flags: 'flags', Fonc: 'fonc', 'Part.*': 'part' };
+const isPlanningNavigant = (page) => page.items.some(i => i.text === 'Planning navigant') && page.items.some(i => i.text === 'Acti') && page.items.some(i => i.text === 'CheckIn');
+
+/**
+ * Air Corsica "Planning navigant" ("NOV. 2021", "Horaires en GMT"): a line per activity under
+ *   Date | Acti | Depa | Arri | CheckIn | Hdep | Harr | CheckOut | BLH | TSV | TS | TSV Max | TpsEqF | StdBy | Rep. avant | Rep. après | Flags | Fonc | Part.*
+ * The day ("lun." over "01 nov.") is centred on its activities; an activity's text wraps over the lines around its
+ * own ("TXI - ORY GARE DU" / "NOR"), so do Rep. après ("12:00" above the duty's last line, "02/11 09:10" under it).
+ *   "FLT - XK154 - 320" a flight (duty XK154, aircraft 320, "[Block: 00:48]"); "MEP - XK770" positioning (dc MEP);
+ *   "TXI - Taxi", "TRAIN - to liverpool", "P-O - PAR ORY VL" ground transport ("[TXI: Taxi]"); "HOT - <name> - HOTEL" with ">"
+ *   a hotel row (HT, its name in info; the "<" line of the stay's last day is left out); "JL", "SOP", "BL - BLANC" codes
+ *   (the "Liste des codes activités" page gives a code's meaning: "[TXI: Taxi]").
+ * CheckIn -> a C/I row before its line, CheckOut -> a C/O row after it with the duty's TSV / TS / TSV Max and Rep. après
+ * ("[Duty: 06:50] [TS: 07:10] [TSV Max: 11:00] [Rest: 12:00]"). Lines with only TpsEqF / StdBy (daily totals) are not read.
+ * Air Tahiti Nui prints it "Horaires en LOC Escale" ("lun. 01" as the day, HDV for BLH, no CheckOut): local times with the UTC
+ * under them ("17:35 Z", "04:55 Z (+1)") -> "17:35 Z / 10:35 L"; a flight number alone ("TN008"); a flight landing the next day
+ * is "TN008 LAX >" then "TN008 < CDG" with the arrival: one row, end "+1".
+ */
+function parsePlanningNavigant(pages) {
+  const trace = startTrace();
+  const rows = [];
+  const all = pages.flatMap(p => p.items);
+  const head = all.map(i => /^([A-ZÉÛ]+)\.? (\d{4})$/.exec(i.text)).find(m => m && frenchMonth(m[1]) >= 0);
+  if (!head) return { format: 'planning-navigant', period: null, notices: [], recognized: false, published: [], planned: [], _trace: trace, _rows: [] };
+  const year0 = +head[2], month0 = frenchMonth(head[1]);
+  // "Liste des codes activités": Groupe | Acti | Description
+  const legend = new Map();
+  for (const page of pages) {
+    const t = page.items.find(i => i.text === 'Liste des codes activités');
+    const acti = t && page.items.find(i => i.text === 'Acti' && i.y > t.y);
+    const desc = acti && page.items.find(i => i.text === 'Description' && Math.abs(i.y - acti.y) < 3);
+    if (!desc) continue;
+    for (const l of toLines(page.items.filter(i => i.y > acti.y + 3 && !/^Part\.\*:/.test(i.text)))) {
+      const code = l.items.find(i => Math.abs(i.x - acti.x) < 8), d = l.items.filter(i => i.x >= desc.x - 5).map(i => i.text).join(' ');
+      if (code && d) legend.set(code.text, d);
+    }
+  }
+  const dayRow = (t) => { const d = new Date(t); return { date: `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${String(d.getUTCFullYear() % 100).padStart(2, '0')}`, day: WEEKDAYS[d.getUTCDay()], t }; };
+  // "Horaires en GMT": times are UTC; "Horaires en LOC Escale": local, with the UTC one under it ("17:35 Z", "04:55 Z (+1)")
+  const local = all.some(i => /^Horaires en LOC/.test(i.text));
+  let open = null; // a flight going on into the next day (">" in Arri)
+  for (const page of pages) {
+    const hdr = page.items.find(i => i.text === 'CheckIn');
+    if (!hdr) continue;
+    const cols = page.items.filter(i => Math.abs(i.y - hdr.y) < 3 && PN_COLS[i.text]).map(i => ({ col: PN_COLS[i.text], x: i.x })).sort((a, b) => a.x - b.x);
+    const colOf = (it) => cols.reduce((c, h) => (h.x <= it.x + 4 ? h.col : c), 'date');
+    const actiX = cols.find(c => c.col === 'acti').x, depX = cols.find(c => c.col === 'dep').x;
+    const footY = page.items.find(i => /^Part\.\*:/.test(i.text))?.y ?? page.height;
+    const body = page.items.filter(i => i.y > hdr.y + 8 && i.y < footY - 3);
+    // days: the weekday ("lun.") starts the day, its date ("01 nov.") is a line or two lower
+    // ("lun. 01" in one item when the month is the header's)
+    const weekdays = body.filter(i => i.x < actiX - 5 && /^(lun|mar|mer|jeu|ven|sam|dim)\.( \d{2})?$/.test(i.text)).sort((a, b) => a.y - b.y);
+    const dates = body.filter(i => i.x < actiX - 5 && /^\d{2} \S+$/.test(i.text) && frenchMonth(i.text.split(' ')[1]) >= 0);
+    const days = weekdays.map((w, k) => {
+      const end = weekdays[k + 1]?.y ?? Infinity;
+      const own = /\. (\d{2})$/.exec(w.text);
+      if (own) return { y: w.y, end, t: Date.UTC(year0, month0, +own[1]), items: [w] };
+      const d = dates.filter(x => x.y > w.y - 3).sort((a, b) => a.y - b.y)[0];
+      if (!d) return null;
+      const [dd, mon] = d.text.split(' ');
+      const m = frenchMonth(mon);
+      return { y: w.y, end, t: Date.UTC(year0 + (m < month0 - 6 ? 1 : m > month0 + 6 ? -1 : 0), m, +dd), items: [w, d] };
+    }).filter(Boolean);
+    const lines = toLines(body.filter(i => i.x >= actiX - 5), 1.5);
+    // a data line: something in Depa / Arri (an airport, or the hotel stay's ">" / "<")
+    const isData = (l) => l.items.some(i => ['dep', 'arr'].includes(colOf(i)) && /^([A-Z]{3}|[<>])$/.test(i.text));
+    const dataLines = lines.filter(isData);
+    for (const l of lines) if (!isData(l)) {
+      // wrapped activity text / Rep. après / times of the nearest data line within 8pt
+      const near = dataLines.filter(d => Math.abs(d.y - l.y) <= 8).sort((a, b) => Math.abs(a.y - l.y) - Math.abs(b.y - l.y))[0];
+      if (near) (near.extra ||= []).push(...l.items);
+    }
+    for (const l of dataLines) {
+      const day = days.find(d => l.y >= d.y - 3 && l.y < d.end - 3);
+      if (!day) continue;
+      const cells = {}, its = {};
+      for (const it of [...l.items, ...(l.extra || [])].sort((a, b) => a.y - b.y || a.x - b.x)) {
+        let c = / Z/.test(it.text) ? colOf({ x: it.x + 10 }) : colOf(it); // "04:55 Z (+1)" starts left of its column
+        if (it.x < depX - 3) c = 'acti';
+        (its[c] ||= []).push(it);
+      }
+      for (const [c, list] of Object.entries(its)) cells[c] = list.map(i => i.text).join(' ').replace(/\s+/g, ' ').trim();
+      const add = (r, marks) => {
+        const row = { section: 'published', ...dayRow(day.t), notes: [], ...r };
+        rows.push(row);
+        for (const [f, it] of marks) if (it?.length) mark(row, f, it);
+        if (!rows.some(x => x !== row && x.t === day.t)) mark(row, 'date', day.items);
+        return row;
+      };
+      const time = (s) => (/^\d{2}:\d{2}$/.test(s || '') ? s : '');
+      // a time column: "14:00" (UTC, or local), with its UTC under it in the local print ("04:55 Z (+1)"); `days` later than the line's day
+      const tm = (col, days = 0) => {
+        const list = its[col] || [];
+        const l = list.find(i => /^\d{2}:\d{2}$/.test(i.text))?.text;
+        const z = list.map(i => /^(\d{2}:\d{2}) Z(?: \(\+(\d)\))?$/.exec(i.text)).find(Boolean);
+        const plus = (n) => (n > 0 ? ` +${n}` : '');
+        if (!local) return l ? `${l}${plus(days)}` : '';
+        if (z && l) return `${z[1]} Z${plus(days + +(z[2] || 0))} / ${l} L${plus(days)}`;
+        return l ? `${l} L${plus(days)}` : z ? `${z[1]} Z${plus(days + +(z[2] || 0))}` : '';
+      };
+      const acti = cells.acti || '';
+      const actiItems = its.acti || [];
+      const dep = /^[A-Z]{3}$/.test(cells.dep || '') ? cells.dep : '', arr = /^[A-Z]{3}$/.test(cells.arr || '') ? cells.arr : '';
+      if (tm('ci')) add({ duty: 'C/I', dep, begin: tm('ci') }, [['ci', its.ci]]);
+      let m;
+      let row;
+      if ((m = /^HOT - (.+?)(?: - HOTEL)?$/.exec(acti))) {
+        if (cells.arr === '<' || cells.dep === '<') continue; // the stay's last day
+        row = add({ duty: 'H', dep: dep || arr, begin: tm('begin'), notes: [m[1]] }, [['dep', its.dep || its.arr], ['begin', its.begin], ['info', actiItems]]);
+      } else if (cells.dep === '<' && open) {
+        // the arrival of yesterday's flight: "TN008 < CDG" with its Harr
+        const n = Math.round((day.t - open.t) / 86400000);
+        Object.assign(open, { arr, end: tm('end', n) });
+        for (const [f, it] of [['arr', its.arr], ['end', its.end]]) if (it?.length) mark(open, f, it);
+        if (time(cells.blh)) { open.notes.push(`[Block: ${cells.blh}]`); mark(open, 'info', its.blh); }
+        row = open;
+        open = null;
+      } else if ((m = /^(FLT|MEP) - ([A-Z0-9]{2}\d{1,4}[A-Z]?)(?: - (\S+))?(?: -)?$/.exec(acti)
+        // a flight number alone ("TN008", local print), not a code of the list ("F17", "RM2") nor a duty at one airport
+        || (!legend.has(acti) && dep !== arr && /^()([A-Z0-9]{2}\d{1,4}[A-Z]?)()$/.exec(acti)))) {
+        row = add({ duty: m[2], dc: m[1] === 'MEP' ? 'MEP' : '', dep, arr, begin: tm('begin'), end: tm('end'), ac: m[3] || '' },
+          [['duty', actiItems], ['dep', its.dep], ['arr', its.arr], ['begin', its.begin], ['end', its.end]]);
+        if (time(cells.blh)) { row.notes.push(`[Block: ${cells.blh}]`); mark(row, 'info', its.blh); }
+        open = cells.arr === '>' ? row : null;
+      } else {
+        m = /^(\S+?)(?: - (.+))?$/.exec(acti);
+        const code = m ? m[1] : acti, desc = m?.[2] || legend.get(code);
+        row = add({ duty: code, dep, arr, begin: tm('begin'), end: tm('end'), notes: desc ? [`[${code}: ${desc}]`] : [] },
+          [['duty', actiItems], ['dep', its.dep], ['arr', its.arr], ['begin', its.begin], ['end', its.end]]);
+      }
+      if (tm('co')) {
+        const notes = [['Duty', 'tsv'], ['TS', 'ts'], ['TSV Max', 'tsvMax']].filter(([, k]) => time(cells[k])).map(([n, k]) => `[${n}: ${cells[k]}]`);
+        const rest = (its.repApres || []).find(i => /^\d{2}:\d{2}$/.test(i.text));
+        if (rest) notes.push(`[Rest: ${rest.text}]`);
+        add({ duty: 'C/O', arr: row.arr || row.dep, end: tm('co'), notes }, [['co', its.co], ['info', [...(its.tsv || []), ...(its.ts || []), ...(its.tsvMax || []), rest]]]);
+      }
+    }
+  }
+  const p = `01${MONTHS[month0]}${String(year0).slice(2)}`;
+  const out = rows.map(({ t, ...r }) => outputRow({ ...r, info: r.notes.join(' ') }, local ? 'L' : 'Z'));
+  return { format: 'planning-navigant', period: `${p} - ${new Date(Date.UTC(year0, month0 + 1, 0)).getUTCDate()}${p.slice(2)}`, notices: [], recognized: out.length > 0, published: out, planned: [], _trace: trace, _rows: rows };
+}
+
+const ES_WEEKDAYS = { Dom: 'Sun', Lun: 'Mon', Mar: 'Tue', Mie: 'Wed', Jue: 'Thu', Vie: 'Fri', Sab: 'Sat' };
+const spanishMonth = (t) => ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'].indexOf(String(t).slice(0, 3).toLowerCase());
+const isIberiaMonthly = (page) => page.items.some(i => i.text === 'Etapas (Hora UTC)') && lineTexts(page).some(t => /\(Hora local de firma y despedida\)$/.test(t));
+
+/**
+ * Iberia's monthly roster letter ("Septiembre 2025 (Hora local de firma y despedida)"): two calendar blocks of days
+ * ("Lun" over "01"), each day's column stacked: the pairing ("3311", its first day), marks ("D", "*", "X" day off),
+ * the sign-on (firma) "0615", the station the duty ends at "MAD", the release (despedida) "1120" (local times),
+ * an indicator ("C3", "U", "E"); "----" / ">>>>" on the days a pairing goes on; a duty code with its times ("1330" "IM" "2359").
+ * Then "Etapas (Hora UTC)": a line per day ("6 Sab") with its legs "529 MAD 0515 LIS 0645 530 LIS 0725 MAD 0850", "DH" before
+ * a deadhead leg. Rows: per duty a C/I (firma, L, "[Pairing: 3311]"), its legs (UTC; the legs from its day up to the next
+ * duty's), a C/O (despedida, L, "+1" when before the firma, arr = the station); a code with times ("[IM: IMAGINARIA]" from
+ * "Descripcion de codigos"); a lone mark (X, D, *) a row of its own. The pairings page and the bids page are not read.
+ */
+function parseIberiaMonthly(pages) {
+  const trace = startTrace();
+  const page = pages.find(isIberiaMonthly);
+  const head = page.items.map(i => /^([A-Z][a-z]+) (\d{4})$/.exec(i.text)).find(m => m && spanishMonth(m[1]) >= 0);
+  if (!head) return { format: 'iberia-monthly', period: null, notices: [], recognized: false, published: [], planned: [], _trace: trace, _rows: [] };
+  const year0 = +head[2], month0 = spanishMonth(head[1]);
+  const dayRow = (t) => { const d = new Date(t); return { date: `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${String(d.getUTCFullYear() % 100).padStart(2, '0')}`, day: WEEKDAYS[d.getUTCDay()], t }; };
+  const hhmm = (s) => `${s.slice(0, 2)}:${s.slice(2)}`;
+  const etapas = page.items.find(i => i.text === 'Etapas (Hora UTC)');
+  const codesTitle = page.items.find(i => i.text === 'Descripcion de codigos');
+  const msgTitle = page.items.find(i => i.text === 'Mensajes');
+  // "Descripcion de codigos": "6 Mie IM - IMAGINARIA"
+  const legend = new Map();
+  if (codesTitle) {
+    for (const l of toLines(page.items.filter(i => i.y > codesTitle.y + 3 && i.y < (msgTitle?.y ?? page.height) - 3))) {
+      const m = /^\d{1,2} \S+ (\S+) - (.+)$/.exec(l.items.map(i => i.text).join(' '));
+      if (m) legend.set(m[1], m[2]);
+    }
+  }
+  // calendar blocks: a weekday line, the day numbers under it, the columns down to the next block / Etapas
+  const wdLines = toLines(page.items.filter(i => i.y < etapas.y)).filter(l => l.items.filter(i => ES_WEEKDAYS[i.text]).length >= 7);
+  const units = []; // { t, rows: [] } in date order
+  let month = month0, year = year0, lastDay = null;
+  const duties = [];
+  wdLines.forEach((wl, b) => {
+    const numLine = toLines(page.items.filter(i => i.y > wl.y + 2 && i.y < wl.y + 16)).find(l => l.items.filter(i => /^\d{2}$/.test(i.text)).length >= 7);
+    if (!numLine) return;
+    const bottom = wdLines[b + 1]?.y ?? etapas.y;
+    const cols = numLine.items.filter(i => /^\d{2}$/.test(i.text)).map(i => ({ item: i, cx: i.x + (i.w || 0) / 2 }));
+    const pitch = (cols.at(-1).cx - cols[0].cx) / Math.max(1, cols.length - 1);
+    const below = page.items.filter(i => i.y > numLine.y + 3 && i.y < bottom - 3);
+    for (const col of cols) {
+      const n = +col.item.text;
+      if (lastDay != null && n < lastDay) { month += 1; if (month > 11) { month = 0; year += 1; } }
+      lastDay = n;
+      const t = Date.UTC(year, month, n);
+      const its = below.filter(i => Math.abs(i.x + (i.w || 0) / 2 - col.cx) < pitch / 2).sort((a, b2) => a.y - b2.y);
+      const isNum = (i) => /^\d{4}$/.test(i?.text || '');
+      const s = its.findIndex(i => /^[A-Z]{3}$/.test(i.text));
+      const dateMarks = [col.item];
+      if (s > 0 && isNum(its[s - 1])) {
+        const firma = its[s - 1], end = isNum(its[s + 1]) ? its[s + 1] : null;
+        const pairing = isNum(its[s - 2]) ? its[s - 2] : its.slice(0, s - 1).find(isNum);
+        const ci = { section: 'published', ...dayRow(t), duty: 'C/I', begin: `${hhmm(firma.text)} L`, notes: pairing ? [`[Pairing: ${pairing.text}]`] : [] };
+        mark(ci, 'date', dateMarks); mark(ci, 'ci', firma); if (pairing) mark(ci, 'info', pairing);
+        const co = end && { section: 'published', ...dayRow(t), duty: 'C/O', arr: its[s].text, end: `${hhmm(end.text)} L${end.text < firma.text ? ' +1' : ''}`, notes: [] };
+        if (co) { mark(co, 'co', end); mark(co, 'arr', its[s]); }
+        const unit = { t, rows: [ci], co, legs: [] };
+        units.push(unit);
+        duties.push(unit);
+        continue;
+      }
+      // a duty code between two times ("1330" "IM" "2359"), or marks alone
+      const k = its.findIndex((i, j) => /^[A-Z][A-Z0-9]{1,4}$/.test(i.text) && isNum(its[j - 1]) && isNum(its[j + 1]));
+      if (k > 0) {
+        const code = its[k].text;
+        const r = { section: 'published', ...dayRow(t), duty: code, begin: `${hhmm(its[k - 1].text)} L`, end: `${hhmm(its[k + 1].text)} L`, notes: legend.has(code) ? [`[${code}: ${legend.get(code)}]`] : [] };
+        mark(r, 'date', dateMarks); mark(r, 'duty', its[k]); mark(r, 'begin', its[k - 1]); mark(r, 'end', its[k + 1]);
+        units.push({ t, rows: [r] });
+        continue;
+      }
+      const marks = its.filter(i => /^(X|D|\*|[A-Z]{2,4})$/.test(i.text)); // "VA" (vacaciones) as well
+      if (marks.length) {
+        const m0 = marks.find(i => i.text === 'X') || marks[0];
+        const r = { section: 'published', ...dayRow(t), duty: m0.text, notes: [] };
+        mark(r, 'date', dateMarks); mark(r, 'duty', m0);
+        units.push({ t, rows: [r] });
+      }
+    }
+  });
+  // Etapas: "6 Sab 529 MAD 0515 LIS 0645 ..." (the first line may be the month before: "31 Jue")
+  let eMonth = null, eYear = null, eLast = null;
+  for (const l of toLines(page.items.filter(i => i.y > etapas.y + 3 && i.y < (codesTitle?.y ?? msgTitle?.y ?? page.height) - 3))) {
+    // "6 Sab ...", or with the rank before it: "FO-T 2 Lun ..."; legs may be one item "||1662 MAD 0815 HEL 1225||"
+    const words = l.items.flatMap((i) => {
+      const m = /^\|\|(.+)\|\|$/.exec(i.text);
+      if (!m) return wordsIn(i);
+      const cw = i.w / i.text.length;
+      return wordsIn({ ...i, text: m[1], x: i.x + 2 * cw, w: m[1].length * cw, _src: i._src || i, _off: (i._off || 0) + 2 });
+    });
+    const at = words.findIndex((i, k) => /^\d{1,2}$/.test(i.text) && ES_WEEKDAYS[words[k + 1]?.text]);
+    if (at < 0) continue;
+    const its = words.slice(at);
+    const n = +its[0].text;
+    if (eMonth == null) {
+      eMonth = month0; eYear = year0;
+      const wd = ES_WEEKDAYS[its[1].text];
+      if (WEEKDAYS[new Date(Date.UTC(eYear, eMonth, n)).getUTCDay()] !== wd) {
+        const prev = new Date(Date.UTC(eYear, eMonth - 1, n));
+        if (WEEKDAYS[prev.getUTCDay()] === wd) { eMonth = prev.getUTCMonth(); eYear = prev.getUTCFullYear(); }
+      }
+    } else if (n < eLast) { eMonth += 1; if (eMonth > 11) { eMonth = 0; eYear += 1; } }
+    eLast = n;
+    const t = Date.UTC(eYear, eMonth, n);
+    let dh = false;
+    for (let k = 2; k < its.length; k++) {
+      if (its[k].text === 'DH') { dh = true; continue; }
+      const [f, a, t1, b2, t2] = its.slice(k, k + 5);
+      if (!(/^\d{1,4}$/.test(f.text) && /^[A-Z]{3}$/.test(a?.text || '') && /^\d{4}$/.test(t1?.text || '') && /^[A-Z]{3}$/.test(b2?.text || '') && /^\d{4}$/.test(t2?.text || ''))) continue;
+      const leg = { section: 'published', ...dayRow(t), dc: dh ? 'DH' : '', duty: f.text, dep: a.text, begin: `${hhmm(t1.text)} Z`, arr: b2.text,
+        end: `${hhmm(t2.text)} Z${t2.text < t1.text ? ' +1' : ''}`, notes: [] };
+      mark(leg, 'duty', f); mark(leg, 'dep', a); mark(leg, 'begin', t1); mark(leg, 'arr', b2); mark(leg, 'end', t2);
+      if (!units.some(u => u.rows.some(r => r.t === t))) mark(leg, 'date', [its[0], its[1]]);
+      const duty = [...duties].reverse().find(u => u.t <= t && t - u.t <= 4 * 86400000);
+      if (duty) duty.legs.push(leg); else units.push({ t, rows: [leg] });
+      dh = false;
+      k += 4;
+    }
+  }
+  const rows = [];
+  for (const u of units.sort((a, b) => a.t - b.t)) {
+    if (u.legs && !u.legs.length && u.co) {
+      // no leg: a ground duty whose code sits where the station would ("1301" "MTY" "1500")
+      const [ci, co] = [u.rows[0], u.co];
+      Object.assign(ci, { duty: co.arr, end: co.end, notes: legend.has(co.arr) ? [`[${co.arr}: ${legend.get(co.arr)}]`] : [] });
+      const FIELD = { ci: 'begin', co: 'end', arr: 'duty' };
+      for (const e of TRACE || []) if ((e.row === ci || e.row === co) && FIELD[e.field]) Object.assign(e, { row: ci, field: FIELD[e.field] });
+      if (TRACE) for (let k = TRACE.length - 1; k >= 0; k--) if (TRACE[k].row === ci && TRACE[k].field === 'info') TRACE.splice(k, 1); // a pairing number: not in this row
+      rows.push(ci);
+      continue;
+    }
+    rows.push(...u.rows);
+    if (u.legs) {
+      if (u.legs[0] && !u.rows[0].dep) u.rows[0].dep = u.legs[0].dep;
+      rows.push(...u.legs);
+      if (u.co) rows.push(u.co);
+    }
+  }
+  const p = `01${MONTHS[month0]}${String(year0).slice(2)}`;
+  const out = rows.map(({ t, ...r }) => outputRow({ ...r, info: r.notes.join(' ') }, 'Z'));
+  return { format: 'iberia-monthly', period: `${p} - ${new Date(Date.UTC(year0, month0 + 1, 0)).getUTCDate()}${p.slice(2)}`, notices: [], recognized: out.length > 0, published: out, planned: [], _trace: trace, _rows: rows };
+}
+
+const OFP_LOG_HEAD = ['FLIGHT', 'DATE', 'FROM', 'TO', 'REG', 'TYPE', 'COMMANDER'];
+const OFP_PLAN_HEAD = ['DATE', 'DEP', 'STD', 'DES', 'STA', 'REG', 'TYPE'];
+const sameLine = (page, it) => page.items.filter(i => Math.abs(i.y - it.y) < 3).sort((a, b) => a.x - b.x);
+const hasHeadLine = (page, names) => page.items.some(i => i.text === names[0] && names.every(n => sameLine(page, i).some(j => j.text === n)));
+const isOfp = (page) => hasHeadLine(page, OFP_LOG_HEAD) || hasHeadLine(page, OFP_PLAN_HEAD);
+
+/**
+ * Flight plans / flight logs (OFP packages, TUI/Jetairfly/Corendon/Eurowings style), one or a few flights a file, UTC:
+ *   flight log: FLIGHT | DATE | FROM | TO | REG | TYPE | COMMANDER, the values under it ("TB7351 20240307 GMMN LFJL OOJAS B737-700W RHE HEYLEN"),
+ *     then "OFF BLOCK 15:11 TAKE OFF 15:24" / "ON BLOCK 18:17 LANDING 18:11" / "BLOCK 03:06 FLIGHT 02:47"
+ *     -> begin / takeoff / landing / end, "[Block: 03:06] [Flight: 02:47]" (00:00 = not flown yet: left out); the commander, or the
+ *     "Crew Onboard" list ("CP Raf Heylen [RHE], FO ...") -> crew "[CP - RHE - Raf Heylen]".
+ *   flight plan: "TB1942" | DATE | DEP | STD | DES | STA | REG | TYPE | OFP REV and the values under it (the first one the ATC callsign)
+ *     -> a row per flight with STD / STA.
+ */
+function parseOfp(pages) {
+  const trace = startTrace();
+  const rows = [];
+  const dateOf = (s) => { const m = /^(\d{4})(\d{2})(\d{2})$/.exec(s); if (!m) return null; const t = Date.UTC(+m[1], +m[2] - 1, +m[3]); const d = new Date(t); return { date: `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${m[1].slice(2)}`, day: WEEKDAYS[d.getUTCDay()], t }; };
+  const hhmm = (s) => (/^\d{4}$/.test(s) ? `${s.slice(0, 2)}:${s.slice(2)}` : s);
+  const valueUnder = (page, head, name) => {
+    // the values line: the first line under the header with a value under DATE (a line of notes may come between)
+    const h = sameLine(page, head).find(i => i.text === name);
+    const dateHead = sameLine(page, head).find(i => i.text === 'DATE');
+    const below = page.items.filter(i => i.y > head.y + 3 && i.y < head.y + 25).sort((a, b) => a.y - b.y);
+    const y = below.find(i => Math.abs(i.x - dateHead.x) < 6)?.y;
+    return h && y != null ? below.filter(i => Math.abs(i.y - y) < 3).find(i => Math.abs(i.x - h.x) < 6) : null;
+  };
+  // "Crew Onboard": "CP Raf Heylen [RHE], FO Brecht Van Brussel [BRL], ..." over a few lines
+  let crew = '', crewItems = [];
+  for (const page of pages) {
+    const t = page.items.find(i => i.text === 'Crew Onboard');
+    if (!t || crew) continue;
+    const next = page.items.filter(i => i.y > t.y + 3 && i.x < t.x + 10 && !/,\s*$/.test(i.text)).sort((a, b) => a.y - b.y).find(i => !/^[A-Z]{2,4} .+\[/.test(i.text));
+    crewItems = page.items.filter(i => i.y > t.y + 3 && i.y < (next?.y ?? Infinity) - 2 && Math.abs(i.x - t.x) < 10);
+    crew = [...crewItems.map(i => i.text).join(' ').matchAll(/([A-Z]{2,4}) ([^,[]+?) \[([A-Z]+)\]/g)].map(m => `[${m[1]} - ${m[3]} - ${m[2].trim()}]`).join('');
+  }
+  for (const page of pages) {
+    for (const head of page.items.filter(i => i.text === 'FLIGHT' && OFP_LOG_HEAD.every(n => sameLine(page, i).some(j => j.text === n)))) {
+      const v = (n) => valueUnder(page, head, n);
+      const d = dateOf(v('DATE')?.text || '');
+      if (!d) continue;
+      const after = page.items.filter(i => i.y > head.y + 15 && i.y < head.y + 60);
+      const timeAfter = (...words) => {
+        const w = after.find(i => i.text === words.at(-1) && (words.length === 1 || sameLine(page, i).some(j => j.text === words[0] && j.x < i.x)));
+        return w && sameLine(page, w).find(j => j.x > w.x && /^\d{2}:\d{2}$/.test(j.text));
+      };
+      let [off, to, ld, on] = [timeAfter('OFF', 'BLOCK'), timeAfter('TAKE', 'OFF'), timeAfter('LANDING'), timeAfter('ON', 'BLOCK')]; // eslint-disable-line prefer-const
+      const blockLine = after.find(i => i.text === 'BLOCK' && i.x < head.x + 5 && !sameLine(page, i).some(j => j.text === 'OFF' || j.text === 'ON'));
+      const blk = blockLine && sameLine(page, blockLine).find(j => /^\d{2}:\d{2}$/.test(j.text));
+      const flt = blockLine && sameLine(page, blockLine).filter(j => /^\d{2}:\d{2}$/.test(j.text))[1];
+      const t = (i) => (i && i.text !== '00:00' ? i.text : '');
+      if (blk?.text === '00:00' && off?.text === on?.text) { off = null; on = null; } // not flown yet: off = on block, no block time
+      const cmd = sameLine(page, v('COMMANDER') || head).filter(i => i.x >= (v('COMMANDER')?.x ?? Infinity));
+      const r = {
+        section: 'published', ...d, duty: v('FLIGHT')?.text || '', dep: v('FROM')?.text || '', arr: v('TO')?.text || '', registration: v('REG')?.text || '', ac: v('TYPE')?.text || '',
+        begin: off?.text || '', takeoff: t(to), landing: t(ld), end: on?.text || '',
+        crew: crew || (cmd.length ? `[COMMANDER - ${cmd.map(i => i.text).join(' ')}]` : ''),
+        notes: [t(blk) && `[Block: ${blk.text}]`, t(flt) && `[Flight: ${flt.text}]`].filter(Boolean),
+      };
+      rows.push(r);
+      for (const [f, it] of [['date', v('DATE')], ['duty', v('FLIGHT')], ['dep', v('FROM')], ['arr', v('TO')], ['registration', v('REG')], ['ac', v('TYPE')],
+        ['begin', off], ['takeoff', t(to) && to], ['landing', t(ld) && ld], ['end', on], ['info', t(blk) && blk], ['info', t(flt) && flt],
+        ['crew', crew ? crewItems : cmd]]) if (it && [].concat(it).length) mark(r, f, it);
+    }
+    for (const head of page.items.filter(i => i.text === 'DATE' && OFP_PLAN_HEAD.every(n => sameLine(page, i).some(j => j.text === n)))) {
+      const flight = sameLine(page, head).find(i => i.x < head.x && /^[A-Z0-9]{2,3}\d{1,4}[A-Z]?$/.test(i.text));
+      const v = (n) => valueUnder(page, head, n);
+      const d = dateOf(v('DATE')?.text || '');
+      if (!d || !flight) continue;
+      const r = {
+        section: 'published', ...d, duty: flight.text, dep: v('DEP')?.text || '', arr: v('DES')?.text || '', begin: hhmm(v('STD')?.text || ''), end: hhmm(v('STA')?.text || ''),
+        registration: v('REG')?.text || '', ac: v('TYPE')?.text || '', notes: [],
+      };
+      if (r.begin && r.end && r.end < r.begin) r.end += '+1';
+      rows.push(r);
+      for (const [f, it] of [['date', v('DATE')], ['duty', flight], ['dep', v('DEP')], ['arr', v('DES')], ['begin', v('STD')], ['end', v('STA')], ['registration', v('REG')], ['ac', v('TYPE')]]) if (it) mark(r, f, it);
+    }
+  }
+  rows.sort((a, b) => a.t - b.t || a.begin.localeCompare(b.begin));
+  const ts = rows.map(r => r.t);
+  const per = ts.length ? [Math.min(...ts), Math.max(...ts)].map(x => new Date(x)).map(d => `${String(d.getUTCDate()).padStart(2, '0')}${MONTHS[d.getUTCMonth()]}${String(d.getUTCFullYear() % 100).padStart(2, '0')}`).join(' - ') : null;
+  const out = rows.map(({ t, ...r }) => outputRow({ ...r, info: r.notes.join(' ') }, 'Z'));
+  return { format: 'ofp', period: per, notices: [], recognized: out.length > 0, published: out, planned: [], _trace: trace, _rows: rows };
+}
+
+const SUMMARY_DAY_RE = /^(Mon|Tue|Wed|Thu|Fri|Sat|Sun), (\d{1,2})$/;
+const isScheduleSummary = (page) => page.items.some(i => /^.+ (Schedule|Escala|Roster) Summary, /.test(i.text)) && page.items.some(i => SUMMARY_DAY_RE.test(i.text));
+
+/**
+ * "<Name> Schedule Summary, 31 Jan - 29 Feb 2024" ("Escala Summary" in Portuguese; Crew Access): a day header
+ * "Thu, 1" "st" "February 2024 (Local time)", then a line per event: name | "14:00 - 15:00" ("+1") | "OOL" or "MCY - CNS" |
+ * position | "Trainee" | "Flight Time: 02:20". Report / Apresentação -> C/I (its start), Release -> C/O (its end), a flight
+ * ("AB589", "SV123 (Deadheading)" -> dc DH) with "[CPT] [Trainee] [Flight: 02:20]", Hotel -> a hotel row, "Off (RDO)" ->
+ * duty RDO "[RDO: Off]" (any "Name (CODE)"), others as named ("Transit"). Local times.
+ */
+function parseScheduleSummary(pages) {
+  const trace = startTrace();
+  const rows = [];
+  let cur = null, curItems = null, zone = 'L';
+  const title = pages.flatMap(p => p.items).map(i => /(?:Schedule|Escala|Roster) Summary, (\d{1,2})(?: ([A-Z][a-z]{2}))?(?: (\d{4}))? - (\d{1,2}) ([A-Z][a-z]{2}) (\d{4})$/.exec(i.text)).find(Boolean);
+  for (const page of pages) {
+    for (const l of toLines(page.items, 2)) {
+      const its = l.items;
+      const dm = SUMMARY_DAY_RE.exec(its[0]?.text || '');
+      const monthItem = its.find(i => /^[A-Z][a-z]+ \d{4} \((Local time|UTC)\)$/.test(i.text));
+      if (monthItem && /\(UTC\)$/.test(monthItem.text)) zone = 'Z';
+      if (dm && monthItem) {
+        const [mon, yyyy] = monthItem.text.split(' ');
+        const t = Date.UTC(+yyyy, monthIndex(mon.slice(0, 3)), +dm[2]);
+        const d = new Date(t);
+        cur = { date: `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${yyyy.slice(2)}`, day: WEEKDAYS[d.getUTCDay()] };
+        curItems = its;
+        continue;
+      }
+      if (!cur) continue;
+      const tIdx = its.findIndex(i => /^\d{2}:\d{2} - \d{2}:\d{2}( \+\d)?$/.test(i.text));
+      if (tIdx < 1) continue;
+      const name = its.slice(0, tIdx).map(i => i.text).join(' ');
+      const tm = /^(\d{2}:\d{2}) - (\d{2}:\d{2})(?: \+(\d))?$/.exec(its[tIdx].text);
+      const timeItem = its[tIdx];
+      const begin = pieceOf(timeItem, 0, 5), end = pieceOf(timeItem, 8, timeItem.text.length - 8);
+      const rest = its.slice(tIdx + 1);
+      const routeItem = rest.find(i => /^[A-Z]{3}( - [A-Z]{3})?$/.test(i.text));
+      const [dep, arr] = routeItem ? routeItem.text.split(' - ') : [];
+      const extras = rest.filter(i => i !== routeItem);
+      const notes = extras.map(i => {
+        const ft = /^Flight Time: (\d{1,2}:\d{2})$/.exec(i.text);
+        return ft ? `[Flight: ${ft[1].padStart(5, '0')}]` : `[${i.text}]`;
+      });
+      const add = (r, marks) => {
+        const row = { section: 'published', ...cur, notes: [], ...r };
+        rows.push(row);
+        for (const [f, it] of marks) if (it && [].concat(it).length) mark(row, f, it);
+        if (curItems) { mark(row, 'date', curItems); curItems = null; }
+        return row;
+      };
+      const endTime = `${tm[2]}${tm[3] ? `+${tm[3]}` : ''}`;
+      const routeMarks = routeItem ? (arr ? [['dep', pieceOf(routeItem, 0, 3)], ['arr', pieceOf(routeItem, 6, 3)]] : [['dep', routeItem]]) : [];
+      let m;
+      if (/^(Report|Apresentação|Apresentacao)$/.test(name)) add({ duty: 'C/I', dep: dep || '', begin: tm[1] }, [['ci', begin], ...routeMarks]);
+      else if (/^(Release|Liberação|Liberacao|Post Flt Duty)$/.test(name)) add({ duty: 'C/O', arr: dep || '', end: endTime }, [['co', end], ['arr', routeItem]]);
+      else if ((m = /^([A-Z0-9]{2}\d{1,4}[A-Z]?)(?: \((Deadheading)\))?$/.exec(name))) {
+        add({ duty: m[1], dc: m[2] ? 'DH' : '', dep: dep || '', arr: arr || '', begin: tm[1], end: endTime, notes },
+          [['duty', its.slice(0, tIdx)], ['begin', begin], ['end', end], ...routeMarks, ['info', extras]]);
+      } else if (name === 'Hotel') add({ duty: 'H', dep: dep || '', begin: tm[1], end: endTime, notes }, [['begin', begin], ['end', end], ...routeMarks, ['info', extras]]);
+      else {
+        m = /^(.+?) \(([^)]+)\)$/.exec(name);
+        add({ duty: m ? m[2] : name, dep: dep || '', arr: arr || '', begin: tm[1], end: endTime, notes: [...(m ? [`[${m[2]}: ${m[1]}]`] : []), ...notes] },
+          [['duty', its.slice(0, tIdx)], ['begin', begin], ['end', end], ...routeMarks, ['info', extras]]);
+      }
+    }
+  }
+  // ("14 - 31 Jan 2026": one month)
+  const p = title && `${title[1].padStart(2, '0')}${title[2] || title[5]}${(title[3] || title[6]).slice(2)} - ${title[4].padStart(2, '0')}${title[5]}${title[6].slice(2)}`;
+  const out = rows.map(r => outputRow({ ...r, info: r.notes.join(' ') }, zone));
+  return { format: 'schedule-summary', period: p || null, notices: [], recognized: out.length > 0, published: out, planned: [], _trace: trace, _rows: rows };
+}
+
+const isPortCrewRosterReport = (page) => page.items.some(i => i.text === 'Crew Roster Report') && page.items.some(i => i.text === '(Times shown are in Port Local times)')
+  && ['Sector', 'Rpt', 'STD', 'STA'].every(t => page.items.some(i => i.text === t));
+
+/**
+ * "Crew Roster Report (Times shown are in Port Local times)" (Singapore Airlines), a line per event:
+ *   Start Date | Day | Flight Number | Sector | A/C | Duty | Pairing Duty | Crew Rank | Rpt | STD | STA | Flight Time | Duty Time | Hotel |
+ *   INSTR/PUPIL | Training | Remarks
+ *   "05Jul26 Sun SQ656 SIN-FUK 787 TVL PU FO 0020 0120 0828 7:38"; "FUK LO FUKHILSH" (layover: a hotel row a line);
+ *   a flight reported late on one day ("07Jul26 SQ810 SIN-PKX ... Rpt 2330 06:05 7:35") and flown the next ("08Jul26 SQ810 SIN-PKX STD 0030
+ *   STA 0635"), or landing the next ("01Aug26 HND-SIN STA 0525": end "+1"); ground duties "SIN STBY FO 1700 1700 2000 3:00",
+ *   training "SIN BFTD2 ... PUPIL 737CONFP" with "T02" wrapped under it.
+ * Rpt of a flight -> a C/I row; TVL -> dc DH; "[Flight: 06:00] [Duty: 07:30]"; a ground duty runs STD-STA; INSTR/PUPIL, Training,
+ * Remarks -> "[PUPIL] [Training: 737CONFPT02] [FTD unserviceable]"; "Duty Codes" (Duty | Duty Desc) -> "[STBY: STANDBY DUTY]".
+ */
+function parsePortCrewRosterReport(pages) {
+  const trace = startTrace();
+  const rows = [];
+  const NAMES = ['date', 'day', 'flight', 'sector', 'ac', 'duty', 'pairing', 'rank', 'rpt', 'std', 'sta', 'ft', 'dt', 'hotel', 'pupil', 'training', 'remarks'];
+  const HEADS = ['Start', 'Day', 'Flight', 'Sector', 'A/C', 'Duty', 'Pairing', 'Crew', 'Rpt', 'STD', 'STA', 'Flight', 'Duty', 'Hotel', 'INSTR/', 'Training', 'Remarks'];
+  // "Duty Codes": Duty | Duty Desc
+  const legend = new Map();
+  for (const page of pages) {
+    const t = page.items.find(i => i.text === 'Duty Codes');
+    const dh = t && page.items.find(i => i.text === 'Duty Desc');
+    if (!dh) continue;
+    for (const l of toLines(page.items.filter(i => i.y > dh.y + 3))) {
+      const [code, ...desc] = l.items;
+      if (desc.length) legend.set(code.text, desc.map(i => i.text).join(' '));
+    }
+  }
+  // "From | 04Jul26 | -- | 31Aug26" or "From | 01Apr26 -- 30Apr26"
+  const per = pages.flatMap(p => p.items).find(i => i.text === 'From');
+  const perItems = per && sameLine(pages.find(p => p.items.includes(per)), per).flatMap(i => i.text.split(/\s+--\s+/).map(text => ({ text }))).filter(i => /^\d{2}[A-Z][a-z]{2}\d{2}$/.test(i.text));
+  const dateOf = (s) => { const m = /^(\d{2})([A-Z][a-z]{2})(\d{2})$/.exec(s); if (!m) return null; const t = Date.UTC(2000 + +m[3], monthIndex(m[2]), +m[1]); const d = new Date(t); return { date: `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${m[3]}`, day: WEEKDAYS[d.getUTCDay()], t }; };
+  const hhmm = (s) => (/^\d{4}$/.test(s || '') ? `${s.slice(0, 2)}:${s.slice(2)}` : '');
+  const dur = (s) => (/^\d{1,2}:\d{2}$/.test(s || '') ? s.padStart(5, '0') : '');
+  let cur = null, curItems = null, pendingNotes = null, open = null, lastRow = null;
+  for (const page of pages) {
+    const head = page.items.find(i => i.text === 'Sector');
+    if (!head) continue;
+    const stop = page.items.find(i => i.text === 'Duty Codes')?.y ?? page.height;
+    // header words left to right; a name's second time is the other column (Flight Time, Duty Time; cabin crew: "Sector Duty")
+    const seen = new Set();
+    const cols = sameLine(page, head).map((h) => {
+      const second = seen.has(h.text);
+      seen.add(h.text);
+      const col = second ? { Flight: 'ft', Duty: 'dt', Sector: 'pairing' }[h.text]
+        : { Start: 'date', Day: 'day', Flight: 'flight', Sector: 'sector', 'A/C': 'ac', Duty: 'duty', Pairing: 'pairing', Crew: 'rank', Acting: 'rank', Rpt: 'rpt',
+          STD: 'std', STA: 'sta', FDP: 'fdp', Hotel: 'hotel', 'INSTR/': 'pupil', Training: 'training', Remarks: 'remarks' }[h.text];
+      return col && { col, c: h.x + (h.w || 0) / 2 };
+    }).filter(Boolean);
+    const colOf = (i) => cols.reduce((b, h) => (Math.abs(h.c - (i.x + (i.w || 0) / 2)) < Math.abs(b.c - (i.x + (i.w || 0) / 2)) ? h : b), cols[0]).col;
+    const sub = page.items.find(i => i.text === 'Date' && i.y > head.y && i.y < head.y + 20);
+    for (const l of toLines(page.items.filter(i => i.y > (sub?.y ?? head.y) + 4 && i.y < stop - 3), 2)) {
+      const its = {};
+      for (const i of l.items) (its[colOf(i)] ||= []).push(i);
+      const cell = (c) => (its[c] || []).map(i => i.text).join(' ');
+      const d = dateOf(cell('date'));
+      if (d) { cur = d; curItems = [...its.date, ...(its.day || [])]; }
+      if (!cur) continue;
+      const add = (r, marks) => {
+        const row = { section: 'published', ...cur, notes: [], ...r };
+        rows.push(row);
+        for (const [f, it] of marks) if (it && [].concat(it).length) mark(row, f, it);
+        if (curItems) { mark(row, 'date', curItems); curItems = null; }
+        lastRow = row;
+        return row;
+      };
+      // a line with only Duty / Training / Remarks text: the wrapped end of the line above ("FMCT" + "RNG", "737CONFP" + "T01")
+      if (Object.keys(its).every(c => c === 'duty' || c === 'training' || c === 'remarks')) {
+        if (lastRow) {
+          if (its.duty && lastRow.duty !== 'H') {
+            const was = lastRow.duty;
+            lastRow.duty += cell('duty');
+            lastRow.notes = lastRow.notes.filter(n => !n.startsWith(`[${was}: `));
+            if (legend.has(lastRow.duty)) lastRow.notes.unshift(`[${lastRow.duty}: ${legend.get(lastRow.duty)}]`);
+          }
+          lastRow.training = (lastRow.training || '') + (its.training ? cell('training') : '');
+          if (its.remarks) lastRow.remark = [lastRow.remark, cell('remarks')].filter(Boolean).join(' ');
+          mark(lastRow, 'info', l.items);
+        }
+        continue;
+      }
+      const sector = /^([A-Z]{3})-([A-Z]{3})$/.exec(cell('sector'));
+      const station = /^[A-Z]{3}$/.test(cell('sector')) ? cell('sector') : '';
+      const duty = cell('duty');
+      const notes = [dur(cell('ft')) && `[Flight: ${dur(cell('ft'))}]`, dur(cell('dt')) && `[Duty: ${dur(cell('dt'))}]`, dur(cell('fdp')) && `[FDP: ${dur(cell('fdp'))}]`].filter(Boolean);
+      const noteItems = [...(its.ft || []), ...(its.dt || []), ...(its.fdp || [])];
+      const extra = (r) => {
+        if (its.pupil) r.pupil = cell('pupil');
+        if (its.training) r.training = cell('training');
+        if (its.remarks) r.remark = cell('remarks');
+        if (its.pupil || its.training || its.remarks) mark(r, 'info', [...(its.pupil || []), ...(its.training || []), ...(its.remarks || [])]);
+      };
+      if (sector) {
+        const [dep, arr] = [sector[1], sector[2]];
+        const sectorMarks = [['dep', pieceOf(its.sector[0], 0, 3)], ['arr', pieceOf(its.sector[0], 4, 3)]];
+        // Rpt: a C/I, unless the duty's report printed again on a later leg
+        const lastCi = [...rows].reverse().find(r => r.duty === 'C/I');
+        if (hhmm(cell('rpt')) && !(lastCi && lastCi.t === cur.t && lastCi.begin === hhmm(cell('rpt')))) {
+          add({ duty: 'C/I', dep, begin: hhmm(cell('rpt')) }, [['ci', its.rpt], ['dep', sectorMarks[0][1]]]);
+        }
+        if (hhmm(cell('std')) || (hhmm(cell('sta')) && !open)) { // (a flight without its STD: "SQ9655 FUK-SIN ... 0700 1300")
+          const r = add({ duty: cell('flight').replace(/\s+/g, ''), dc: duty === 'TVL' ? 'DH' : '', dep, arr, begin: hhmm(cell('std')), end: hhmm(cell('sta')), ac: cell('ac'), notes: [...(pendingNotes || []), ...notes.filter(n => !(pendingNotes || []).includes(n))] },
+            [['duty', its.flight], ...sectorMarks, ['begin', its.std], ['end', its.sta], ['ac', its.ac], ['info', [...(pendingNotes?.items || []), ...noteItems]]]);
+          extra(r);
+          if (r.end && r.end < r.begin) r.end += '+1';
+          open = r.end ? null : r;
+          pendingNotes = null;
+        } else if (hhmm(cell('sta')) && open) {
+          // the arrival of yesterday's flight
+          const n = Math.round((cur.t - open.t) / 86400000);
+          open.end = `${hhmm(cell('sta'))}${n > 0 ? `+${n}` : ''}`;
+          mark(open, 'end', its.sta);
+          open = null;
+        } else if (!hhmm(cell('std'))) {
+          pendingNotes = Object.assign([...notes], { items: noteItems });
+        }
+        continue;
+      }
+      if (duty === 'LO') {
+        add({ duty: 'H', dep: station, notes: its.hotel ? [cell('hotel')] : [] }, [['dep', its.sector], ['info', its.hotel]]);
+        continue;
+      }
+      if (duty) {
+        const r = add({ duty, dep: station, begin: hhmm(cell('std')), end: hhmm(cell('sta')), notes: [legend.has(duty) && `[${duty}: ${legend.get(duty)}]`, ...notes].filter(Boolean) },
+          [['duty', its.duty], ['dep', its.sector], ['begin', its.std], ['end', its.sta], ['info', noteItems]]);
+        extra(r);
+        if (r.end && r.begin && r.end < r.begin) r.end += '+1';
+      }
+    }
+  }
+  for (const r of rows) {
+    r.notes.push(...[r.pupil && `[${r.pupil}]`, r.training && `[Training: ${r.training}]`, r.remark && `[${r.remark}]`].filter(Boolean));
+  }
+  const p = perItems?.length === 2 ? `${perItems[0].text} - ${perItems[1].text}` : null;
+  const out = rows.map(({ t, pupil, training, remark, ...r }) => outputRow({ ...r, info: r.notes.join(' ') }, 'L'));
+  return { format: 'port-crew-roster-report', period: p, notices: [], recognized: out.length > 0, published: out, planned: [], _trace: trace, _rows: rows };
+}
+
+const isFlightLogSummary = (page) => page.items.some(i => i.text === 'FLIGHT LOG SUMMARY REPORT') && page.items.some(i => i.text === 'Leg Date') && page.items.some(i => i.text === 'Hobbs');
+
+/**
+ * "FLIGHT LOG SUMMARY REPORT" (Jet Linx; base and aircraft "N217EC" above the table), a line per leg:
+ *   Leg Date "10-24-19" | Trip # | Reg (the FAR part: 135 / 91) | PIC | SIC | DEP | ARR | Out | Off | On | In | Hobbs | Flight | Block | Night | IMC |
+ *   T/O D N | Land D N | Appr P N | Hld | Trk | Pax | GTOW | ...
+ * -> registration from above, begin / takeoff / landing / end (Out / Off / On / In, "1112" taken as UTC), crew "[PIC - CHUB][SIC - DFIE]",
+ * info "[Trip: 624328] [FAR: 135] [Flight: 1.5] [Block: 1.7] [Night: 0.3] [IMC: 0.1] [Takeoff Day: 1] [Landing Day: 1] [Pax: 2]" (decimal hours as printed).
+ */
+function parseFlightLogSummary(pages) {
+  const trace = startTrace();
+  const rows = [];
+  for (const page of pages) {
+    const head = page.items.find(i => i.text === 'Leg Date');
+    if (!head) continue;
+    const reg = page.items.filter(i => i.y < head.y - 5 && /^[A-Z]{1,2}-?[A-Z0-9]{3,5}$/.test(i.text) && i.x < 60).sort((a, b) => b.y - a.y)[0];
+    const seen = {};
+    const cols = sameLine(page, head).map((h) => {
+      const n = (seen[h.text] = (seen[h.text] || 0) + 1);
+      const col = h.text === 'D' ? ['tkDay', 'ldDay'][n - 1] : h.text === 'N' ? ['tkNight', 'ldNight', 'apprN'][n - 1]
+        : { 'Leg Date': 'date', 'Trip #': 'trip', Reg: 'far', PIC: 'pic', SIC: 'sic', DEP: 'dep', ARR: 'arr', Out: 'out', Of: 'off', Off: 'off', On: 'on', In: 'in',
+          Flight: 'flight', Block: 'block', Night: 'night', IMC: 'imc', Pax: 'pax' }[h.text];
+      return { col: col || `x${h.x}`, x: h.x };
+    });
+    const colOf = (i) => cols.reduce((b, h) => (Math.abs(h.x - i.x) < Math.abs(b.x - i.x) ? h : b), cols[0]).col;
+    for (const l of toLines(page.items.filter(i => i.y > head.y + 4), 2)) {
+      const its = {};
+      for (const i of l.items) (its[colOf(i)] ||= []).push(i);
+      const cell = (c) => (its[c] || []).map(i => i.text).join(' ');
+      const dm = /^(\d{1,2})-(\d{1,2})-(\d{2})$/.exec(cell('date')); // "10-24-19", "9-15-19"
+      if (!dm) continue;
+      const t = Date.UTC(2000 + +dm[3], +dm[1] - 1, +dm[2]);
+      const d = new Date(t);
+      const tm = (c) => (/^\d{4}$/.test(cell(c)) ? cell(c) : '');
+      const num = (c) => (/^\d+(\.\d+)?$/.test(cell(c)) && +cell(c) > 0 ? cell(c) : '');
+      const info = [['Trip', 'trip'], ['FAR', 'far'], ['Flight', 'flight'], ['Block', 'block'], ['Night', 'night'], ['IMC', 'imc'],
+        ['Takeoff Day', 'tkDay'], ['Takeoff Night', 'tkNight'], ['Landing Day', 'ldDay'], ['Landing Night', 'ldNight'], ['Pax', 'pax']]
+        .filter(([, c]) => (c === 'trip' || c === 'far' ? cell(c) : num(c))).map(([k, c]) => [k, c]);
+      const r = {
+        section: 'published', date: `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${dm[3]}`, day: WEEKDAYS[d.getUTCDay()], duty: '', registration: reg?.text || '',
+        dep: cell('dep'), arr: cell('arr'), begin: tm('out'), takeoff: tm('off'), landing: tm('on'), end: tm('in'),
+        crew: [['PIC', 'pic'], ['SIC', 'sic']].filter(([, c]) => cell(c)).map(([k, c]) => `[${k} - ${cell(c)}]`).join(''),
+        info: info.map(([k, c]) => `[${k}: ${cell(c)}]`).join(' '),
+      };
+      rows.push(r);
+      for (const [f, c] of [['date', 'date'], ['dep', 'dep'], ['arr', 'arr'], ['begin', 'out'], ['takeoff', 'off'], ['landing', 'on'], ['end', 'in'], ['crew', 'pic'], ['crew', 'sic']]) if (its[c]) mark(r, f, its[c]);
+      for (const [, c] of info) mark(r, 'info', its[c]);
+      if (reg) mark(r, 'registration', reg);
+    }
+  }
+  // "24/10/2019 - 25/10/2019", or month first "9/15/2019 - 9/16/2019"
+  const per = pages.flatMap(p => p.items).map(i => /^(\d{1,2})\/(\d{1,2})\/(\d{4}) - (\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(i.text)).find(Boolean);
+  if (per && +per[2] > 12) [per[1], per[2], per[4], per[5]] = [per[2], per[1], per[5], per[4]];
+  const pd = (dd, mm, yyyy) => `${dd.padStart(2, '0')}${MONTHS[+mm - 1]}${yyyy.slice(2)}`;
+  const out = rows.map(r => outputRow(r, 'Z'));
+  return { format: 'flight-log-summary', period: per ? `${pd(per[1], per[2], per[3])} - ${pd(per[4], per[5], per[6])}` : null,
+    notices: [], recognized: out.length > 0, published: out, planned: [], _trace: trace, _rows: rows };
+}
+
+const isQatarLogbook = (page) => page.items.some(i => i.text === 'QATAR AIRWAYS LOGBOOK') && page.items.some(i => i.text === 'NAME(S) PIC') && page.items.some(i => i.text === 'PLACE');
+
+/**
+ * "QATAR AIRWAYS LOGBOOK" (EASA layout, "01-Aug-2024 To 09-Sep-2024"), a record per flight, its PIC name and remarks wrapping
+ * onto the lines under it:
+ *   DATE | DEPARTURE PLACE TIME | ARRIVAL PLACE TIME ("00:39 (+1)") | AIRCRAFT TYPE REG | SINGLE PILOT SE ME | MULTI PILOT TIME |
+ *   TOTAL TIME OF FLIGHT | NAME(S) PIC | TAKE OFF DAY NIGHT | LANDINGS DAY NIGHT | OPERATIONAL CONDITION NIGHT IFR |
+ *   PILOT FUNCTION TIME PIC CO-PILOT DUAL INSTRUCTOR | FSTD SESSION DATE TYPE TOTAL TIME | REMARKS AND ENDORSEMENTS
+ * Times UTC. A flight: ac, registration, crew "[PIC - DE SOUZA HENKIN Felipe]", info "[Flight: 07:07] [Takeoff Day: 1] [Landing Day: 1]
+ * [Night: 05:28] [IFR: 07:07] [PIC: 07:07] [CoPilot: ..] [Dual: ..] [Instructor: ..]" and the remarks; an FSTD session a row (duty SIM,
+ * its type as ac "B777,EU-A0206", "[Sim: 04:00]"). Times of 00:00 and counts of 0 are left out. Columns by their headers' centres.
+ */
+function parseQatarLogbook(pages) {
+  const trace = startTrace();
+  const rows = [];
+  const dateOf = (t) => { const m = /^(\d{2})\/(\d{2})\/(\d{2})$/.exec(t || ''); return m && Date.UTC(2000 + +m[3], +m[2] - 1, +m[1]); };
+  const dayRow = (t) => { const d = new Date(t); return { date: `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${String(d.getUTCFullYear() % 100).padStart(2, '0')}`, day: WEEKDAYS[d.getUTCDay()] }; };
+  const dur = (t) => (/^\d{1,3}:\d{2}$/.test(t || '') && /[1-9]/.test(t) ? t : '');
+  const cnt = (t) => (/^[1-9]\d*$/.test(t || '') ? t : '');
+  const ORDER = { PLACE: ['depPlace', 'arrPlace'], TIME: ['depTime', 'arrTime'], TYPE: ['type', 'simType'], REG: ['reg'], SE: ['se'], ME: ['me'], FLIGHT: ['total'],
+    DAY: ['tkDay', 'ldDay'], NIGHT: ['tkNight', 'ldNight', 'night'], IFR: ['ifr'], PIC: ['pic'], 'CO-PILOT': ['coPilot'], DUAL: ['dual'], INSTRUCTOR: ['instructor'],
+    DATE: ['simDate'], TOTAL: ['simTotal'] };
+  for (const page of pages) {
+    const place = page.items.find(i => i.text === 'PLACE');
+    const top = page.items.find(i => i.text === 'NAME(S) PIC');
+    if (!place || !top) continue;
+    const seen = {};
+    const centre = (i) => i.x + (i.w || 0) / 2;
+    const cols = [
+      ...sameLine(page, place).map((h) => { const n = (seen[h.text] = (seen[h.text] || 0) + 1); const name = ORDER[h.text]?.[n - 1]; return name && { name, c: centre(h) }; }).filter(Boolean),
+      ...sameLine(page, top).map(h => ({ DATE: 'date', 'NAME(S) PIC': 'picName', MULTI: 'multi', 'REMARKS AND': 'remark' }[h.text] && { name: { DATE: 'date', 'NAME(S) PIC': 'picName', MULTI: 'multi', 'REMARKS AND': 'remark' }[h.text], c: centre(h) })).filter(Boolean),
+    ];
+    const remarkX = sameLine(page, top).find(i => i.text === 'REMARKS AND')?.x ?? Infinity;
+    const colOf = (i) => (i.x >= remarkX - 20 ? 'remark' : cols.reduce((b, h) => (Math.abs(h.c - centre(i)) < Math.abs(b.c - centre(i)) ? h : b), cols[0]).name);
+    const dataTop = Math.max(...page.items.filter(i => /^\(dd\/mm\/yy\)$|^TIME$/.test(i.text) && Math.abs(i.y - place.y) < 25).map(i => i.y));
+    let rec = null;
+    const records = [];
+    for (const l of toLines(page.items.filter(i => i.y > dataTop + 3), 2)) {
+      const cells = {};
+      for (const i of l.items) (cells[colOf(i)] ||= []).push(i);
+      if (dateOf(cells.date?.[0]?.text) != null || dateOf(cells.simDate?.[0]?.text) != null) { rec = { cells }; records.push(rec); continue; }
+      if (l.items.some(i => i.text === 'TOTAL')) rec = null; // the page totals ("TOTAL THIS PAGE", "I certify that the entries ...")
+      if (rec) for (const [c, list] of Object.entries(cells)) (rec.cells[c] ||= []).push(...list); // wrapped name / sim type / remarks
+    }
+    for (const { cells } of records) {
+      const get = (c) => (cells[c] || []).map(i => i.text).join(' ').trim();
+      const d = dateOf(cells.date?.[0]?.text);
+      if (d != null && /^[A-Z]{3,4}$/.test(get('depPlace'))) {
+        const tag = (k, c) => { const v = dur(get(c)); return v && `[${k}: ${v}]`; };
+        const arrTime = get('arrTime').replace(/\s*\((\+\d)\)$/, '$1');
+        const r = {
+          section: 'published', ...dayRow(d), duty: '', dep: get('depPlace'), arr: get('arrPlace'), begin: get('depTime'), end: arrTime,
+          ac: get('type'), registration: get('reg'), crew: get('picName').split(/\s*,\s*/).filter(Boolean).map(n => `[PIC - ${n}]`).join(''), // "A,B": two names
+          notes: [tag('Flight', 'total'), ...[['Takeoff Day', 'tkDay'], ['Takeoff Night', 'tkNight'], ['Landing Day', 'ldDay'], ['Landing Night', 'ldNight']].filter(([, c]) => cnt(get(c))).map(([k, c]) => `[${k}: ${get(c)}]`),
+            tag('Night', 'night'), tag('IFR', 'ifr'), tag('PIC', 'pic'), tag('CoPilot', 'coPilot'), tag('Dual', 'dual'), tag('Instructor', 'instructor'), get('remark')].filter(Boolean),
+        };
+        rows.push(r);
+        for (const [f, c] of [['date', 'date'], ['dep', 'depPlace'], ['begin', 'depTime'], ['arr', 'arrPlace'], ['end', 'arrTime'], ['ac', 'type'], ['registration', 'reg'], ['crew', 'picName'],
+          ['info', 'total'], ['info', 'night'], ['info', 'ifr'], ['info', 'pic'], ['info', 'coPilot'], ['info', 'dual'], ['info', 'instructor'], ['info', 'remark'],
+          ...['tkDay', 'tkNight', 'ldDay', 'ldNight'].filter(c => cnt(get(c))).map(c => ['info', c])]) if (cells[c]) mark(r, f, cells[c].filter(i => f !== 'info' || i.text !== '00:00'));
+      }
+      const s = dateOf(cells.simDate?.[0]?.text);
+      if (s != null) {
+        const r = { section: 'published', ...dayRow(s), duty: 'SIM', ac: get('simType').replace(/\s+/g, ''), notes: [dur(get('simTotal')) && `[Sim: ${get('simTotal')}]`].filter(Boolean) };
+        if (d == null) r.notes.push(...[['PIC', 'pic'], ['CoPilot', 'coPilot'], ['Dual', 'dual'], ['Instructor', 'instructor']].filter(([, c]) => dur(get(c))).map(([k, c]) => `[${k}: ${get(c)}]`));
+        rows.push(r);
+        for (const [f, c] of [['date', 'simDate'], ['ac', 'simType'], ['info', 'simTotal']]) if (cells[c]) mark(r, f, cells[c]);
+      }
+    }
+  }
+  const per = pages.flatMap(p => p.items).map(i => /^(\d{2})-([A-Z][a-z]{2})-(\d{4}) To (\d{2})-([A-Z][a-z]{2})-(\d{4})$/.exec(i.text)).find(Boolean);
+  const out = rows.map(r => outputRow({ ...r, info: r.notes.join(' ') }, 'Z'));
+  return { format: 'qatar-logbook', period: per ? `${per[1]}${per[2]}${per[3].slice(2)} - ${per[4]}${per[5]}${per[6].slice(2)}` : null, notices: [], recognized: out.length > 0, published: out, planned: [], _trace: trace, _rows: rows };
+}
+
+const isRolIndividual = (page) => page.items.some(i => /^ROL INDIVIDUAL DE SERVICIOS [A-Z]+ \d{4}$/.test(i.text)) && page.items.some(i => i.text === 'BLOCK DH');
+
+/**
+ * Aeromexico "ROL INDIVIDUAL DE SERVICIOS SEPTIEMBRE 2025" ("Time zone: Base"): a calendar strip, then a line per day under
+ * DAY | DUTY | BLOCK DH:
+ *   "01 Mon" "R4 MEX" "16:15" "23:59"                                  a code at a station with its times ("[R4: RESERVA]" from the code list)
+ *   "09 Tue 25002" "001 MEX" "(T2) 17:45 MAD" "04:35" "10:50 0:00"      pairing, flight, dep, terminal, STD, arr, STA (next day when earlier), block, DH
+ *   "12 Fri" "020 MAD" "01:00 MEX" "(T2) 12:45" "11:45 0:00"
+ * -> flights "[Pairing: 25002] [Block: 10:50]" (dc DH when the DH hours are not 0:00); times are base times (B).
+ */
+function parseRolIndividual(pages) {
+  const trace = startTrace();
+  const rows = [];
+  const all = pages.flatMap(p => p.items);
+  const title = all.map(i => /^ROL INDIVIDUAL DE SERVICIOS ([A-Z]+) (\d{4})$/.exec(i.text)).find(Boolean);
+  const month = spanishMonth(title[1]), year = +title[2];
+  // the code list: "R4 : RESERVA", "X" ": DIAS INTOCABLES"
+  const legend = new Map();
+  for (const page of pages) for (const l of toLines(page.items)) {
+    const m = /^([A-Z0-9]{1,5}) ?: (.+)$/.exec(l.items.map(i => i.text).join(' '));
+    if (m && !/^(Id|Name|Pos|Group|Equip|Base|Seniority|Time zone|TOTAL|BLK|DH)$/.test(m[1])) legend.set(m[1], m[2].trim());
+  }
+  let pairing = null;
+  for (const page of pages) {
+    const head = page.items.find(i => i.text === 'BLOCK DH');
+    const blockX = head?.x ?? Infinity;
+    for (const l of toLines(page.items.filter(i => head && i.y > head.y + 3))) {
+      const words = l.items.flatMap(wordsIn);
+      const dm = /^(\d{2})$/.exec(words[0]?.text || '');
+      if (!dm || !WEEKDAYS.includes(words[1]?.text)) continue;
+      const t = Date.UTC(year, month, +dm[1]);
+      const d = new Date(t);
+      const base = { section: 'published', date: `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${String(year % 100).padStart(2, '0')}`, day: WEEKDAYS[d.getUTCDay()], notes: [] };
+      let k = 2;
+      if (/^\d{4,6}$/.test(words[k]?.text || '') && words[k].x < 110) { pairing = words[k]; k += 1; }
+      const rest = words.slice(k).filter(w => !/^\(T\d*\)$/.test(w.text));
+      const body = rest.filter(w => w.x < blockX - 5), tail = rest.filter(w => w.x >= blockX - 5);
+      const times = body.filter(w => /^\d{2}:\d{2}$/.test(w.text));
+      const ports = body.filter(w => /^[A-Z]{3}$/.test(w.text));
+      const code = body[0];
+      if (/^\d{3,4}$/.test(code?.text || '') && ports.length === 2 && times.length === 2) {
+        const [blk, dh] = tail.map(w => w.text);
+        const r = { ...base, duty: code.text, dc: dh && /[1-9]/.test(dh) ? 'DH' : '', dep: ports[0].text, arr: ports[1].text, begin: times[0].text,
+          end: `${times[1].text}${times[1].text < times[0].text ? '+1' : ''}`, notes: [pairing && `[Pairing: ${pairing.text}]`, blk && /[1-9]/.test(blk) && `[Block: ${blk.padStart(5, '0')}]`].filter(Boolean) };
+        rows.push(r);
+        for (const [f, it] of [['date', words.slice(0, 2)], ['duty', code], ['dep', ports[0]], ['arr', ports[1]], ['begin', times[0]], ['end', times[1]], ['info', [pairing, tail[0]].filter(Boolean)]]) mark(r, f, it);
+        pairing = null;
+      } else if (code) {
+        const r = { ...base, duty: code.text, dep: ports[0]?.text || '', begin: times[0]?.text || '', end: times[1]?.text || '', notes: legend.has(code.text) ? [`[${code.text}: ${legend.get(code.text)}]`] : [] };
+        if (r.end && r.end < r.begin) r.end += '+1';
+        rows.push(r);
+        for (const [f, it] of [['date', words.slice(0, 2)], ['duty', code], ['dep', ports[0]], ['begin', times[0]], ['end', times[1]]]) mark(r, f, it);
+      }
+    }
+  }
+  const p = `01${MONTHS[month]}${String(year).slice(2)}`;
+  const out = rows.map(r => outputRow({ ...r, info: r.notes.join(' ') }, 'B'));
+  return { format: 'rol-individual', period: `${p} - ${new Date(Date.UTC(year, month + 1, 0)).getUTCDate()}${p.slice(2)}`, notices: [], recognized: out.length > 0, published: out, planned: [], _trace: trace, _rows: rows };
+}
+
+const isFlightSheet = (page) => page.items.some(i => i.text === 'FlightNumber') && page.items.some(i => i.text === 'City Pair') && page.items.some(i => i.text === 'Off Block');
+
+/**
+ * Ryanair flight sheets (an e-mail print: "2020/09/14", then per flight "Key : value" lines): FlightNumber "FR 9141", Registration,
+ * City Pair "PMO - CRL", STD / STA, Block / fuel / pax figures, Airborne, Landed, Total flight, Off Block, On Block, Total Block, delays,
+ * Pilot Flying (Take Off, Landing), Captain Remarks; at the end "Flight Deck Crew": "RYCKVE : CP : VEERLE DE RYCKE".
+ * Times ("18" ":" "12") are UTC. A row per flight: begin / takeoff / landing / end = Off Block / Airborne / Landed / On Block,
+ * info "[Block: 02:21] [Flight: 02:08] [Pilot Flying: DHAALE]" and the captain's remark; crew = the flight deck crew, on every flight.
+ */
+function parseFlightSheet(pages) {
+  const trace = startTrace();
+  const rows = [];
+  let date = null, dateItem = null, rec = null;
+  const recs = [];
+  const crew = [];
+  let inCrew = false;
+  for (const page of pages) {
+    for (const l of toLines(page.items)) {
+      const its = l.items;
+      const text = its.map(i => i.text).join(' ');
+      const dm = /^(\d{4})\/(\d{2})\/(\d{2})$/.exec(text);
+      if (dm) { date = Date.UTC(+dm[1], +dm[2] - 1, +dm[3]); dateItem = its[0]; continue; }
+      if (text === 'Flight Deck Crew') { inCrew = true; continue; }
+      if (/^E-MAIL DISCLAIMER/.test(text)) inCrew = false;
+      const colon = its.findIndex(i => i.text === ':');
+      if (colon < 1) continue;
+      const key = its.slice(0, colon).map(i => i.text).join(' ');
+      const valItems = its.slice(colon + 1);
+      if (inCrew) {
+        const m = /^(\S+) : (\S+) : (.+)$/.exec(text);
+        if (m) crew.push({ text: `[${m[2]} - ${m[1]} - ${m[3]}]`, items: its });
+        continue;
+      }
+      const value = valItems.map(i => i.text).join(/^\d{2}$/.test(valItems[0]?.text || '') ? '' : ' ').trim(); // "18" ":" "12" -> 18:12
+      if (key === 'FlightNumber') { rec = { date, dateItem, v: {}, items: {} }; recs.push(rec); dateItem = null; }
+      if (rec) { rec.v[key] = value; rec.items[key] = valItems; }
+    }
+  }
+  for (const { date: t, dateItem: di, v, items } of recs) {
+    if (t == null) continue;
+    const d = new Date(t);
+    const [dep, arr] = (v['City Pair'] || '').split(/\s*-\s*/);
+    const tm = (k) => (/^\d{2}:\d{2}$/.test(v[k] || '') ? v[k] : '');
+    const pf = [...new Set([v['Take Off'], v.Landing].filter(Boolean))];
+    const r = {
+      section: 'published', date: `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${String(d.getUTCFullYear() % 100).padStart(2, '0')}`, day: WEEKDAYS[d.getUTCDay()],
+      duty: (v.FlightNumber || '').replace(/\s+/g, ''), registration: v.Registration || '', dep: dep || '', arr: arr || '',
+      begin: tm('Off Block'), takeoff: tm('Airborne'), landing: tm('Landed'), end: tm('On Block') && tm('On Block') < tm('Off Block') ? `${tm('On Block')}+1` : tm('On Block'),
+      crew: crew.map(c => c.text).join(''),
+      notes: [tm('Total Block') && `[Block: ${tm('Total Block')}]`, tm('Total flight') && `[Flight: ${tm('Total flight')}]`,
+        pf.length && `[Pilot Flying: ${pf.join(' / ')}]`, v['Captain Remarks'] && v['Captain Remarks'] !== 'No Data Available' && v['Captain Remarks']].filter(Boolean),
+    };
+    rows.push(r);
+    for (const [f, k] of [['duty', 'FlightNumber'], ['registration', 'Registration'], ['begin', 'Off Block'], ['takeoff', 'Airborne'], ['landing', 'Landed'], ['end', 'On Block'],
+      ['info', 'Total Block'], ['info', 'Total flight'], ['info', 'Take Off'], ['info', 'Landing']]) if (items[k]) mark(r, f, items[k].filter(i => i.text !== ':' || f !== 'duty'));
+    const cp = items['City Pair']?.[0];
+    if (cp && dep && arr) { mark(r, 'dep', pieceOf(cp, 0, dep.length)); mark(r, 'arr', pieceOf(cp, cp.text.length - arr.length, arr.length)); }
+    if (di) mark(r, 'date', di);
+    for (const c of crew) mark(r, 'crew', c.items);
+  }
+  const ts = recs.map(x => x.date).filter(x => x != null);
+  const fmt = (x) => { const d = new Date(x); return `${String(d.getUTCDate()).padStart(2, '0')}${MONTHS[d.getUTCMonth()]}${String(d.getUTCFullYear() % 100).padStart(2, '0')}`; };
+  const out = rows.map(r => outputRow({ ...r, info: r.notes.join(' ') }, 'Z'));
+  return { format: 'flight-sheet', period: ts.length ? `${fmt(Math.min(...ts))} - ${fmt(Math.max(...ts))}` : null, notices: [], recognized: out.length > 0, published: out, planned: [], _trace: trace, _rows: rows };
+}
+
+const isProgrammeDu = (page) => page.items.some(i => /^Programme du \d{2}\/\d{2}\/\d{4} au \d{2}\/\d{2}\/\d{4}$/.test(i.text)) && page.items.some(i => i.text === 'Activité') && page.items.some(i => i.text === 'Checkin');
+
+/**
+ * Air Corsica "Programme du 01/11/2024 au 31/01/2025": a day "Friday 01 November 2024", its header
+ * Activité | Dépar Arrivé | Checkin | Début | Fin | Checkout | Durée | TdV | TdS | Vol | Equipe, then per event three lines:
+ *   (above) UTC times "14:15" (Checkin) "15:15" (Début) "17:02" (Fin) ["17:22" Checkout], the flight "XK721", crew "CDB:BRY - OPL:CAD -"
+ *   (middle) "FLT - XK721 - FHXKE" (activity, registration), dep, arr, Durée, TdV, TdS, crew "C/C:LWS - HST:ATL"
+ *   (under) the function "(OPL)", local times "(15:15 LOC)" under their UTC ones, the aircraft "(AT6)".
+ * Checkin -> a C/I row, Checkout -> a C/O row ("[TdV: 05:11] [Duty: 05:31]"); times "14:15 Z / 15:15 L"; a flight with registration,
+ * ac, "[Block: 01:47]", crew "[CDB - BRY][OPL - CAD][C/C - LWS][HST - ATL]"; codes "BL ()", "VM5 ()" with their times ("[Duty: 04:00]"; in the
+ * brackets the crew member's function, left out), "HOT" a hotel row.
+ */
+function parseProgrammeDu(pages) {
+  const trace = startTrace();
+  const rows = [];
+  let cur = null, curItem = null;
+  for (const page of pages) {
+    const head = page.items.find(i => i.text === 'Checkin');
+    if (!head) continue;
+    const H = (t) => page.items.find(i => i.text === t && Math.abs(i.y - head.y) < 3)?.x;
+    const X = { ci: H('Checkin'), begin: H('Début'), end: H('Fin'), co: H('Checkout'), dur: H('Durée'), tdv: H('TdV'), tds: H('TdS'), vol: H('Vol'), crew: H('Equipe'), dep: H('Dépar Arrivé') ?? H('Dépar') };
+    const near = (it, x, tol = 14) => x != null && Math.abs(it.x - x) <= tol;
+    const DAY_HEAD = /^(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday) (\d{2}) ([A-Z][a-z]+) (\d{4})$/;
+    // in reading order: the day headers, and the events by their departure airport (the line's items stand up to 2.5pt apart,
+    // the activity a little lower or higher than its airports)
+    const anchors = page.items.filter(i => DAY_HEAD.test(i.text) || (/^[A-Z]{3}$/.test(i.text) && i.x > X.dep - 10 && i.x < X.dep + 15)).sort((a, b) => a.y - b.y);
+    for (const anchor of anchors) {
+      const dm = DAY_HEAD.exec(anchor.text);
+      if (dm) {
+        const t = Date.UTC(+dm[4], monthIndex(dm[3].slice(0, 3)), +dm[2]);
+        const d = new Date(t);
+        cur = { date: `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${dm[4].slice(2)}`, day: WEEKDAYS[d.getUTCDay()] };
+        curItem = anchor;
+        continue;
+      }
+      const band = (lo, hi) => page.items.filter(i => i.y - anchor.y >= lo && i.y - anchor.y < hi);
+      const mid = band(-2.6, 3.0), above = band(-8, -2.6), under = band(3.0, 8);
+      const act = mid.find(i => i.x < X.dep - 10 && !/^\(/.test(i.text));
+      if (!cur || !act) continue;
+      const ports = mid.filter(i => i.x > X.dep - 10 && i.x < X.ci - 10 && /^[A-Z]{3}$/.test(i.text)).sort((a, b) => a.x - b.x);
+      const l = { y: anchor.y, items: mid };
+      const utc = (key) => above.find(i => near(i, X[key], 12) && /^\d{2}:\d{2}$/.test(i.text));
+      const loc = (u) => u && under.find(i => /^\(\d{2}:\d{2} LOC\)$/.test(i.text) && Math.abs(i.x - (u.x - 10)) <= 8);
+      const zl = (key, days = 0) => {
+        const u = utc(key);
+        if (!u) return '';
+        const l2 = loc(u);
+        const plus = days ? ` +${days}` : '';
+        return l2 ? `${u.text} Z${plus} / ${l2.text.slice(1, 6)} L` : `${u.text} Z${plus}`;
+      };
+      const marksZ = (key) => [utc(key), loc(utc(key))].filter(Boolean);
+      const val = (key, from = l.items) => from.find(i => near(i, X[key]) && /^\d{2}:\d{2}$/.test(i.text))?.text;
+      const add = (r, marks) => {
+        const row = { section: 'published', ...cur, notes: [], ...r };
+        rows.push(row);
+        for (const [f, it] of marks) if (it && [].concat(it).length) mark(row, f, it);
+        if (curItem) { mark(row, 'date', curItem); curItem = null; }
+        return row;
+      };
+      const [dep, arr] = [ports[0], ports[1]];
+      if (utc('ci')) add({ duty: 'C/I', dep: dep.text, begin: zl('ci') }, [['ci', marksZ('ci')], ['dep', dep]]);
+      const crewText = [...above, ...l.items].filter(i => i.x >= X.crew - 25).sort((a, b) => a.y - b.y || a.x - b.x).map(i => i.text).join(' ');
+      const crew = [...crewText.matchAll(/([A-Z/]+):([A-Z]+)/g)].map(m => `[${m[1]} - ${m[2]}]`).join('');
+      const crewItems = [...above, ...l.items].filter(i => i.x >= X.crew - 25);
+      const endDays = utc('end') && utc('begin') && utc('end').text < utc('begin').text ? 1 : 0;
+      const flt = /^(FLT|MEP) - ([A-Z0-9]{2}\d{1,4}[A-Z]?)(?: - ([A-Z0-9-]+))?$/.exec(act.text);
+      const ac = /^\(([A-Z0-9]{2,4})\)$/.exec(under.find(i => near(i, X.vol))?.text || '')?.[1] || '';
+      let row;
+      if (flt) {
+        const dur = val('dur');
+        row = add({ duty: flt[2], dc: flt[1] === 'MEP' ? 'MEP' : '', registration: flt[3] || '', dep: dep.text, arr: arr?.text || '', begin: zl('begin'), end: zl('end', endDays), ac, crew,
+          notes: dur ? [`[Block: ${dur}]`] : [] },
+        [['duty', pieceOf(act, act.text.indexOf(flt[2]), flt[2].length)], ['registration', flt[3] && pieceOf(act, act.text.lastIndexOf(flt[3]), flt[3].length)], ['dep', dep], ['arr', arr],
+          ['begin', marksZ('begin')], ['end', marksZ('end')], ['ac', under.find(i => near(i, X.vol))], ['crew', crewItems], ['info', l.items.find(i => near(i, X.dur))]]);
+      } else {
+        // "BL ()", "VL (OPL)": the code and the crew member's function (left out); HOT = a hotel night
+        const code = /^(\S+)/.exec(act.text)[1];
+        const tds = val('tds') || val('dur');
+        row = add({ duty: code === 'HOT' ? 'H' : code, dep: dep.text, arr: arr && arr.text !== dep.text ? arr.text : '', begin: zl('begin'), end: zl('end', endDays),
+          notes: [tds && `[Duty: ${tds}]`].filter(Boolean) },
+        [['duty', pieceOf(act, 0, code.length)], ['dep', dep], ['begin', marksZ('begin')], ['end', marksZ('end')]]);
+      }
+      if (utc('co')) {
+        const notes = [val('tdv') && `[TdV: ${val('tdv')}]`, val('tds') && `[Duty: ${val('tds')}]`].filter(Boolean);
+        add({ duty: 'C/O', arr: row.arr || row.dep, end: zl('co'), notes }, [['co', marksZ('co')], ['info', l.items.filter(i => near(i, X.tdv) || near(i, X.tds))]]);
+      }
+    }
+  }
+  const per = pages.flatMap(p => p.items).map(i => /^Programme du (\d{2})\/(\d{2})\/(\d{4}) au (\d{2})\/(\d{2})\/(\d{4})$/.exec(i.text)).find(Boolean);
+  const out = rows.map(r => outputRow({ ...r, info: r.notes.join(' ') }, 'Z'));
+  return { format: 'programme-du', period: per ? `${per[1]}${MONTHS[+per[2] - 1]}${per[3].slice(2)} - ${per[4]}${MONTHS[+per[5] - 1]}${per[6].slice(2)}` : null,
+    notices: [], recognized: out.length > 0, published: out, planned: [], _trace: trace, _rows: rows };
+}
+
+const CAL_WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+const isMonthCalendar = (page) => page.items.some(i => /^[A-Z][a-z]+ \d{4}$/.test(i.text) && monthIndex(i.text.slice(0, 3)) >= 0 && i.y < 30)
+  && toLines(page.items).some(l => l.items.filter(i => CAL_WEEKDAYS.includes(i.text)).length === 7) && page.items.some(i => i.text === '~' || /~/.test(i.text));
+
+/**
+ * A month calendar print (Crew Access; "April 2025", a week a row under Monday ... Sunday, the days "Mar. 31" "1" ... "May. 1"),
+ * each day's events stacked in its cell, a line each (local times):
+ *   "Report" "07:00" "NCL" (Apresentação) -> C/I;  "Release" "15:00" "NCL" -> C/O;  "OFF", "LV", "RDO" a code alone;
+ *   "LS557" "NCL 06:04" "~ 09:17 AGP" an event (flight or code, "BLS", "Travel (HIR)" -> HIR "[HIR: Travel]");
+ *   "LS554" "AYT 20:01 ~ NCL" going on into the next day, and there "LS554" "AYT ~ 00:44 NCL" with its end: one row, end "+1";
+ *   "Hotel" "J2S ~ 18:25 J2S" a hotel row.
+ */
+function parseMonthCalendar(pages) {
+  const trace = startTrace();
+  const rows = [];
+  const title = pages.flatMap(p => p.items).find(i => /^[A-Z][a-z]+ \d{4}$/.test(i.text) && monthIndex(i.text.slice(0, 3)) >= 0);
+  const year0 = +title.text.slice(-4), month0 = monthIndex(title.text.slice(0, 3));
+  let month = null, year = year0, lastN = null;
+  const open = new Map(); // duty -> row going on into the next day
+  let colX = null; // the weekday columns (a page without the weekday line goes on with the page before)
+  for (const page of pages) {
+    const wd = toLines(page.items).find(l => l.items.filter(i => CAL_WEEKDAYS.includes(i.text)).length === 7) || (colX && { y: -1 });
+    if (!wd) continue;
+    if (wd.items) colX = wd.items.filter(i => CAL_WEEKDAYS.includes(i.text)).map(i => i.x).sort((a, b) => a - b);
+    const colOf = (x) => colX.reduce((k, cx, j) => (x >= cx - 8 ? j : k), 0);
+    // the day-number lines: 7 items, numbers or "Mar. 31"
+    const DAYNUM = /^(?:([A-Z][a-z]{2})\. )?(\d{1,2})$/;
+    const dayLines = toLines(page.items.filter(i => i.y > wd.y + 3)).filter(l => l.items.length === 7 && l.items.every(i => DAYNUM.test(i.text)));
+    // "28" "29" "Apr. 30" "1": the days before the first month name are in that month
+    const firstMon = month == null && dayLines[0]?.items.map(i => DAYNUM.exec(i.text)[1]).find(Boolean);
+    if (firstMon) { month = monthIndex(firstMon); if (month > month0 + 6) year -= 1; }
+    for (const [w, dl] of dayLines.entries()) {
+      const bottom = dayLines[w + 1]?.y ?? page.height;
+      const cells = page.items.filter(i => i.y > dl.y + 3 && i.y < bottom - 3);
+      for (const [c, di] of [...dl.items].sort((a, b) => a.x - b.x).entries()) {
+        const [, mon, nn] = DAYNUM.exec(di.text);
+        const n = +nn;
+        if (mon) { const m = monthIndex(mon); if (month != null && m < month - 6) year += 1; if (month == null && m > month0 + 6) year -= 1; month = m; }
+        else if (month == null) month = month0;
+        else if (lastN != null && n < lastN) { month += 1; if (month > 11) { month = 0; year += 1; } }
+        lastN = n;
+        const t = Date.UTC(year, month, n);
+        const d = new Date(t);
+        const base = { section: 'published', date: `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${String(d.getUTCFullYear() % 100).padStart(2, '0')}`, day: WEEKDAYS[d.getUTCDay()], t, notes: [] };
+        let first = true;
+        const add = (r, marks) => {
+          const row = { ...base, ...r, notes: r.notes || [] };
+          rows.push(row);
+          for (const [f, it] of marks) if (it && [].concat(it).length) mark(row, f, it);
+          if (first) { mark(row, 'date', di); first = false; }
+          return row;
+        };
+        // an event's end may wrap onto the next line ("SV1463" "RUH 15:35" / "~ 17:15 MED")
+        const lines = [];
+        for (const l of toLines(cells.filter(i => colOf(i.x) === c), 2)) {
+          if (/^~/.test(l.items[0].text) && lines.length && !/~/.test(lines.at(-1).items.map(i => i.text).join(' '))) lines.at(-1).items.push(...l.items);
+          else lines.push({ items: [...l.items] });
+        }
+        for (const l of lines) {
+          const [nameItem, ...restItems] = l.items;
+          const name = nameItem.text;
+          const R = restItems.map(i => i.text).join(' ');
+          let m;
+          if (/^(Report|Apresentação|Apresentacao)$/.test(name) && (m = /^(\d{2}:\d{2}) ([A-Z0-9]{3})$/.exec(R))) { add({ duty: 'C/I', dep: m[2], begin: m[1] }, [['ci', restItems[0]], ['dep', restItems[1]]]); continue; }
+          if (/^(Release|Liberação)$/.test(name) && (m = /^(\d{2}:\d{2}) ([A-Z0-9]{3})$/.exec(R))) { add({ duty: 'C/O', arr: m[2], end: m[1] }, [['co', restItems[0]], ['arr', restItems[1]]]); continue; }
+          const code = /^(.+) \(([^)]+)\)$/.exec(name);
+          const duty = name === 'Hotel' ? 'H' : code ? code[2] : name;
+          const notes = code ? [`[${code[2]}: ${code[1]}]`] : [];
+          m = /^(?:([A-Z0-9]{3}) )?(\d{2}:\d{2})? ?~ ?(\d{2}:\d{2})?(?: ([A-Z0-9]{3}))?$/.exec(R);
+          if (!R) { add({ duty, notes }, [['duty', nameItem]]); continue; }
+          if (!m) continue;
+          const [, dep, t1, t2, arr] = m;
+          const ws = restItems.flatMap(wordsIn);
+          const w = (re, k = 0) => ws.filter(x => re.test(x.text))[k];
+          const prev = open.get(duty);
+          if (!t1 && t2 && prev) {
+            // the end of an event from an earlier day
+            const days = Math.round((t - prev.t) / 86400000);
+            prev.end = `${t2}${days > 0 ? `+${days}` : ''}`;
+            if (arr) prev.arr = arr;
+            mark(prev, 'end', w(/^\d{2}:\d{2}$/));
+            open.delete(duty);
+            continue;
+          }
+          const row = add({ duty, dep: dep || '', arr: arr || '', begin: t1 || '', end: t2 || '', notes },
+            [['duty', nameItem], ['dep', dep && w(/^[A-Z0-9]{3}$/)], ['begin', t1 && w(/^\d{2}:\d{2}$/)], ['end', t2 && w(/^\d{2}:\d{2}$/, t1 ? 1 : 0)], ['arr', arr && w(/^[A-Z0-9]{3}$/, dep ? 1 : 0)]]);
+          if (t1 && !t2) open.set(duty, row);
+        }
+      }
+    }
+  }
+  for (const r of rows) if (r.duty === 'H' && r.arr === r.dep) r.arr = '';
+  const ts = rows.map(r => r.t);
+  const fmt = (x) => { const d = new Date(x); return `${String(d.getUTCDate()).padStart(2, '0')}${MONTHS[d.getUTCMonth()]}${String(d.getUTCFullYear() % 100).padStart(2, '0')}`; };
+  const out = rows.map(({ t, ...r }) => outputRow({ ...r, info: r.notes.join(' ') }, 'L'));
+  return { format: 'month-calendar', period: ts.length ? `${fmt(Math.min(...ts))} - ${fmt(Math.max(...ts))}` : null, notices: [], recognized: out.length > 0, published: out, planned: [], _trace: trace, _rows: rows };
+}
+
+const EDW_COLS = { DATE: 'date', DUTY: 'duty', ROUTE: 'route', DETAILS: 'details', 'START/END (LT)': 'startEnd', 'STD / STA (UTC)': 'stdSta', POS: 'pos', 'POS TIME (LT)': 'posTime',
+  'CHECK-IN /': 'ciCo', 'BLOCK OFF / ON': 'offOn', 'A/C': 'ac', BLOCK: 'block', 'BH 28': 'bh28', 'DH 7': 'dh7', 'DH 14': 'dh14', 'DH 28': 'dh28' };
+const isDayLineRoster = (page) => ['ROUTE', 'DETAILS', 'START/END (LT)', 'STD / STA (UTC)', 'CHECK-IN /'].every(t => page.items.some(i => i.text === t));
+
+/**
+ * A month as a line per day (Edelweiss; "Nicolas Auer | 102732 | May - 2024"):
+ *   DATE | DUTY | ROUTE | DETAILS | START/END (LT) | STD / STA (UTC) | POS | POS TIME (LT) | CHECK-IN / CHECK-OUT (UTC) | BLOCK OFF / ON (UTC) |
+ *   A/C TYPE | BLOCK | BH 28 | DUTY | DH 7 | DH 14 | DH 28
+ *   "02.05.2024 130-131 ZRH-HRG-ZRH 05:50-17:30 04:50-15:00 03:50-15:30 320 09:20 ... 11:40": a day's flights as one row (duty "130-131", the route's
+ *   first and last airport, STD of the first and STA of the last leg, "[Route: ZRH-HRG-ZRH] [Block: 09:20]") between a C/I and a C/O row
+ *   ("03:50 Z / 05:50 L", "15:30 Z / 17:30 L", "[Duty: 11:40]"); a duty over midnight prints "CI: 20:35" on its first day and "CO: 07:40" on the next.
+ *   Day codes (OFF, RSV, OFC 08:00-17:00 local) with DETAILS in info ("[GAV]"). The cumulated hours (BH 28, DH 7/14/28) are not read.
+ */
+function parseDayLineRoster(pages) {
+  const trace = startTrace();
+  const rows = [];
+  const range = (s) => /^(\d{2}:\d{2})-(\d{2}:\d{2})$/.exec(s || '');
+  for (const page of pages) {
+    const head = page.items.find(i => i.text === 'ROUTE');
+    if (!head) continue;
+    const seen = new Set();
+    const cols = sameLine(page, head).map((h) => {
+      let col = EDW_COLS[h.text];
+      if (h.text === 'DUTY') { col = seen.has('DUTY') ? 'dutyTime' : 'duty'; seen.add('DUTY'); }
+      return col && { col, x: h.x };
+    }).filter(Boolean);
+    const colOf = (i) => cols.reduce((c, h) => (h.x <= i.x + 4 ? h.col : c), 'date');
+    for (const l of toLines(page.items.filter(i => i.y > head.y + 12), 2)) {
+      const its = {};
+      for (const i of l.items) (its[colOf(i)] ||= []).push(i);
+      const cell = (c) => (its[c] || []).map(i => i.text).join(' ').trim();
+      const dm = /^(\d{2})\.(\d{2})\.(\d{4})$/.exec(cell('date'));
+      if (!dm) continue;
+      const t = Date.UTC(+dm[3], +dm[2] - 1, +dm[1]);
+      const d = new Date(t);
+      const base = { section: 'published', date: `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${dm[3].slice(2)}`, day: WEEKDAYS[d.getUTCDay()], notes: [] };
+      let first = true;
+      const add = (r, marks) => {
+        const row = { ...base, ...r, notes: r.notes || [] };
+        rows.push(row);
+        for (const [f, it] of marks) if (it && [].concat(it).length) mark(row, f, it);
+        if (first) { mark(row, 'date', its.date); first = false; }
+        return row;
+      };
+      const duty = cell('duty'), route = cell('route'), details = cell('details') === '-' ? '' : cell('details');
+      const se = range(cell('startEnd')), ss = range(cell('stdSta')), cc = range(cell('ciCo'));
+      const ci = cc?.[1] || /^CI: (\d{2}:\d{2})/.exec(cell('ciCo'))?.[1], co = cc?.[2] || /^CO: (\d{2}:\d{2})/.exec(cell('ciCo'))?.[1];
+      const legs = /^[A-Z]{3}(-[A-Z]{3})+$/.test(route) ? route.split('-') : null;
+      const dur = (c) => (/^\d{1,3}:\d{2}$/.test(cell(c)) && /[1-9]/.test(cell(c)) ? cell(c).padStart(5, '0') : '');
+      if (legs) {
+        if (ci) add({ duty: 'C/I', dep: legs[0], begin: `${ci} Z${se ? ` / ${se[1]} L` : ''}` }, [['ci', its.ciCo]]);
+        add({ duty, dep: legs[0], arr: legs.at(-1), begin: ss ? `${ss[1]} Z` : '', end: ss ? `${ss[2]} Z${ss[2] < ss[1] ? ' +1' : ''}` : '', ac: cell('ac') === '-' ? '' : cell('ac'),
+          notes: [legs.length > 2 && `[Route: ${route}]`, details && `[${details}]`, dur('block') && `[Block: ${dur('block')}]`].filter(Boolean) },
+        [['duty', its.duty], ['dep', its.route], ['begin', its.stdSta], ['ac', its.ac], ['info', its.block]]);
+        if (co) add({ duty: 'C/O', arr: legs.at(-1), end: `${co} Z${se ? ` / ${se[2]} L` : ''}`, notes: dur('dutyTime') ? [`[Duty: ${dur('dutyTime')}]`] : [] }, [['co', its.ciCo], ['info', its.dutyTime]]);
+      } else if (duty) {
+        add({ duty, begin: se ? `${se[1]} L` : '', end: se ? `${se[2]} L` : '', notes: [details && `[${details}]`, dur('dutyTime') && `[Duty: ${dur('dutyTime')}]`].filter(Boolean) },
+          [['duty', its.duty], ['begin', its.startEnd], ['info', its.details]]);
+      }
+    }
+  }
+  const title = pages.flatMap(p => p.items).map(i => /\| ([A-Z][a-z]+) - (\d{4})$/.exec(i.text) || /^([A-Z][a-z]+) - (\d{4})$/.exec(i.text)).find(Boolean);
+  const mi = title ? monthIndex(title[1].slice(0, 3)) : -1;
+  const period = mi >= 0 ? `01${MONTHS[mi]}${title[2].slice(2)} - ${new Date(Date.UTC(+title[2], mi + 1, 0)).getUTCDate()}${MONTHS[mi]}${title[2].slice(2)}` : null;
+  const out = rows.map(r => outputRow({ ...r, info: r.notes.join(' ') }, 'Z'));
+  return { format: 'day-line-roster', period, notices: [], recognized: out.length > 0, published: out, planned: [], _trace: trace, _rows: rows };
+}
+
+const isMonthPlanDetail = (page) => lineTexts(page).some(t => /^MONTH PLAN \d{2}\/\d{2} - \d{2}\/\d{2}\/\d{4}$/.test(t)) && lineTexts(page).some(t => t === 'Detail duty plan');
+
+/**
+ * "MONTH PLAN 01/09 - 30/09/2025" (Vietnam Airlines), its "Detail duty plan": a day "31." with its legs on the line above
+ * ("1135 HAN ==> 1235 DIN", up to four side by side) and their flight numbers on the line under ("VN1806"); a leg over midnight
+ * prints "2305 DAD ==> HAN ..." and the next day "... DAD ==> 0030 HAN" (one row, end "+1"); other days a text: "--- Dayoff ---" with
+ * "Day OFF based on fly schedule (FOM)", "Standby C (0900 -- 1700 )", "--- Extra off days ---", "Off/Birthday leave". Times taken as local.
+ * The "Scheme" calendar above is not read.
+ */
+function parseMonthPlanDetail(pages) {
+  const trace = startTrace();
+  const rows = [];
+  const all = lineTexts(pages.find(isMonthPlanDetail));
+  const per = all.map(t => /^MONTH PLAN (\d{2})\/(\d{2}) - (\d{2})\/(\d{2})\/(\d{4})$/.exec(t)).find(Boolean);
+  const y0 = +per[5], m0 = +per[2] - 1, d0 = +per[1];
+  let month = null, year = y0, lastN = null, open = null;
+  for (const page of pages) {
+    const detail = toLines(page.items).find(l => l.items.map(i => i.text).join(' ') === 'Detail duty plan');
+    if (!detail) continue;
+    const labels = page.items.filter(i => i.y > detail.y && /^\d{1,2}\.$/.test(i.text) && i.x < 70).sort((a, b) => a.y - b.y);
+    for (const [k, lab] of labels.entries()) {
+      const n = parseInt(lab.text, 10);
+      if (month == null) { month = n > d0 ? m0 - 1 : m0; if (month < 0) { month = 11; year -= 1; } }
+      else if (n < lastN) { month += 1; if (month > 11) { month = 0; year += 1; } }
+      lastN = n;
+      const t = Date.UTC(year, month, n);
+      const d = new Date(t);
+      const base = { section: 'published', date: `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${String(d.getUTCFullYear() % 100).padStart(2, '0')}`, day: WEEKDAYS[d.getUTCDay()], t, notes: [] };
+      const lo = Math.max(lab.y - 7, labels[k - 1] ? labels[k - 1].y + 7 : -Infinity), hi = labels[k + 1] ? Math.min(lab.y + 7, labels[k + 1].y - 7) : lab.y + 7;
+      const band = page.items.filter(i => i !== lab && i.y >= lo && i.y <= hi && i.x > 70);
+      const above = band.filter(i => i.y < lab.y).sort((a, b) => a.x - b.x), under = band.filter(i => i.y > lab.y).sort((a, b) => a.x - b.x);
+      let first = true;
+      const add = (r, marks) => {
+        const row = { ...base, ...r, notes: r.notes || [] };
+        rows.push(row);
+        for (const [f, it] of marks) if (it && [].concat(it).length) mark(row, f, it);
+        if (first) { mark(row, 'date', lab); first = false; }
+        return row;
+      };
+      if (above.some(i => i.text === '==>')) {
+        const flights = under.filter(i => /^[A-Z0-9]{2}\d{1,4}[A-Z]?$/.test(i.text));
+        let f = 0;
+        for (let j = 0; j < above.length; j++) {
+          if (above[j].text !== '==>') continue;
+          const b1 = above[j - 1], b2 = above[j - 2], a1 = above[j + 1], a2 = above[j + 2];
+          const dep = /^[A-Z]{3}$/.test(b1?.text || '') ? b1 : null;
+          const t1 = dep && /^\d{4}$/.test(b2?.text || '') ? b2 : null;
+          const t2 = /^\d{4}$/.test(a1?.text || '') ? a1 : null;
+          const arr = /^[A-Z]{3}$/.test((t2 ? a2 : a1)?.text || '') ? (t2 ? a2 : a1) : null;
+          const flight = flights[f++];
+          const hh = (x) => `${x.text.slice(0, 2)}:${x.text.slice(2)}`;
+          if (!t1 && t2 && open && open.duty === flight?.text) {
+            const days = Math.round((t - open.t) / 86400000);
+            open.end = `${hh(t2)}${days > 0 ? `+${days}` : ''}`;
+            mark(open, 'end', t2);
+            open = null;
+            continue;
+          }
+          const r = add({ duty: flight?.text || '', dep: dep?.text || '', arr: arr?.text || '', begin: t1 ? hh(t1) : '', end: t2 ? hh(t2) : '' },
+            [['duty', flight], ['dep', dep], ['begin', t1], ['arr', arr], ['end', t2]]);
+          if (r.begin && r.end && r.end < r.begin) r.end += '+1';
+          open = t1 && !t2 ? r : null;
+        }
+        continue;
+      }
+      // a day's text: "--- Dayoff ---" + "Day OFF based on fly schedule (FOM)", "Standby C (0900 -- 1700 )"
+      const lines = toLines(band, 2).map(l => l.items.map(i => i.text).join(' ').trim());
+      const text = lines.join(' ');
+      const sb = /^(.+?) \((\d{4}) -- (\d{4}) \)$/.exec(text);
+      if (sb) { add({ duty: sb[1], begin: `${sb[2].slice(0, 2)}:${sb[2].slice(2)}`, end: `${sb[3].slice(0, 2)}:${sb[3].slice(2)}` }, [['duty', band.filter(i => !/\d/.test(i.text))], ['begin', band.find(i => i.text === `(${sb[2]}`)], ['end', band.find(i => i.text === sb[3])]]); continue; }
+      const head = /^-+ (.+?) -+$/.exec(lines[0] || '');
+      if (head) add({ duty: head[1], notes: lines.slice(1).map(x => `[${x}]`) }, [['duty', band.filter(i => i.y < lab.y + 1 && !/^-+$/.test(i.text))], ['info', band.filter(i => i.y > lab.y + 1)]]);
+      else if (text) add({ duty: text }, [['duty', band]]);
+    }
+  }
+  const pd = (dd, mm, yy) => `${dd}${MONTHS[+mm - 1]}${String(yy).slice(2)}`;
+  const out = rows.map(({ t, ...r }) => outputRow({ ...r, info: r.notes.join(' ') }, 'L'));
+  return { format: 'month-plan-detail', period: `${pd(per[1], per[2], per[5])} - ${pd(per[3], per[4], per[5])}`, notices: [], recognized: out.length > 0, published: out, planned: [], _trace: trace, _rows: rows };
+}
+
+/** A data line's items by the column whose header starts left of them (`cols`: [{ col, x }] in x order). */
+function cellsByHeader(items, cols, tol = 4) {
+  const its = {};
+  for (const i of items) {
+    const c = cols.reduce((b, h) => (h.x <= i.x + tol ? h.col : b), cols[0].col);
+    (its[c] ||= []).push(i);
+  }
+  const cell = (c) => (its[c] || []).map(i => i.text).join(' ').trim();
+  return { its, cell };
+}
+
+const isPilotLogBookReport = (page) => page.items.some(i => i.text === 'Pilot Log Book Report') && page.items.some(i => i.text === 'Flt No') && page.items.some(i => i.text === 'Dep Stn');
+
+/**
+ * "Pilot Log Book Report" (Qatar Airways, "From: 23-Feb-2019 To 02-Apr-2021"), a line per flight or simulator session:
+ *   # | Date "26-03-2019" | Flt No | Dep Stn | Dep Time | Arr Stn | Arr Time | A/C Type | A/C Reg | Name Of PIC | Co-Pilot Name | Block Hrs | PIC Hrs |
+ *   CP Acting As FO Hrs | Inst Hrs | Jump Seat Hrs | Logbook Hrs | SIM Hrs | Night Hrs | Take Off Day Night | Landings Day Night
+ * Times UTC; crew "[PIC - name][Co-Pilot - name]"; info "[Block: ..] [PIC: ..] [CP as FO: ..] [Instructor: ..] [Jump Seat: ..] [Logbook: ..] [Sim: ..]
+ * [Night: ..] [Takeoff Day: 1] [Landing Night: 1]" (00:00 and 0 left out); "MFTD" and the like (a simulator) as the duty.
+ */
+function parsePilotLogBookReport(pages) {
+  const trace = startTrace();
+  const rows = [];
+  const NAMES = { '#': 'n', Date: 'date', 'Flt No': 'flight', 'Dep Stn': 'dep', 'Dep Time': 'begin', 'Arr Stn': 'arr', Arr: 'end', 'A/C': 'ac', Name: 'pic', 'Co-Pilot': 'co',
+    Block: 'block', PIC: 'picH', 'CP Acting As': 'cpfo', Inst: 'inst', Jump: 'jump', Logbook: 'logbook', SIM: 'sim', Night: 'night', 'Take Off': 'tk', Landings: 'ld' };
+  for (const page of pages) {
+    const head = page.items.find(i => i.text === 'Flt No');
+    if (!head) continue;
+    const seen = {};
+    const cols = sameLine(page, head).map((h) => {
+      const n = (seen[h.text] = (seen[h.text] || 0) + 1);
+      let col = NAMES[h.text];
+      if (h.text === 'A/C') col = n === 1 ? 'ac' : 'reg';
+      if (h.text === 'Name') col = n === 1 ? 'pic' : null; // "Name Of PIC", "Co-Pilot Name"
+      if (h.text === 'Co-Pilot') col = 'coName';
+      return col && { col, x: h.x };
+    }).filter(Boolean);
+    // the Day / Night columns under Take Off and Landings
+    const sub = page.items.filter(i => i.y > head.y + 3 && i.y < head.y + 14 && /^(Day|Night)$/.test(i.text) && i.x > (cols.find(c => c.col === 'tk')?.x ?? Infinity) - 40).sort((a, b) => a.x - b.x);
+    cols.push(...sub.map((s, k) => ({ col: ['tkDay', 'tkNight', 'ldDay', 'ldNight'][k], x: s.x })));
+    cols.sort((a, b) => a.x - b.x);
+    // a record per dated line; the lines under it carry its wrapped names ("D" "SOUZA" / "Wesley Adam" / "(95566 - FO)") and "(+1)"
+    const records = [];
+    for (const l of toLines(page.items.filter(i => i.y > head.y + 20), 2)) {
+      const c = cellsByHeader(l.items, cols);
+      if (/^\d{2}-\d{2}-\d{4}$/.test(c.cell('date'))) records.push(c.its);
+      else if (records.length) for (const [k, list] of Object.entries(c.its)) if (k !== 'n') (records.at(-1)[k] ||= []).push(...list);
+    }
+    for (const its of records) {
+      const cell = (c) => (its[c] || []).map(i => i.text).join(' ').trim();
+      const dm = /^(\d{2})-(\d{2})-(\d{4})$/.exec(cell('date'));
+      if (!dm || !/^[A-Z]{3}$/.test(cell('dep'))) continue;
+      const t = Date.UTC(+dm[3], +dm[2] - 1, +dm[1]);
+      const d = new Date(t);
+      const dur = (c) => (/^\d{1,3}:\d{2}$/.test(cell(c)) && /[1-9]/.test(cell(c)) ? cell(c) : '');
+      const cnt = (c) => (/^[1-9]\d*$/.test(cell(c)) ? cell(c) : '');
+      const flight = cell('flight');
+      const r = {
+        section: 'published', date: `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${dm[3].slice(2)}`, day: WEEKDAYS[d.getUTCDay()],
+        duty: flight.replace(/\s+/g, ''), dep: cell('dep'), arr: cell('arr'), begin: cell('begin'), end: cell('end').replace(/\s*\((\+\d)\)$/, '$1'),
+        ac: cell('ac'), registration: cell('reg'),
+        // the Co-Pilot cell: "NAME First (31861 - CP) NAME2 First2 (96860 - FO)"
+        crew: [cell('pic') && `[PIC - ${cell('pic')}]`, ...[...cell('coName').matchAll(/\s*(.+?) \((\d+) - ([A-Z]+)\)/g)].map(m => `[${m[3]} - ${m[2]} - ${m[1]}]`)].filter(Boolean).join('')
+          || (cell('coName') ? `[Co-Pilot - ${cell('coName')}]` : ''),
+        notes: [...[['Block', 'block'], ['PIC', 'picH'], ['CP as FO', 'cpfo'], ['Instructor', 'inst'], ['Jump Seat', 'jump'], ['Logbook', 'logbook'], ['Sim', 'sim'], ['Night', 'night']]
+          .filter(([, c]) => dur(c)).map(([k, c]) => `[${k}: ${dur(c)}]`),
+        ...[['Takeoff Day', 'tkDay'], ['Takeoff Night', 'tkNight'], ['Landing Day', 'ldDay'], ['Landing Night', 'ldNight']].filter(([, c]) => cnt(c)).map(([k, c]) => `[${k}: ${cnt(c)}]`)],
+      };
+      rows.push(r);
+      for (const [f, c] of [['date', 'date'], ['duty', 'flight'], ['dep', 'dep'], ['arr', 'arr'], ['begin', 'begin'], ['end', 'end'], ['ac', 'ac'], ['registration', 'reg'], ['crew', 'pic'], ['crew', 'coName']]) if (its[c]) mark(r, f, its[c]);
+      for (const c of ['block', 'picH', 'cpfo', 'inst', 'jump', 'logbook', 'sim', 'night']) if (dur(c)) mark(r, 'info', its[c]);
+      for (const c of ['tkDay', 'tkNight', 'ldDay', 'ldNight']) if (cnt(c)) mark(r, 'info', its[c]);
+    }
+  }
+  const per = pages.flatMap(p => p.items).map(i => /^From: (\d{2})-([A-Z][a-z]{2})-(\d{4}) To (\d{2})-([A-Z][a-z]{2})-(\d{4})$/.exec(i.text)).find(Boolean);
+  const out = rows.map(r => outputRow({ ...r, info: r.notes.join(' ') }, 'Z'));
+  return { format: 'pilot-logbook-report', period: per ? `${per[1]}${per[2]}${per[3].slice(2)} - ${per[4]}${per[5]}${per[6].slice(2)}` : null, notices: [], recognized: out.length > 0, published: out, planned: [], _trace: trace, _rows: rows };
+}
+
+const isSequenceLogbook = (page) => page.items.some(i => i.text === 'Logbook') && ['SeqDate', 'DepSta', 'ArrSta', 'Out Dt Time', 'InDtTime'].every(t => page.items.some(i => i.text === t));
+
+/**
+ * "Logbook" (US airline sequences): YEAR | SeqDate | Seq | EmpSeat | Eq | EQCode | Flt | DepSta | ArrSta | Out Dt Time "Aug 6, 2024 09:34 AM" |
+ * InDtTime | DH | AcNum | FLY | PAX | Distance. A row per leg on its Out date (local times), "+1" when In is on a later date; info
+ * "[Seq: 31082] [Flight: 1:26] [Pax: 84] [Distance: 337]"; DH -> dc DH.
+ */
+function parseSequenceLogbook(pages) {
+  const trace = startTrace();
+  const rows = [];
+  const NAMES = { YEAR: 'year', SeqDate: 'seqDate', Seq: 'seq', EmpSeat: 'seat', Eq: 'ac', EQCode: 'eqCode', Flt: 'flight', DepSta: 'dep', ArrSta: 'arr', 'Out Dt Time': 'out', InDtTime: 'in',
+    DH: 'dh', AcNum: 'reg', FLY: 'fly', PAX: 'pax', Distance: 'dist' };
+  const stamp = (s) => {
+    const m = /^([A-Z][a-z]{2}) (\d{1,2}), (\d{4}) (\d{1,2}):(\d{2}) ([AP]M)$/.exec(s || '');
+    if (!m) return null;
+    const h = (+m[4] % 12) + (m[6] === 'PM' ? 12 : 0);
+    return { t: Date.UTC(+m[3], monthIndex(m[1]), +m[2]), hhmm: `${String(h).padStart(2, '0')}:${m[5]}` };
+  };
+  for (const page of pages) {
+    const head = page.items.find(i => i.text === 'SeqDate');
+    if (!head) continue;
+    const cols = sameLine(page, head).map(h => NAMES[h.text] && { col: NAMES[h.text], x: h.x }).filter(Boolean);
+    for (const l of toLines(page.items.filter(i => i.y > head.y + 3), 2)) {
+      const { its, cell } = cellsByHeader(l.items, cols);
+      const o = stamp(cell('out')), n = stamp(cell('in'));
+      if (!o || !/^[A-Z]{3}$/.test(cell('dep'))) continue;
+      const d = new Date(o.t);
+      const days = n ? Math.round((n.t - o.t) / 86400000) : 0;
+      const r = {
+        section: 'published', date: `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${String(d.getUTCFullYear() % 100).padStart(2, '0')}`, day: WEEKDAYS[d.getUTCDay()],
+        dc: cell('dh') ? 'DH' : '', duty: cell('flight'), dep: cell('dep'), arr: cell('arr'), begin: o.hhmm, end: n ? `${n.hhmm}${days > 0 ? `+${days}` : ''}` : '', ac: cell('ac'), registration: cell('reg'),
+        notes: [cell('seq') && `[Seq: ${cell('seq')}]`, /^\d+:\d{2}$/.test(cell('fly')) && `[Flight: ${cell('fly')}]`, cell('pax') && `[Pax: ${cell('pax')}]`, cell('dist') && `[Distance: ${cell('dist')}]`].filter(Boolean),
+      };
+      rows.push(r);
+      for (const [f, c] of [['date', 'out'], ['duty', 'flight'], ['dep', 'dep'], ['arr', 'arr'], ['end', 'in'], ['ac', 'ac'], ['registration', 'reg'], ['info', 'seq'], ['info', 'fly'], ['info', 'pax'], ['info', 'dist']]) if (its[c]) mark(r, f, its[c]);
+    }
+  }
+  const ts = rows.map(r => Date.parse(`${r.date.replace(/ (\d{2})$/, ' 20$1')} UTC`)).filter(Number.isFinite);
+  const fmt = (x) => { const d = new Date(x); return `${String(d.getUTCDate()).padStart(2, '0')}${MONTHS[d.getUTCMonth()]}${String(d.getUTCFullYear() % 100).padStart(2, '0')}`; };
+  const out = rows.map(r => outputRow({ ...r, info: r.notes.join(' ') }, 'L'));
+  return { format: 'sequence-logbook', period: ts.length ? `${fmt(Math.min(...ts))} - ${fmt(Math.max(...ts))}` : null, notices: [], recognized: out.length > 0, published: out, planned: [], _trace: trace, _rows: rows };
+}
+
+const isCrewLegExport = (page) => ['SequenceNumber', 'OriginationDate', 'LegNumber', 'FlightNumber', 'CrewName1', 'DepartureStation', 'ArrivalStation'].every(t => page.items.some(i => i.text === t));
+
+/**
+ * A logbook export of legs with their crew ("938829.logbook_20260320-20260601"): EffectivePeriod | SequenceNumber | OriginationDate |
+ * Seat | LegNumber | FlightNumber | CrewId1 | CrewSeat1 | CrewName1 | ... CrewName6 | DepartureStation | ArrivalStation. No times: a row per leg
+ * on its sequence's origination date, crew "[CA - 772493 - Lonsdale, Daniel][FO - ...]", "[Seq: 9604] [Leg: 4]".
+ */
+function parseCrewLegExport(pages) {
+  const trace = startTrace();
+  const rows = [];
+  for (const page of pages) {
+    const head = page.items.find(i => i.text === 'OriginationDate');
+    if (!head) continue;
+    const cols = sameLine(page, head).map((h) => {
+      const m = /^Crew(Id|Seat|Name)(\d)$/.exec(h.text);
+      const col = m ? `${m[1].toLowerCase()}${m[2]}` : { SequenceNumber: 'seq', OriginationDate: 'date', Seat: 'seat', LegNumber: 'leg', FlightNumber: 'flight', DepartureStation: 'dep', ArrivalStation: 'arr' }[h.text];
+      return col && { col, x: h.x };
+    }).filter(Boolean);
+    cols.unshift({ col: 'period', x: -Infinity });
+    for (const l of toLines(page.items.filter(i => i.y > head.y + 3), 2)) {
+      const { its, cell } = cellsByHeader(l.items, cols, 12);
+      const dm = /^(\d{2})\/(\d{2})\/(\d{4})/.exec(cell('date'));
+      if (!dm || !/^[A-Z]{3}$/.test(cell('dep'))) continue;
+      const t = Date.UTC(+dm[3], +dm[2] - 1, +dm[1]);
+      const d = new Date(t);
+      const crew = [1, 2, 3, 4, 5, 6].filter(k => cell(`name${k}`)).map(k => `[${cell(`seat${k}`)} - ${cell(`id${k}`)} - ${cell(`name${k}`)}]`).join('');
+      const r = {
+        section: 'published', date: `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${dm[3].slice(2)}`, day: WEEKDAYS[d.getUTCDay()], duty: cell('flight'), dep: cell('dep'), arr: cell('arr'), crew,
+        notes: [cell('seq') && `[Seq: ${cell('seq')}]`, cell('leg') && `[Leg: ${cell('leg')}]`].filter(Boolean),
+      };
+      rows.push(r);
+      for (const [f, c] of [['duty', 'flight'], ['dep', 'dep'], ['arr', 'arr'], ['info', 'seq'], ['info', 'leg']]) if (its[c]) mark(r, f, its[c]);
+      if (its.date) mark(r, 'date', pieceOf(its.date[0], 0, 10));
+      for (const k of [1, 2, 3, 4, 5, 6]) for (const c of [`seat${k}`, `id${k}`, `name${k}`]) if (its[c]) mark(r, 'crew', its[c]);
+    }
+  }
+  const per = pages.flatMap(p => p.items).map(i => /logbook_(\d{4})(\d{2})(\d{2})-(\d{4})(\d{2})(\d{2})$/.exec(i.text)).find(Boolean);
+  const out = rows.map(r => outputRow({ ...r, info: r.notes.join(' ') }, 'L'));
+  return { format: 'crew-leg-export', period: per ? `${per[3]}${MONTHS[+per[2] - 1]}${per[1].slice(2)} - ${per[6]}${MONTHS[+per[5] - 1]}${per[4].slice(2)}` : null,
+    notices: [], recognized: out.length > 0, published: out, planned: [], _trace: trace, _rows: rows };
+}
+
+const isCarnetDeVol = (page) => page.items.some(i => i.text === 'Carnet de vol') && page.items.some(i => i.text === 'Programmé') && page.items.some(i => i.text === 'Réel');
+
+/**
+ * "Carnet de vol" (Air Austral flight log, "Horaires en UTC"): Avion "223 - FOTER" | Vol | Départ | Arrivée | Fonc. |
+ * Programmé Début Fin Total Jour Nuit | Réel Début Fin Total Jour Nuit ("08/07/2022 11:45", decimal hours "1,68").
+ * A row per flight on the actual times (UTC), type and registration from Avion, "[Function: OBS] [Total: 1,68] [Night: 0,87]".
+ */
+function parseCarnetDeVol(pages) {
+  const trace = startTrace();
+  const rows = [];
+  for (const page of pages) {
+    const reel = page.items.find(i => i.text === 'Réel');
+    const head = page.items.find(i => i.text === 'Vol' && i.y > (reel?.y ?? Infinity));
+    if (!head) continue;
+    const sub = page.items.filter(i => i.y > head.y + 3 && i.y < head.y + 15 && /^(Début|Fin|Total|Jour|Nuit)$/.test(i.text)).sort((a, b) => a.x - b.x);
+    const cols = [
+      ...sameLine(page, head).map(h => ({ Avion: 'ac', Vol: 'flight', Départ: 'dep', Arrivée: 'arr', 'Fonc.': 'fn' }[h.text] && { col: { Avion: 'ac', Vol: 'flight', Départ: 'dep', Arrivée: 'arr', 'Fonc.': 'fn' }[h.text], x: h.x })).filter(Boolean),
+      ...sub.map(s => ({ col: `${s.x < reel.x - 5 ? 'p' : 'r'}${s.text}`, x: s.x })),
+    ].sort((a, b) => a.x - b.x);
+    for (const l of toLines(page.items.filter(i => i.y > head.y + 15), 2)) {
+      const { its, cell } = cellsByHeader(l.items, cols);
+      const s = /^(\d{2})\/(\d{2})\/(\d{4}) (\d{2}:\d{2})$/.exec(cell('rDébut')), e = /^(\d{2})\/(\d{2})\/(\d{4}) (\d{2}:\d{2})$/.exec(cell('rFin'));
+      const ac = /^(\S+) - (\S+)$/.exec(cell('ac'));
+      if (!s || !/^[A-Z]{3}$/.test(cell('dep'))) continue;
+      const t = Date.UTC(+s[3], +s[2] - 1, +s[1]);
+      const d = new Date(t);
+      const later = e && Date.UTC(+e[3], +e[2] - 1, +e[1]) > t;
+      const hrs = (c) => (/^\d+(,\d+)?$/.test(cell(c)) && cell(c) !== '0' ? cell(c) : '');
+      const r = {
+        section: 'published', date: `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${s[3].slice(2)}`, day: WEEKDAYS[d.getUTCDay()], duty: cell('flight'), dep: cell('dep'), arr: cell('arr'),
+        begin: s[4], end: e ? `${e[4]}${later ? '+1' : ''}` : '', ac: ac ? ac[1] : cell('ac'), registration: ac ? ac[2] : '',
+        notes: [cell('fn') && `[Function: ${cell('fn')}]`, hrs('rTotal') && `[Total: ${hrs('rTotal')}]`, hrs('rNuit') && `[Night: ${hrs('rNuit')}]`].filter(Boolean),
+      };
+      rows.push(r);
+      const pc = (it, off, len) => it && pieceOf(it, off, len);
+      for (const [f, it] of [['date', pc(its.rDébut?.[0], 0, 10)], ['begin', pc(its.rDébut?.[0], 11, 5)], ['end', pc(its.rFin?.[0], 11, 5)], ['duty', its.flight], ['dep', its.dep], ['arr', its.arr],
+        ['ac', ac && pc(its.ac[0], 0, ac[1].length)], ['registration', ac && pc(its.ac[0], its.ac[0].text.length - ac[2].length, ac[2].length)], ['info', its.fn],
+        ['info', hrs('rTotal') && its.rTotal], ['info', hrs('rNuit') && its.rNuit]]) if (it) mark(r, f, it);
+    }
+  }
+  const per = pages.flatMap(p => p.items).map(i => /^Du (\d{2}) (\S+) (\d{2}) Au (\d{2}) (\S+) (\d{2})$/.exec(i.text)).find(Boolean);
+  const out = rows.map(r => outputRow({ ...r, info: r.notes.join(' ') }, 'Z'));
+  return { format: 'carnet-de-vol', period: per && frenchMonth(per[2]) >= 0 ? `${per[1]}${MONTHS[frenchMonth(per[2])]}${per[3]} - ${per[4]}${MONTHS[frenchMonth(per[5])]}${per[6]}` : null,
+    notices: [], recognized: out.length > 0, published: out, planned: [], _trace: trace, _rows: rows };
+}
+
+const isStartEndLogbook = (page) => ['START', 'END', 'AIRCRAFT', 'FROM', 'TO', 'DURATION', 'CHECKIN', 'CHECKOUT'].every(t => page.items.some(i => i.text === t))
+  && page.items.some(i => i.text === 'REMARKS AND');
+
+/**
+ * A pilot logbook with START DATE / END DATE (Brazilian airline export, FAA-style columns), three lines per flight:
+ *   "19/02/2018" "19/02/2018" (start / end date)
+ *   E179 | PR-AXE | SDU | VCP | 01:15 (total) | single | 01:15 (multi) | 01:15 (jet) | 1 (day landings) | 0 (night) | 00:02 (night) | instrument actual |
+ *   cross country | checkin | checkout | PIC | FO (second in command) | dual | instructor | 5798 (remarks: the flight number)
+ *   "05:58" "07:13" (start / end time)
+ * A row per flight (times taken as UTC; "+1" when it ends on a later date), "[Total: 01:15] [Landing Day: 1] [Night: 00:02] [IFR: 01:15] [Function: FO]".
+ */
+function parseStartEndLogbook(pages) {
+  const trace = startTrace();
+  const rows = [];
+  const H = [['MODEL', 'ac'], ['IDENT', 'reg'], ['FROM', 'dep'], ['TO', 'arr'], ['DURATION', 'total'], ['MULTI-', 'multi'], ['JET', 'jet'], ['DAY', 'ldDay'], ['NIGHT', 'ldNight'],
+    ['OF FLIGHT', 'night'], ['FLIGHT ACTUAL', 'ifr'], ['FLIGHT CROSS', 'xc'], ['CHECKIN', 'ci'], ['CHECKOUT', 'co'], ['PILOT IN', 'pic'], ['SECOND IN', 'sic'], ['TIME DUAL', 'dual'],
+    ['FLIGHT', 'instr'], ['REMARKS AND', 'remark']];
+  const dateOf = (s) => { const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(s || ''); return m && Date.UTC(+m[3], +m[2] - 1, +m[1]); };
+  for (const page of pages) {
+    const from = page.items.find(i => i.text === 'FROM');
+    if (!from) continue;
+    const band = page.items.filter(i => Math.abs(i.y - from.y) < 14);
+    const cols = H.map(([t, col]) => { const h = band.filter(i => i.text === t).sort((a, b) => (t === 'FLIGHT' ? b.y - a.y : a.y - b.y))[0]; return h && { col, c: h.x + (h.w || 0) / 2 }; }).filter(Boolean);
+    const colOf = (i) => cols.reduce((b, h) => (Math.abs(h.c - (i.x + (i.w || 0) / 2)) < Math.abs(b.c - (i.x + (i.w || 0) / 2)) ? h : b), cols[0]).col;
+    const top = Math.max(...band.map(i => i.y)) + 3;
+    const lines = toLines(page.items.filter(i => i.y > top), 2);
+    for (const [k, l] of lines.entries()) {
+      // the main line: an airport under FROM; the dates line above it, the times line under it
+      const words = l.items;
+      const cells = {};
+      for (const i of words) (cells[colOf(i)] ||= []).push(i);
+      const get = (c) => (cells[c] || []).map(i => i.text).join(' ');
+      if (!/^[A-Z]{3,4}$/.test(get('dep')) || !/^[A-Z]{3,4}$/.test(get('arr'))) continue;
+      const dl = lines[k - 1], tl = lines[k + 1];
+      const dates = dl && l.y - dl.y < 8 ? dl.items.filter(i => dateOf(i.text) != null) : [];
+      const times = tl && tl.y - l.y < 8 ? tl.items.filter(i => /^\d{2}:\d{2}$/.test(i.text)) : [];
+      const t = dateOf(dates[0]?.text);
+      if (t == null) continue;
+      const te = dateOf(dates[1]?.text);
+      const d = new Date(t);
+      const dur = (c) => (/^\d{1,3}:\d{2}$/.test(get(c)) && /[1-9]/.test(get(c)) ? get(c) : '');
+      const cnt = (c) => (/^[1-9]\d*$/.test(get(c)) ? get(c) : '');
+      const fn = ['pic', 'sic', 'dual', 'instr'].map(get).find(v => /^[A-Z]{2,3}$/.test(v));
+      const r = {
+        section: 'published', date: `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${String(d.getUTCFullYear() % 100).padStart(2, '0')}`, day: WEEKDAYS[d.getUTCDay()],
+        duty: /^\d{1,5}$/.test(get('remark')) ? get('remark') : '', ac: get('ac'), registration: get('reg'), dep: get('dep'), arr: get('arr'),
+        begin: times[0]?.text || '', end: times[1] ? `${times[1].text}${te != null && te > t ? '+1' : ''}` : '',
+        notes: [dur('total') && `[Total: ${get('total')}]`, cnt('ldDay') && `[Landing Day: ${get('ldDay')}]`, cnt('ldNight') && `[Landing Night: ${get('ldNight')}]`,
+          dur('night') && `[Night: ${get('night')}]`, dur('ifr') && `[IFR: ${get('ifr')}]`, fn && `[Function: ${fn}]`, get('remark') && !/^\d{1,5}$/.test(get('remark')) && get('remark')].filter(Boolean),
+      };
+      rows.push(r);
+      for (const [f, c] of [['duty', 'remark'], ['ac', 'ac'], ['registration', 'reg'], ['dep', 'dep'], ['arr', 'arr']]) if (cells[c]) mark(r, f, cells[c]);
+      for (const c of ['total', 'night', 'ifr']) if (dur(c)) mark(r, 'info', cells[c]);
+      for (const c of ['ldDay', 'ldNight']) if (cnt(c)) mark(r, 'info', cells[c]);
+      mark(r, 'date', dates[0]); if (times[0]) mark(r, 'begin', times[0]); if (times[1]) mark(r, 'end', times[1]);
+    }
+  }
+  const ts = rows.map(r => Date.parse(`${r.date.replace(/ (\d{2})$/, ' 20$1')} UTC`)).filter(Number.isFinite);
+  const fmt = (x) => { const d = new Date(x); return `${String(d.getUTCDate()).padStart(2, '0')}${MONTHS[d.getUTCMonth()]}${String(d.getUTCFullYear() % 100).padStart(2, '0')}`; };
+  const out = rows.map(r => outputRow({ ...r, info: r.notes.join(' ') }, 'Z'));
+  return { format: 'start-end-logbook', period: ts.length ? `${fmt(Math.min(...ts))} - ${fmt(Math.max(...ts))}` : null, notices: [], recognized: out.length > 0, published: out, planned: [], _trace: trace, _rows: rows };
+}
+
+/** A line's text from its items (no space where they touch: a print with a character an item), and the items behind a stretch of it. */
+function lineText(items) {
+  const sorted = [...items].sort((a, b) => a.x - b.x);
+  let text = '';
+  const spans = [];
+  let end = null;
+  for (const it of sorted) {
+    if (end != null && it.x - end > 1) text += ' ';
+    spans.push({ it, from: text.length, to: text.length + it.text.length });
+    text += it.text;
+    end = it.x + (it.w || 0);
+  }
+  return { text, at: (from, to) => spans.filter(s => s.from < to && s.to > from).map(s => s.it) };
+}
+
+/** OCR slips of these prints: "O1" / "2025O4:00" (O for 0), "Oh 58m", "Wed1st", "Sun19h". Length is kept (offsets stay right). */
+const crewAccessText = (t) => t.replace(/O(?=\d)|(?<=\d)O/g, '0').replace(/\bO[hb](?= \d)/g, '0h').replace(/\bFliqht\b/g, 'Flight');
+
+const isCrewAccessDetail = (page) => {
+  const texts = toLines(page.items, 3).map(l => crewAccessText(lineText(l.items).text));
+  return texts.some(t => /Crew ?Access/.test(t)) && texts.some(t => /All activ\w* times are in the\w* .ocal time/.test(t));
+};
+
+/**
+ * Crew Access "Schedule Summary" / "Escala Summary" print with the crew of each flight ("All activities times are in their local time
+ * timezone"; Saudia, Azul). Pages may be text (a character an item, a "/" printed as "7": "04:007+1"), or drawn as outlines and read by OCR.
+ *   "Mon, 5th Aug 2024 (RUH)" a day; "Check-In 16:30 - 17:54 RUH" -> C/I; "Release 23:15 - 23:45 RUH" -> C/O (its end);
+ *   "Off" / "Leave" "00:00 - 00:00/+1 CNF Position: CA Activity Code: FP" -> duty FP "[FP: Off] [Position: CA]";
+ *   a flight: "SV 323 ( TVL ) RUH > CAI Position: CA Flight Time: 2h 27m" (TVL = deadhead), its scheduled times on the line above
+ *   ("00:30 / +1 - 02:25 / +1"), the actual ones in brackets under it -> "[Position: CA] [Flight: 02:27] [Actual: 00:23 +1 - 01:50 +1]";
+ *   "Hotel 15:15 - 14:20 / +1" with the hotel's name above -> a hotel row at the day's station. The crew lists are not read.
+ */
+function parseCrewAccessDetail(pages) {
+  const trace = startTrace();
+  const rows = [];
+  const DAY = /^(Mon|Tue|Wed|Thu|Fri|Sat|Sun),? ?(\d{1,2}) ?(?:st|nd|rd|th|h)? ([A-Za-z]{3}) (\d{4}) ?(?:\(([A-Z]{3})\))?/d;
+  const SPAN = /(\d{2}:\d{2}) ?(?:[/7] ?\+(\d))? ?-? ?(\d{2}:\d{2}) ?(?:[/7] ?\+(\d))?/d; // (OCR may drop the "-")
+  let cur = null, curItems = null, station = '';
+  const time = (t, p) => `${t}${p ? `+${p}` : ''}`;
+  for (const page of pages) {
+    const lines = [];
+    for (const it of [...page.items].sort((a, b) => a.y - b.y)) {
+      const l = lines.at(-1);
+      if (l && it.y - l.yLast <= 3) { l.items.push(it); l.yLast = it.y; } else lines.push({ y: it.y, yLast: it.y, items: [it] });
+    }
+    const info = lines.map(l => { const t = lineText(l.items); return { ...l, text: crewAccessText(t.text), at: t.at }; });
+    for (const [k, l] of info.entries()) {
+      const dm = DAY.exec(l.text);
+      if (dm) {
+        const t = Date.UTC(+dm[4], monthIndex(dm[3]), +dm[2]);
+        const d = new Date(t);
+        cur = { section: 'published', date: `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${dm[4].slice(2)}`, day: WEEKDAYS[d.getUTCDay()] };
+        curItems = l.at(0, dm.indices[4][1]);
+        station = dm[5] || '';
+        continue;
+      }
+      if (!cur) continue;
+      const add = (r, marks) => {
+        const row = { ...cur, notes: [], ...r };
+        rows.push(row);
+        for (const [f, it] of marks) if (it && [].concat(it).length) mark(row, f, it);
+        if (curItems) { mark(row, 'date', curItems); curItems = null; }
+        return row;
+      };
+      const at = (m, g) => (m?.indices?.[g] ? l.at(...m.indices[g]) : []);
+      const span = SPAN.exec(l.text);
+      const st = /\b([A-Z]{3})\s*$/d.exec(l.text.replace(/\s*\)\s*$/, ''));
+      let m;
+      if ((m = /^(Check-In|Apresentação|Release) /.exec(l.text)) && span) {
+        const stm = /\b([A-Z]{3})\b(?!.*\b[A-Z]{3}\b)/d.exec(l.text.slice(span.index + span[0].length));
+        const stItems = stm ? l.at(span.index + span[0].length + stm.indices[1][0], span.index + span[0].length + stm.indices[1][1]) : [];
+        if (m[1] === 'Release') add({ duty: 'C/O', arr: stm?.[1] || station, end: time(span[3], span[4]) }, [['co', at(span, 3)], ['arr', stItems]]);
+        else add({ duty: 'C/I', dep: stm?.[1] || station, begin: time(span[1], span[2]) }, [['ci', at(span, 1)], ['dep', stItems]]);
+        continue;
+      }
+      if (/^Hotel /.test(l.text) && span) {
+        const name = info.slice(Math.max(0, k - 3), k).flatMap(x => x.items).filter(i => i.x >= 350 && !/:/.test(i.text)).map(i => i.text).join(' ');
+        add({ duty: 'H', dep: station, begin: time(span[1], span[2]), end: time(span[3], span[4]), notes: name ? [name] : [] }, [['begin', at(span, 1)], ['end', at(span, 3)]]);
+        continue;
+      }
+      // an activity: "Off 00:00 - 00:00/+1 CNF Position: CA Activity Code: FP"
+      if ((m = /^([A-Za-z][A-Za-z ]*?) (?=\d{2}:\d{2})/.exec(l.text)) && span && (m = /Activity Code:? ?(\S+)/d.exec(l.text))) {
+        const name = /^([A-Za-z][A-Za-z ]*?) (?=\d{2}:\d{2})/d.exec(l.text);
+        const stm = /\b([A-Z]{3}) +Position/d.exec(l.text);
+        const pos = /Position:? ?([A-Z]{2,3})\b/d.exec(l.text);
+        add({ duty: m[1].toUpperCase(), dep: stm?.[1] || '', begin: time(span[1], span[2]), end: time(span[3], span[4]), notes: [`[${m[1].toUpperCase()}: ${name[1]}]`, pos && `[Position: ${pos[1]}]`].filter(Boolean) },
+          [['duty', at(m, 1)], ['dep', at(stm, 1)], ['begin', at(span, 1)], ['end', at(span, 3)], ['info', [...at(name, 1), ...at(pos, 1)]]]);
+        continue;
+      }
+      // a flight: "SV 323 ( TVL ) RUH > CAI Position: CA Flight Time: 2h 27m", "AD4950 SSALEC Position: ..."
+      const fm = /^([A-Z0-9]{2}) ?(\d{1,4}[A-Z]?)\b(?: ?\( ?(TVL) ?\))?.*?\b([A-Z]{3}) ?>? ?([A-Z]{3}) +Position/d.exec(l.text);
+      if (fm) {
+        // the scheduled times: a time span left of the flight on its own line above (or on this line), the actual ones in brackets under it
+        const near = info.filter(x => x !== l && Math.abs(x.y - l.y) < 10);
+        const schedLine = near.filter(x => x.y < l.y).reverse().find(x => SPAN.test(x.text) && !/^\(/.test(x.text.trim()));
+        const actLine = near.filter(x => x.y > l.y).find(x => /^\(/.test(x.text.trim()) && SPAN.test(x.text));
+        const sched = schedLine ? SPAN.exec(schedLine.text) : span && !/\(/.test(l.text.slice(0, span.index)) ? span : null;
+        const act = actLine ? SPAN.exec(actLine.text) : null;
+        const pos = /Position:? ?([A-Z]{2,3})\b/d.exec(l.text);
+        const ft = /Flight Time:? ?(\d+)h ?(\d+)m/d.exec(l.text);
+        const sAt = (g) => (sched && schedLine ? schedLine.at(...sched.indices[g]) : at(sched, g));
+        add({
+          duty: `${fm[1]}${fm[2]}`, dc: fm[3] ? 'DH' : '', dep: fm[4], arr: fm[5],
+          begin: sched ? time(sched[1], sched[2]) : '', end: sched ? time(sched[3], sched[4]) : '',
+          notes: [pos && `[Position: ${pos[1]}]`, ft && `[Flight: ${ft[1].padStart(2, '0')}:${ft[2].padStart(2, '0')}]`,
+            act && `[Actual: ${act[1]}${act[2] ? ` +${act[2]}` : ''} - ${act[3]}${act[4] ? ` +${act[4]}` : ''}]`].filter(Boolean),
+        }, [['duty', [...at(fm, 1), ...at(fm, 2)]], ['dep', at(fm, 4)], ['arr', at(fm, 5)], ['begin', sAt(1)], ['end', sAt(3)], ['info', [...at(pos, 1), ...at(ft, 1), ...at(ft, 2)]]]);
+      }
+    }
+  }
+  const out = rows.map(r => outputRow({ ...r, info: r.notes.join(' ') }, 'L'));
+  const first = rows[0], last = rows.at(-1);
+  const pd = (r) => { const [dd, mon, yy] = r.date.split(' '); return `${dd.padStart(2, '0')}${mon}${yy}`; };
+  return { format: 'crew-access-detail', period: first ? `${pd(first)} - ${pd(last)}` : null, notices: [], recognized: out.length > 0, published: out, planned: [], _trace: trace, _rows: rows };
+}
+
+const isDayTableRoster = (page) => page.items.some(i => i.text === 'All times in station local time') && ['Aircraft Type', 'Description', 'Function', 'Crew', 'Block'].every(t => page.items.some(i => i.text === t));
+
+/**
+ * A month as a table of days (Flightworx, "All times in station local time"): Day "27 Aug Thu" | Aircraft Type "A320 9H-AEO" | Check In |
+ * Description | Check Out | Function | Crew | Block. A day of flights takes several lines with its Day and Aircraft Type centred on them:
+ *   "MMO030 11:50 MLA OTP 15:20" | FO | "AMS-CGA-" / "MRM / GMA-" / "SCE" (the crew wraps over three lines) | 02:30
+ *   "MMO031 16:20 OTP MLA 17:50" | 18:20 (Check Out) | ...
+ *   10:20 (Check In) | "MMO030/MMO031 10:20 MLA 18:20" (the duty's line)
+ * -> a C/I row (Check In), the flights (ac / registration, crew "[Crew - AMS-CGA-MRM / GMA-SCE]", "[Function: FO] [Block: 02:30]"), a C/O row
+ * (Check Out); "Off Duty MLA", "Home STBY 1000-1600Z 09:00 MLA 15:00" a row each. The totals page is not read.
+ */
+function parseDayTableRoster(pages) {
+  const trace = startTrace();
+  const rows = [];
+  const DAY = /^(\d{2}) ([A-Z][a-z]{2}) (Mon|Tue|Wed|Thu|Fri|Sat|Sun)$/;
+  const year = +(pages.flatMap(p => p.items).find(i => /^\d{4}$/.test(i.text) && i.y < 130)?.text || new Date().getUTCFullYear());
+  for (const page of pages) {
+    const head = page.items.find(i => i.text === 'Description');
+    if (!head) continue;
+    const H = (t) => page.items.find(i => i.text === t && Math.abs(i.y - head.y) < 8)?.x;
+    const X = { ci: H('Check'), desc: H('Check') + 30, co: page.items.filter(i => i.text === 'Check' && Math.abs(i.y - head.y) < 8).map(i => i.x).sort((a, b) => a - b)[1], fn: H('Function'), crew: H('Crew'), block: H('Block') };
+    const body = page.items.filter(i => i.y > head.y + 8);
+    const labels = body.filter(i => DAY.test(i.text)).sort((a, b) => a.y - b.y);
+    if (!labels.length) continue;
+    const acItems = body.filter(i => i.x > 60 && i.x < X.ci - 10 && /^[A-Z0-9]{3,4} \S+$/.test(i.text));
+    // the lines with a Description (crew wraps and day labels are not lines of their own)
+    const lines = toLines(body.filter(i => i.x >= X.ci - 10 && i.x < X.fn - 5), 2).filter(l => l.items.some(i => i.x >= X.desc));
+    const nearest = (y) => labels.reduce((b, d) => (Math.abs(d.y - y) < Math.abs(b.y - y) ? d : b), labels[0]);
+    const groups = new Map(); // label -> lines
+    let lastFlightLabel = null;
+    for (const l of lines) {
+      const desc = l.items.filter(i => i.x >= X.desc).map(i => i.text).join(' ');
+      // the duty's line ("MMO030/MMO031 ...") goes with its flights' day
+      const lab = /^[A-Z0-9]+\/[A-Z0-9]+/.test(desc) && lastFlightLabel ? lastFlightLabel : nearest(l.y);
+      if (/^[A-Z]{2,3}\d{2,4}[A-Z]? \d{2}:\d{2} [A-Z]{3} [A-Z]{3} \d{2}:\d{2}/.test(desc)) lastFlightLabel = lab;
+      (groups.get(lab) || groups.set(lab, []).get(lab)).push(l);
+    }
+    for (const lab of labels) {
+      const [, dd, mon] = DAY.exec(lab.text);
+      const t = Date.UTC(year, monthIndex(mon), +dd);
+      const d = new Date(t);
+      const base = { section: 'published', date: `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${String(year % 100).padStart(2, '0')}`, day: WEEKDAYS[d.getUTCDay()], notes: [] };
+      let first = true;
+      const add = (r, marks) => {
+        const row = { ...base, ...r, notes: r.notes || [] };
+        rows.push(row);
+        for (const [f, it] of marks) if (it && [].concat(it).length) mark(row, f, it);
+        if (first) { mark(row, 'date', lab); first = false; }
+        return row;
+      };
+      const ls = (groups.get(lab) || []).sort((a, b) => a.y - b.y);
+      const ac = acItems.find(i => Math.abs(i.y - lab.y) < 12);
+      const [type, reg] = ac ? ac.text.split(' ') : [];
+      const dutyLine = ls.find(l => /^[A-Z0-9]+\/[A-Z0-9]+/.test(l.items.filter(i => i.x >= X.desc).map(i => i.text).join(' ')));
+      const ci = dutyLine?.items.find(i => i.x < X.desc && /^\d{2}:\d{2}$/.test(i.text));
+      const flights = ls.filter(l => l !== dutyLine && /^[A-Z]{2,3}\d{2,4}[A-Z]? \d{2}:\d{2} [A-Z]{3} [A-Z]{3} \d{2}:\d{2}/.test(l.items.filter(i => i.x >= X.desc && i.x < X.co - 5).map(i => i.text).join(' ')));
+      if (flights.length) {
+        if (ci) add({ duty: 'C/I', dep: flights[0].items.filter(i => i.x >= X.desc)[2]?.text || '', begin: ci.text }, [['ci', ci]]);
+        let co = null, arr = '';
+        for (const fl of flights) {
+          const [f, t1, dep, arrI, t2] = fl.items.filter(i => i.x >= X.desc && i.x < X.co - 5);
+          const crewItems = body.filter(i => i.x >= X.crew - 30 && i.x < X.block - 5 && Math.abs(i.y - fl.y) < 10).sort((a, b) => a.y - b.y || a.x - b.x);
+          const fn = body.find(i => i.x >= X.fn - 5 && i.x < X.crew - 30 && Math.abs(i.y - fl.y) < 3);
+          const blk = body.find(i => i.x >= X.block - 5 && Math.abs(i.y - fl.y) < 3 && /^\d{2}:\d{2}$/.test(i.text));
+          co = fl.items.find(i => i.x >= X.co - 5 && /^\d{2}:\d{2}$/.test(i.text)) || co;
+          arr = arrI.text;
+          add({ duty: f.text, dep: dep.text, arr: arrI.text, begin: t1.text, end: t2.text, ac: type || '', registration: reg || '',
+            crew: crewItems.length ? `[Crew - ${crewItems.map(i => i.text).join('').replace(/\s*\/\s*/g, ' / ')}]` : '',
+            notes: [fn && `[Function: ${fn.text}]`, blk && `[Block: ${blk.text}]`].filter(Boolean) },
+          [['duty', f], ['begin', t1], ['dep', dep], ['arr', arrI], ['end', t2], ['ac', ac && pieceOf(ac, 0, type.length)], ['registration', ac && pieceOf(ac, type.length + 1, reg.length)],
+            ['crew', crewItems], ['info', [fn, blk].filter(Boolean)]]);
+        }
+        if (co) add({ duty: 'C/O', arr, end: co.text }, [['co', co]]);
+        continue;
+      }
+      for (const l of ls) {
+        const ci2 = l.items.find(i => i.x < X.desc && /^\d{2}:\d{2}$/.test(i.text));
+        const co2 = l.items.find(i => i.x >= X.co - 5 && /^\d{2}:\d{2}$/.test(i.text));
+        const desc = l.items.filter(i => i.x >= X.desc && i.x < X.co - 5);
+        const st = desc.find(i => /^[A-Z]{3}$/.test(i.text));
+        const name = desc.filter(i => !/^\d{2}:\d{2}$/.test(i.text) && i !== st);
+        const times = desc.filter(i => /^\d{2}:\d{2}$/.test(i.text));
+        add({ duty: name.map(i => i.text).join(' '), dep: st?.text || '', begin: (ci2 || times[0])?.text || '', end: (co2 || times.at(-1))?.text || '' },
+          [['duty', name], ['dep', st], ['begin', ci2 || times[0]], ['end', co2 || times.at(-1)]]);
+      }
+    }
+  }
+  const mon = pages.flatMap(p => p.items).find(i => /^(JANUARY|FEBRUARY|MARCH|APRIL|MAY|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER)$/.test(i.text));
+  const mi = mon ? monthIndex(mon.text.slice(0, 3)) : -1;
+  const out = rows.map(r => outputRow({ ...r, info: r.notes.join(' ') }, 'L'));
+  return { format: 'day-table-roster', period: mi >= 0 ? `01${MONTHS[mi]}${String(year).slice(2)} - ${new Date(Date.UTC(year, mi + 1, 0)).getUTCDate()}${MONTHS[mi]}${String(year).slice(2)}` : null,
+    notices: [], recognized: out.length > 0, published: out, planned: [], _trace: trace, _rows: rows };
+}
+
+const isMinhaEscala = (page) => page.items.some(i => /^Minha$/.test(i.text)) && page.items.some(i => /^Escala$/.test(i.text))
+  && ['Checkin', 'Checkout', 'AcVer'].every(t => page.items.some(i => i.text === t));
+
+/**
+ * Azul "Minha Escala" (a web page printed as one tall picture, read by OCR in strips): a table
+ *   Activity | Checkin | Start | End | Checkout | Dep | Arr | AcVer | DD/CAT | Crews (Crew | Function)
+ * each date-time cell on three lines ("28 JUN." / "2024" / "05:30"), the activity, airports, aircraft and DD/CAT on the middle one, the crew
+ * table beside it. Rows: C/I (Checkin), the flight (Start / End, "DHD" -> dc DH, crew "[CA - CAVALCANTI][FO - BONITZ]..."), C/O (Checkout);
+ * "Layover" a hotel row. Times taken as UTC, as in Azul's activity lists.
+ */
+function parseMinhaEscala(pages) {
+  const trace = startTrace();
+  const rows = [];
+  const MON = (t) => monthIndex(String(t).slice(0, 3));
+  for (const page of pages) {
+    const head = page.items.find(i => i.text === 'AcVer');
+    if (!head) continue;
+    const hl = page.items.filter(i => Math.abs(i.y - head.y) < 8);
+    const centre = (i) => i.x + (i.w || 0) / 2;
+    const H = (re) => hl.find(i => re.test(i.text));
+    const cols = [['act', /^Activ/], ['ci', /^Checkin$/], ['start', /^Start$/], ['end', /^End$/], ['co', /^Checkout$/], ['dep', /^Dep$/], ['arr', /^Arr$/], ['ac', /^AcVer$/], ['dd', /^DD/], ['crews', /^Cre[wW]s$/]]
+      .map(([col, re]) => { const h = H(re); return h && { col, c: centre(h) }; }).filter(Boolean);
+    const colOf = (i) => cols.reduce((b, h) => (Math.abs(h.c - centre(i)) < Math.abs(b.c - centre(i)) ? h : b), cols[0]).col;
+    const crewX = (cols.find(c => c.col === 'crews')?.c ?? Infinity) - 30; // the crew names start well left of the "Crews" header's middle
+    const body = page.items.filter(i => i.y > head.y + 10);
+    // a record per activity in the first column (a flight number, "Layover")
+    const anchors = body.filter(i => colOf(i) === 'act' && /^([A-Z0-9]{2}\d{2,4}[A-Z]?|[A-Z][a-z]+)$/.test(i.text) && i.x < (cols[1]?.c ?? 150) - 40).sort((a, b) => a.y - b.y);
+    // the crew tables: rows (name, function) between "Crew | Function" headers
+    const crewHeads = body.filter(i => /^Cre[wW]$/.test(i.text) && i.x > crewX - 150).map(i => i.y).sort((a, b) => a - b);
+    // a crew row: its function (right column) and the name beside it (OCR puts them a few points apart)
+    const fnHead = body.find(i => i.text === 'Function');
+    const fnX = fnHead ? fnHead.x - 15 : crewX + 100;
+    const names = body.filter(i => i.x > crewX - 150 && i.x < fnX && !/^(Cre[wW]|Function)$/.test(i.text));
+    const crewRows = body.filter(i => i.x >= fnX && /^[A-Z]{2,3}$/.test(i.text)).map((fn) => {
+      const near = names.filter(i => Math.abs(i.y - fn.y) < 8);
+      const y0 = near.sort((a, b) => Math.abs(a.y - fn.y) - Math.abs(b.y - fn.y))[0]?.y;
+      return { y: fn.y, fn, name: near.filter(i => Math.abs(i.y - y0) < 3).sort((a, b) => a.x - b.x) };
+    });
+    for (const [k, a] of anchors.entries()) {
+      const band = body.filter(i => Math.abs(i.y - a.y) <= 34 && i.x < crewX - 150 + 20);
+      const cell = (col) => band.filter(i => colOf(i) === col).sort((x, y) => x.y - y.y || x.x - y.x);
+      const stamp = (col) => {
+        const its = cell(col);
+        const m = /(\d{1,2}) ?([A-Z]{3})\.?.*?(\d{4}).*?(\d{2}:\d{2})/.exec(its.map(i => i.text).join(' '));
+        return m && MON(m[2]) >= 0 ? { t: Date.UTC(+m[3], MON(m[2]), +m[1]), hhmm: m[4], items: its } : null;
+      };
+      const [ci, s, e, co] = ['ci', 'start', 'end', 'co'].map(stamp);
+      const first = s || ci || e;
+      if (!first) continue;
+      const day = (t) => { const d = new Date(t); return { section: 'published', date: `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${String(d.getUTCFullYear() % 100).padStart(2, '0')}`, day: WEEKDAYS[d.getUTCDay()] }; };
+      const plus = (x, from) => (x && from && x.t > from.t ? `+${Math.round((x.t - from.t) / 86400000)}` : '');
+      const get = (col) => cell(col).filter(i => Math.abs(i.y - a.y) < 8).map(i => i.text).join(' ');
+      const dep = get('dep'), arr = get('arr'), dd = get('dd');
+      const add = (r, marks) => { const row = { notes: [], ...r }; rows.push(row); for (const [f, it] of marks) if (it && [].concat(it).length) mark(row, f, it); return row; };
+      if (ci) add({ ...day(ci.t), duty: 'C/I', dep, begin: ci.hhmm }, [['date', ci.items.slice(0, 1)], ['ci', ci.items.filter(i => i.text === ci.hhmm)]]);
+      if (a.text === 'Layover') {
+        add({ ...day(s.t), duty: 'H', dep, begin: s?.hhmm || '', end: e ? `${e.hhmm}${plus(e, s)}` : '' }, [['date', s.items.slice(0, 1)], ['dep', cell('dep')], ['begin', s.items.filter(i => i.text === s.hhmm)], ['end', e?.items.filter(i => i.text === e.hhmm)]]);
+        continue;
+      }
+      // the crew rows of this record: in its crew table (between the headers around it), up to the next record
+      const hTop = Math.max(-Infinity, ...crewHeads.filter(y => y < a.y + 20));
+      const hNext = Math.min(anchors[k + 1] ? anchors[k + 1].y - 34 : Infinity, ...crewHeads.filter(y => y > a.y + 20));
+      const crew = crewRows.filter(r => r.y > hTop && r.y < hNext);
+      add({
+        ...day((s || first).t), duty: a.text, dc: dd === 'DHD' ? 'DH' : '', dep, arr, begin: s?.hhmm || '', end: e ? `${e.hhmm}${plus(e, s)}` : '', ac: get('ac'),
+        crew: crew.map(r => `[${r.fn.text} - ${r.name.map(i => i.text).join(' ')}]`).join(''), notes: dd && dd !== 'DHD' ? [`[${dd}]`] : [],
+      }, [['date', (s || first).items.slice(0, 1)], ['duty', a], ['dep', cell('dep')], ['arr', cell('arr')], ['begin', s?.items.filter(i => i.text === s.hhmm)], ['end', e?.items.filter(i => i.text === e.hhmm)],
+        ['ac', cell('ac')], ['crew', crew.flatMap(r => [r.fn, ...r.name])], ['info', dd !== 'DHD' ? cell('dd') : null]]);
+      if (co) add({ ...day(s ? s.t : co.t), duty: 'C/O', arr, end: `${co.hhmm}${plus(co, s)}` }, [['co', co.items.filter(i => i.text === co.hhmm)]]);
+    }
+  }
+  const fmt = (r) => { const [d, m, y] = r.date.split(' '); return `${d.padStart(2, '0')}${m}${y}`; };
+  const out = rows.map(r => outputRow({ ...r, info: r.notes.join(' ') }, 'Z'));
+  return { format: 'minha-escala', period: rows.length ? `${fmt(rows[0])} - ${fmt(rows.at(-1))}` : null, notices: [], recognized: out.length > 0, published: out, planned: [], _trace: trace, _rows: rows };
+}
+
+const LRR_PERIOD = /^(\d{2})-([A-Z][a-z]{2})-(\d{4}) ?to ?(\d{2})-([A-Z][a-z]{2})-(\d{4})$/;
+const isLatamRosterReport = (page) => page.items.some(i => i.text === 'Roster Report') && page.items.some(i => LRR_PERIOD.test(i.text));
+// a header column (its lines joined: "Dep Stn / Dep Time") -> field; the others (Rank, ACY Rep, SDC, Updated By ..) are not read
+const LRR_COLUMNS = [[/ACY/, 'skip'], [/^Date/, 'date'], [/^DOW/, 'dow'], [/^Pairing/, 'pairing'], [/Debrief/, 'debrief'], [/Report/, 'report'], [/^Item/, 'item'],
+  [/^Dep/, 'dep'], [/^Arr/, 'arr'], [/^(Flying|FH$)/, 'fh'], [/^(Duty H|DH$)/, 'dh'], [/^A\/C/, 'ac'], [/^Hotel/, 'hotel'], [/^(Work|WT)/, 'wt']];
+// the columns of the print without a header row (the same as with one: "Roster Report" 1300 x 750 pt)
+const LRR_DEFAULT = [['date', 25, 75], ['dow', 128, 150], ['pairing', 184, 255], ['report', 271, 330], ['item', 366, 400], ['skip', 433, 490], ['wt', 514, 565],
+  ['dep', 587, 650], ['arr', 665, 730], ['debrief', 750, 800], ['fh', 829, 880], ['dh', 913, 965], ['skip', 1009, 1035], ['ac', 1078, 1120], ['hotel', 1168, 1230], ['skip', 1237, 1290]]
+  .map(([f, left, right]) => ({ f, left, right }));
+
+/**
+ * "Roster Report" (LATAM / Jetstar, Sabre: "01-Jun-2024 to 01-Jul-2024", the crew member's name | id | base | rank), a line per event:
+ *   Date | (DOW) | Pairing/Activity | (Duty) Report | Item | (Overridden) Rank | Work Type | Dep Stn / Dep Time | Arr. Stn / Arr. Time |
+ *   (Duty) Debrief | Flying Hrs | Duty Hrs | SDC | A/C Type | Hotel | ...
+ * The header's words take two or three lines ("Duty" over "Report"), a few prints have none (the columns are then where the others
+ * print them). A cell that does not fit wraps above and below its line ("GRU" / "00:50(+1)"); "<==" for the date: the pairing began
+ * before the period, on the weekday printed beside it. "(+1)" counts from the line's date, but some prints leave it out: a duty's times
+ * are taken to run forward. Rows: C/I (Report), the flights ("PX" work type: dc DH, "[Block: ..]" its Flying Hrs), C/O (Debrief),
+ * the hotel after it; an activity (DO, VC, RES-L, a simulator) a row of its own. The report says nothing of its time zone: taken as local.
+ */
+function parseLatamRosterReport(pages) {
+  const trace = startTrace();
+  const rows = [];
+  const pm = pages.flatMap(p => p.items).map(i => LRR_PERIOD.exec(i.text)).find(Boolean);
+  const from = Date.UTC(+pm[3], monthIndex(pm[2]), +pm[1]);
+  const DAY = 86400000;
+  const dateOf = (t) => { const d = new Date(t); return { section: 'published', date: `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${String(d.getUTCFullYear() % 100).padStart(2, '0')}`, day: WEEKDAYS[d.getUTCDay()] }; };
+  const centre = (i) => i.x + (i.w || 0) / 2;
+  // a station and / or a time in a cell's items: { st, hhmm, off, items (the pieces, for the trace) }
+  const stnTime = (items) => {
+    const out = { st: '', hhmm: '', off: 0, items: [] };
+    for (const it of items) {
+      const s = !out.st && /\b[A-Z]{3}\b/.exec(it.text);
+      if (s && !/^\d/.test(it.text)) { out.st = s[0]; out.stItem = pieceOf(it, s.index, 3); }
+      const t = !out.hhmm && /\b(\d{1,2}):(\d{2})\b/.exec(it.text);
+      if (t) { out.hhmm = `${t[1].padStart(2, '0')}:${t[2]}`; out.tItem = pieceOf(it, t.index, t[0].length); }
+      const o = /\(\+(\d)/.exec(it.text);
+      if (o) out.off = +o[1];
+    }
+    return out;
+  };
+  let cols = null;
+  let cur = null; // the date of the line before (a line without one goes on with it)
+  let duty = null; // the open duty: { ci, flights: [], hotel }
+  const add = (r, marks) => { const row = { notes: [], ...r }; rows.push(row); for (const [f, it] of marks) if (it && [].concat(it).length) mark(row, f, it); return row; };
+  for (const page of pages) {
+    const lines = toLines(page.items, 2);
+    const pairings = page.items.filter(i => /^Pairing ?\/ ?Activity$/.test(i.text)).sort((a, b) => a.y - b.y);
+    // the header: its lines (two items or more, no digit) around "Pairing/Activity"; a page may print it again lower down
+    const headOf = (p) => lines.filter(l => l.y >= p.y - 8 && l.y <= p.y + 13 && l.items.length >= 2 && !l.items.some(i => /\d/.test(i.text))).flatMap(l => l.items);
+    const heads = new Set(pairings.flatMap(headOf));
+    const pairing = pairings[0];
+    let top = (lines.find(l => l.items.some(i => LRR_PERIOD.test(i.text)))?.y ?? 0) + 10;
+    if (pairing) {
+      // a column per run of overlapping words
+      const head = headOf(pairing);
+      const clusters = [];
+      for (const it of [...head].sort((a, b) => a.x - b.x)) {
+        const r = it.x + (it.w || it.text.length * 4);
+        const c = clusters.find(k => it.x < k.right - 1 && r > k.left + 1);
+        if (c) { c.items.push(it); c.left = Math.min(c.left, it.x); c.right = Math.max(c.right, r); } else clusters.push({ left: it.x, right: r, items: [it] });
+      }
+      cols = clusters.map(c => ({ ...c, f: (LRR_COLUMNS.find(([re]) => re.test(c.items.sort((a, b) => a.y - b.y).map(i => i.text).join(' '))) || [, 'skip'])[1] }));
+      top = Math.max(...head.map(i => i.y)) + 4;
+    }
+    const C = cols || LRR_DEFAULT;
+    const colOf = (i) => C.reduce((b, c) => { const d = Math.max(0, c.left - centre(i), centre(i) - c.right); return d < b.d ? { d, f: c.f } : b; }, { d: Infinity, f: 'skip' }).f;
+    const legend = page.items.find(i => i.text === 'LEGEND');
+    const body = page.items.filter(i => i.y > top && !heads.has(i) && (!legend || i.y < legend.y - 4));
+    // a station starts the Dep or the Arr cell (the nearer); a time under a station is in its column (a wrapped "GRU" / "00:50(+1)")
+    const STN = /^[A-Z]{3}( \d{1,2}:\d{2}\S*)?$/;
+    const stnCol = (i) => C.filter(c => c.f === 'dep' || c.f === 'arr').reduce((b, c) => { const d = Math.max(0, c.left - centre(i), centre(i) - c.right); return d < b.d ? { d, f: c.f } : b; }, { d: Infinity, f: 'skip' }).f;
+    // (a station with its time may stand nearer a column not read, "SYD 04:55" under "ACY Deb"; "FDT" alone in Rank is no station)
+    const isStn = (i) => STN.test(i.text) && (['dep', 'arr'].includes(colOf(i)) || (/\d/.test(i.text) && colOf(i) === 'skip'));
+    const anchors = toLines(body, 2).filter(l => l.items.some(i => isStn(i) && stnCol(i) === 'dep'));
+    if (!anchors.length) continue;
+    const near = new Map(anchors.map(a => [a, []]));
+    for (const it of body) {
+      const a = anchors.reduce((b, l) => (Math.abs(l.y - it.y) < Math.abs(b.y - it.y) ? l : b), anchors[0]);
+      if (Math.abs(a.y - it.y) <= 22) near.get(a).push(it);
+    }
+    for (const a of anchors) {
+      const its = near.get(a).sort((p, q) => p.y - q.y || p.x - q.x);
+      const stns = its.filter(isStn);
+      // a cell's wrapped lines start where its first does ("Hotel Ibis Navegantes" / "Itajai")
+      const colIn = new Map();
+      for (const i of its) {
+        const under = /^\d{1,2}:\d{2}|^\(\+/.test(i.text) && stns.find(s => Math.abs(s.x - i.x) < 4);
+        const above = [...colIn.keys()].find(o => Math.abs(o.x - i.x) < 3 && o.y < i.y - 2);
+        colIn.set(i, stns.includes(i) ? stnCol(i) : under ? stnCol(under) : above ? colIn.get(above) : colOf(i));
+      }
+      const cell = (f) => its.filter(i => colIn.get(i) === f);
+      const text = (f) => cell(f).map(i => i.text).join(' ').trim();
+      const dItem = cell('date')[0];
+      let m;
+      if (dItem && (m = /^(\d{2})-([A-Z][a-z]{2})-(\d{4})/.exec(dItem.text))) cur = Date.UTC(+m[3], monthIndex(m[2]), +m[1]);
+      else if (dItem && (m = /^(\d{2})\/(\d{2})\/(\d{4})/.exec(dItem.text))) cur = Date.UTC(+m[3], +m[2] - 1, +m[1]);
+      else if (dItem && dItem.text === '<==') {
+        // the weekday the pairing began, on or before the period's first day
+        const wd = WEEKDAYS.indexOf(text('dow').slice(0, 3));
+        cur = from - (wd >= 0 ? ((new Date(from).getUTCDay() - wd + 7) % 7) * DAY : 0);
+      }
+      if (cur == null) cur = from;
+      const item = text('item'), wt = text('wt');
+      const rep = stnTime(cell('report')), dep = stnTime(cell('dep')), arr = stnTime(cell('arr')), deb = stnTime(cell('debrief'));
+      const fh = text('fh'), dh = text('dh'), ac = text('ac'), hotel = text('hotel');
+      const dateMark = dItem && dItem.text !== '<==' ? [pieceOf(dItem, 0, Math.min(dItem.text.length, 11))] : null;
+      const flight = /^[A-Z0-9]{2}\d{1,4}[A-Z]?$/.test(item);
+      const min = (x) => (x.hhmm ? x.off * 1440 + (+x.hhmm.slice(0, 2)) * 60 + (+x.hhmm.slice(3)) : null);
+      if (!flight) {
+        // an activity: its code, where, from and until
+        duty = null;
+        const code = item || text('pairing').split(/\s+/)[0];
+        const b = min(dep) ?? min(rep), e0 = min(arr) ?? min(deb);
+        const e = e0 != null && b != null && e0 < b ? e0 + 1440 * Math.ceil((b - e0) / 1440) : e0;
+        const base = b != null ? Math.floor(b / 1440) : 0;
+        const at = (v) => `${String(Math.floor((v % 1440) / 60)).padStart(2, '0')}:${String(v % 60).padStart(2, '0')}`;
+        add({ ...dateOf(cur + base * DAY), duty: code, dep: dep.st, arr: arr.st && arr.st !== dep.st ? arr.st : '',
+          begin: b != null ? at(b) : '', end: e != null ? `${at(e)}${Math.floor(e / 1440) > base ? `+${Math.floor(e / 1440) - base}` : ''}` : '' },
+        [['date', dateMark], ['duty', cell(item ? 'item' : 'pairing').slice(0, 1).map(i => pieceOf(i, 0, code.length))], ['dep', dep.stItem], ['arr', arr.st !== dep.st && arr.stItem],
+          ['begin', dep.tItem || rep.tItem], ['end', arr.tItem || deb.tItem]]);
+        continue;
+      }
+      // a flight: the report opens a duty, the debrief closes it; its times run forward from the line before
+      if (rep.hhmm || !duty) duty = { last: null, cur, hotel: '', hotelItems: [] };
+      const fwd = (v) => { if (v == null) return null; let x = v; while (duty.last != null && x < duty.last - 60) x += 1440; duty.last = x; return x; };
+      const repAt = rep.hhmm ? fwd(min(rep)) : null;
+      const depAt = fwd(min(dep)), arrAt = fwd(min(arr)), debAt = deb.hhmm ? fwd(min(deb)) : null;
+      const day0 = Math.floor((depAt ?? repAt ?? 0) / 1440);
+      const hm = (x, v, d0) => (v == null ? '' : `${x.hhmm}${Math.floor(v / 1440) > d0 ? `+${Math.floor(v / 1440) - d0}` : ''}`);
+      if (repAt != null) {
+        add({ ...dateOf(duty.cur + Math.floor(repAt / 1440) * DAY), duty: 'C/I', dep: dep.st, begin: rep.hhmm, notes: dh && !/^0?0:00$/.test(dh) ? [`[Duty: ${dh}]`] : [] },
+          [['date', dateMark], ['ci', rep.tItem], ['info', cell('dh')]]);
+      }
+      add({ ...dateOf(duty.cur + day0 * DAY), duty: item, dc: /^(PX|DH|DHD)$/.test(wt) ? 'DH' : '', dep: dep.st, arr: arr.st,
+        begin: hm(dep, depAt, day0), end: hm(arr, arrAt, day0), ac, notes: fh && !/^0?0:00$/.test(fh) ? [`[Block: ${fh}]`] : [] },
+      [['date', repAt == null ? dateMark : null], ['duty', cell('item')], ['dep', dep.stItem], ['arr', arr.stItem], ['begin', dep.tItem], ['end', arr.tItem], ['ac', cell('ac')], ['info', fh && !/^0?0:00$/.test(fh) ? cell('fh') : null]]);
+      if (hotel) { duty.hotel = hotel; duty.hotelItems = cell('hotel'); }
+      if (debAt != null) {
+        add({ ...dateOf(duty.cur + day0 * DAY), duty: 'C/O', arr: arr.st, end: hm(deb, debAt, day0) }, [['co', deb.tItem]]);
+        if (duty.hotel) add({ ...dateOf(duty.cur + day0 * DAY), duty: 'H', dep: arr.st, notes: [duty.hotel] }, [['hotel', duty.hotelItems]]);
+        duty = null;
+      }
+    }
+  }
+  const out = rows.map(r => outputRow({ ...r, info: r.notes.join(' ') }, 'L'));
+  const yy = (s) => s.slice(2);
+  return { format: 'latam-roster-report', period: `${pm[1]}${pm[2]}${yy(pm[3])} - ${pm[4]}${pm[5]}${yy(pm[6])}`, notices: [], recognized: out.length > 0, published: out, planned: [], _trace: trace, _rows: rows };
+}
+
+const isCrewScheduleList = (page) => page.items.some(i => /^CREW SCHEDULE LIST/.test(i.text)) && page.items.some(i => i.text === 'DUTY END') && page.items.some(i => i.text === 'DETAIL INFO');
+
+/**
+ * "CREW SCHEDULE LIST (LATEST)" (Japan Airlines group, jasperadmin; "PERIOD 2025/04/01 - 2025/04/30"), an entry a block:
+ *   LOCAL DATE "01APR" / "(Tue)" | DUTY | FLT NO. / FLEET | PORT (dep / arr) | REPORT | DEP | ARV | DUTY END (local; UTC under them,
+ *   "(19:00-1)") | CREW: STAFF NO. / NAME / RANK, the crew's duty under DUTY | DETAIL INFO: PLACE, the crew member's part, EVENT
+ * Rows: the entry's duty (a flight: its number, "DH1" -> dc DH, the fleet; "SIM", "TRG", "OFF", "BD"; "---" is a briefing: its event
+ * "BRFG"), the place and event as info, the other crew "[CAP - 03389 - HIROYUKI HOSHINO]"; C/I (REPORT) and C/O (DUTY END) around
+ * a duty with a flight or a simulator. Local times.
+ */
+function parseCrewScheduleList(pages) {
+  const trace = startTrace();
+  const rows = [];
+  const all = pages.flatMap(p => p.items);
+  const pm = /^(\d{4})\/(\d{2})\/(\d{2}) - (\d{4})\/(\d{2})\/(\d{2})$/.exec(all.find(i => /^\d{4}\/\d{2}\/\d{2} - \d{4}\/\d{2}\/\d{2}$/.test(i.text))?.text || '');
+  const me = all.find(i => /^\d{4,6}$/.test(i.text) && all.some(s => s.text === 'STAFF NO.' && Math.abs(s.y - i.y) < 3 && s.x < 40))?.text;
+  const y0 = pm ? +pm[1] : new Date().getUTCFullYear(), m0 = pm ? +pm[2] - 1 : 0;
+  const DATE = /^(\d{2})([A-Z]{3})$/;
+  const TIME = /^\d{2}:\d{2}(\+\d)?$/;
+  let cur = null;
+  let open = null; // the rows since the last C/I
+  const add = (r, marks) => { const row = { notes: [], ...r }; rows.push(row); for (const [f, it] of marks) if (it && [].concat(it).length) mark(row, f, it); return row; };
+  const close = () => {
+    // C/I and C/O only around a duty with a flight or a simulator
+    if (open && !open.rows.some(r => r.isFlight || /^(SIM|DH)/.test(r.duty) || r.dc === 'DH')) for (const r of open.rows.filter(x => /^C\/[IO]$/.test(x.duty))) rows.splice(rows.indexOf(r), 1);
+    open = null;
+  };
+  for (const page of pages) {
+    const head = page.items.find(i => i.text === 'DUTY END');
+    if (!head) continue;
+    const X = (t, below = 12) => page.items.find(i => i.text === t && i.y >= head.y - 15 && i.y <= head.y + below)?.x;
+    const xs = { duty: X('DUTY'), flt: X('FLT NO.'), port: X('PORT'), rep: X('REPORT'), dep: X('DEP'), arv: X('ARV'), end: head.x, staff: X('STAFF NO.'), name: X('NAME'), place: X('PLACE'), event: X('EVENT') };
+    const col = (i, k, tol = 12) => Math.abs(i.x - xs[k]) <= tol;
+    const body = page.items.filter(i => i.y > head.y + 12 && !/PAGE$|^\/$/.test(i.text)); // not the page number ("3 / 4 PAGE")
+    const lines = toLines(body, 2);
+    // an entry's first line: a port, no UTC time in brackets
+    const anchors = lines.filter(l => l.items.some(i => col(i, 'port', 10) && /^[A-Z]{3}$/.test(i.text)) && !l.items.some(i => /^\(/.test(i.text)));
+    for (const [k, a] of anchors.entries()) {
+      const next = anchors[k + 1]?.y ?? Infinity;
+      const blk = lines.filter(l => l.y >= a.y && l.y < next - 2);
+      const its = blk.flatMap(l => l.items);
+      const at = (key, l, re, tol) => l?.items.find(i => col(i, key, tol) && (!re || re.test(i.text)));
+      const dItem = a.items.find(i => i.x < 60 && DATE.test(i.text)); // (a date alone further down is a day with nothing)
+      let m;
+      if (dItem && (m = DATE.exec(dItem.text)) && monthIndex(m[2]) >= 0) {
+        const mi = monthIndex(m[2]);
+        cur = Date.UTC(y0 + (mi < m0 - 6 ? 1 : 0), mi, +m[1]);
+      }
+      if (cur == null) continue;
+      const dutyItem = its.find(i => i.y <= a.y + 8 && col(i, 'duty', 10) && /^[A-Z0-9-]{1,4}$|^---$/.test(i.text));
+      const code = dutyItem?.text || '';
+      const flt = at('flt', a, /^[A-Z0-9]{2}\d{1,4}[A-Z]?$/, 14);
+      const bottom = blk.find(l => l.y > a.y + 3 && l.y <= a.y + 12 && l.items.some(i => /^\(/.test(i.text)));
+      const fleet = at('flt', bottom, /^\d{3}$|^[A-Z0-9]{3,4}$/, 14);
+      const dep = at('port', a, /^[A-Z]{3}$/, 10), arr = flt ? at('port', bottom, /^[A-Z]{3}$/, 10) : null;
+      const tm = (key) => at(key, a, TIME, 14); // ("01:10+1" starts a little left of the others)
+      const [rep, dp, av, end] = ['rep', 'dep', 'arv', 'end'].map(tm);
+      // the detail (place, part, event) on the entry's first line with one
+      const det = blk.find(l => l.items.some(i => i.x >= xs.place - 12));
+      const detItems = det ? det.items.filter(i => i.x >= xs.place - 12) : [];
+      // PLACE "KZT/SIM2", the crew member's part "INSTR" (right of PLACE), EVENT
+      const partX = xs.place + 30;
+      const event = detItems.filter(i => i.x >= xs.event - 30).map(i => i.text).join(' ');
+      const place = detItems.filter(i => i.x < partX).map(i => i.text).join(' ');
+      const part = detItems.filter(i => i.x >= partX && i.x < xs.event - 30).map(i => i.text).join(' ');
+      // the crew: a staff number, the name on the line after it, the crew member's duty beside the name
+      const crew = [];
+      const isName = (i) => i.x > xs.staff + 20 && i.x < xs.place - 20 && /[A-Z]{2,} [A-Z]/.test(i.text);
+      for (const s of its.filter(i => col(i, 'staff', 8) && /^\d{4,6}$/.test(i.text) && i.text !== me)) {
+        const nl = blk.find(l => l.y > s.y + 1 && l.y <= s.y + 8 && l.items.some(isName));
+        const name = nl?.items.find(isName);
+        const role = nl?.items.find(i => col(i, 'duty', 10)) || nl?.items.find(i => i.x >= partX && i.x < xs.event - 30);
+        if (name) crew.push({ text: `[${role ? `${role.text} - ` : ''}${s.text} - ${name.text}]`, items: [role, s, name].filter(Boolean) });
+      }
+      // local times, "01:10+1" a day after the entry's date
+      const min = (i) => (i ? (+(/\+(\d)/.exec(i.text)?.[1] || 0)) * 1440 + +i.text.slice(0, 2) * 60 + +i.text.slice(3, 5) : null);
+      const first = min(rep) ?? min(dp) ?? 0;
+      const d0 = Math.floor(first / 1440);
+      const base = dateOf(cur + d0 * 86400000);
+      const hm = (i, from) => { if (!i) return ''; let v = min(i); if (from != null && v < from) v += 1440; const d = Math.floor(v / 1440) - d0; return `${i.text.slice(0, 5)}${d > 0 ? `+${d}` : ''}`; };
+      if (rep) { close(); open = { rows: [] }; open.rows.push(add({ ...base, duty: 'C/I', dep: dep?.text || '', begin: hm(rep) }, [['date', dItem], ['ci', pieceOf(rep, 0, 5)]])); }
+      const duty = flt ? flt.text : code === '---' ? (event || code) : code;
+      const row = add({
+        ...base, duty, dc: /^DH/.test(code) ? 'DH' : '', dep: dep?.text || '', arr: arr?.text || '', begin: hm(dp), end: hm(av, min(dp)), ac: flt ? fleet?.text || '' : '',
+        crew: crew.map(c => c.text).join(''),
+        notes: [flt && code && !/^DH/.test(code) && `[Duty: ${code}]`, place && `[Place: ${place}]`, part && `[Part: ${part}]`, event && duty !== event && `[Event: ${event}]`].filter(Boolean),
+      }, [['date', rep ? null : dItem], ['duty', flt || (code === '---' ? detItems.filter(i => i.x >= xs.event - 30) : dutyItem)], ['dep', dep], ['arr', arr], ['begin', dp && pieceOf(dp, 0, 5)], ['end', av && pieceOf(av, 0, 5)],
+        ['ac', flt ? fleet : null], ['crew', crew.flatMap(c => c.items)], ['info', detItems.filter(i => duty !== event || i.x < xs.event - 30)]]);
+      row.isFlight = !!flt;
+      open?.rows.push(row);
+      if (end) {
+        open?.rows.push(add({ ...base, duty: 'C/O', arr: (arr || dep)?.text || '', end: hm(end, first) }, [['co', pieceOf(end, 0, 5)]]));
+        close();
+      }
+    }
+  }
+  close();
+  const out = rows.map(r => outputRow({ ...r, info: r.notes.join(' ') }, 'L'));
+  return { format: 'crew-schedule-list', period: pm ? `${pm[3]}${MONTHS[+pm[2] - 1]}${pm[1].slice(2)} - ${pm[6]}${MONTHS[+pm[5] - 1]}${pm[4].slice(2)}` : null,
+    notices: [], recognized: out.length > 0, published: out, planned: [], _trace: trace, _rows: rows };
+}
+
+const isMonthlyFlightProgram = (page) => page.items.some(i => /^(MONTHLY FLIGHT PROGRAM|AYLIK UCUS PROGRAMI)$/.test(i.text)) && page.items.some(i => /^Period:$/.test(i.text));
+const TR_MONTHS = { OCA: 0, SUB: 1, MAR: 2, NIS: 3, MAY: 4, HAZ: 5, TEM: 6, AGU: 7, EYL: 8, EKI: 9, KAS: 10, ARA: 11 };
+
+/**
+ * Turkish Airlines "CREW PLANNING SYSTEM - MONTHLY FLIGHT PROGRAM" (or in Turkish "EKIP PLANLAMA SISTEMI - AYLIK UCUS PROGRAMI"):
+ * the month as a grid, the trips in GMT, then "LOCAL TIME ROSTER DETAILS" ("LOKAL SAATLI UCUS PROGRAMI"), read here:
+ *   Trip (TS/TE) | Duty: "DS: 03Jul2024 12:45" .. "DE: 04Jul2024 03:35" (GMB / GMS, "03TEM 00:00") | Value / Limit |
+ *   Flight "TK6397" / an activity "CFR", "HSBY", "IBI" | Dep/LT "IST/13:45" | Arr/LT "ALG/15:15" | Cockpit "GYORGY MIKO (C1), ..."
+ * Each column is stacked on its own (a duty's lines do not face its flights), so a flight goes to the duty whose
+ * start and end take in its local times, in order. Rows: C/I (DS), the flights (the other cockpit crew), C/O (DE), the layover
+ * ("LS/LRT: ICN/52:10": a hotel row, "[Layover: 52:10]"); an activity a row of its own.
+ */
+function parseMonthlyFlightProgram(pages) {
+  const trace = startTrace();
+  const rows = [];
+  const all = pages.flatMap(p => p.items);
+  const mon = (s) => { const m = String(s).toUpperCase(); return monthIndex(m) >= 0 ? monthIndex(m) : (TR_MONTHS[m] ?? -1); };
+  const printed = all.map(i => /^Printed (\d{2})([A-Z]{3})(\d{4})/.exec(i.text)).find(Boolean);
+  const pText = all.find((i, k, a) => a[k - 1]?.text === 'Period:' || (/^\d{2}[A-Za-z]{3}(\d{4})? - \d{2}[A-Za-z]{3}(\d{4})?$/.test(i.text) && i.y < 60))?.text || '';
+  const pm = /^(\d{2})([A-Za-z]{3})(\d{4})? - (\d{2})([A-Za-z]{3})(\d{4})?$/.exec(pText);
+  // the year: the period's, else the year it was printed in (a period early next year when printed late in the year)
+  const yearOf = (mi) => (pm?.[3] ? +pm[3] + (mi < mon(pm[2]) ? 1 : 0) : printed ? +printed[3] + (mi < mon(printed[2]) - 6 ? 1 : 0) : new Date().getUTCFullYear());
+  const stamp = (s) => {
+    const m = /^(\d{2})([A-Za-z]{3})(\d{4})? (\d{1,2}):(\d{2})$/.exec(s || '');
+    const mi = m ? mon(m[2]) : -1;
+    return mi >= 0 ? Date.UTC(m[3] ? +m[3] : yearOf(mi), mi, +m[1], +m[4], +m[5]) : null;
+  };
+  // the crew member: the name under the staff number at the top ("069210" / "MIKO" / "GYORGY")
+  const idItem = pages[0].items.find(i => /^\d{5,6}$/.test(i.text) && i.x < 140 && i.y < 140);
+  const meWords = new Set(pages[0].items.filter(i => idItem && i.x < 140 && i.y > idItem.y + 3 && i.y < idItem.y + 30 && /^[A-Z]+$/.test(i.text)).map(i => i.text));
+  const duties = [], entries = [], layovers = [];
+  let inLocal = false;
+  for (const page of pages) {
+    const marker = page.items.find(i => /^(LOCAL TIME ROSTER DETAILS|LOKAL SAATLI UCUS PROGRAMI)$/.test(i.text));
+    if (marker) inLocal = true;
+    const fHead = page.items.find(i => /^(Flight|Ucus)$/.test(i.text) && page.items.some(j => /\/LT$/.test(j.text) && Math.abs(j.y - i.y) < 3));
+    if (!inLocal || !fHead) continue;
+    const cHead = page.items.find(i => /^(Cockpit|Kokpit)$/.test(i.text) && Math.abs(i.y - fHead.y) < 3);
+    const body = page.items.filter(i => i.y > fHead.y + 5 && !/^Printed /.test(i.text));
+    const right = (it, re) => body.find(j => Math.abs(j.y - it.y) < 2 && j.x > it.x && j.x < it.x + 60 && re.test(j.text));
+    for (const it of body) {
+      if (/^(DS|GMB):$/.test(it.text) || /^(DE|GMS):$/.test(it.text)) {
+        const v = right(it, /^\d{2}[A-Za-z]{3}(\d{4})? \d{1,2}:\d{2}$/);
+        const t = v && stamp(v.text);
+        if (t == null) continue;
+        if (/^(DS|GMB)/.test(it.text)) duties.push({ start: t, startItem: v, page: page.page, y: it.y, entries: [] });
+        else { const d = [...duties].reverse().find(x => x.end == null && x.page === page.page && x.y <= it.y + 1) || duties.at(-1); if (d && d.end == null) { d.end = t; d.endItem = v; } }
+      }
+      if (/^(LS\/LRT|YI\/YDS):$/.test(it.text)) {
+        const v = right(it, /^[A-Z]{3}\/\d{1,3}:\d{2}$/);
+        if (v) layovers.push({ page: page.page, y: it.y, item: v });
+      }
+    }
+    // the flight column: a flight number or an activity code, its stations and times to the right, the crew after them
+    const crewX = cHead ? cHead.x - 40 : Infinity;
+    const lineOf = (e) => body.filter(j => Math.abs(j.y - e.y) < 2 && j.x > e.x + 5).sort((a, b) => a.x - b.x);
+    const codes = body.filter(i => Math.abs(i.x - fHead.x) < 10 && /^[A-Z0-9]{2,7}$/.test(i.text) && lineOf(i).some(j => /\d{1,2}:\d{2}/.test(j.text)));
+    for (const c of codes) entries.push({ page: page.page, y: c.y, code: c, parts: lineOf(c), crewItems: [] });
+    // crew lines of their own ("KUTAY" / "AYVALI (P6)"): with the nearest flight
+    const pageEntries = entries.filter(e => e.page === page.page);
+    for (const it of body.filter(i => i.x >= crewX && !codes.some(c => Math.abs(c.y - i.y) < 2) && /[A-Z]{2,}/.test(i.text))) {
+      const e = pageEntries.reduce((b, x) => (!b || Math.abs(x.y - it.y) < Math.abs(b.y - it.y) ? x : b), null);
+      if (e && Math.abs(e.y - it.y) < 14) e.crewItems.push(it);
+    }
+  }
+  duties.sort((a, b) => a.start - b.start);
+  // each entry into the duty whose times take it in, in order
+  let k = 0, last = -Infinity;
+  const at = (from, hh, mm) => { const d = new Date(from); let t = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), hh, mm); if (t < from) t += 86400000; return t; };
+  for (const e of entries.sort((a, b) => a.page - b.page || a.y - b.y)) {
+    const text = e.parts.map(p => p.text).join(' ');
+    const legs = [...text.matchAll(/([A-Z]{3})\/(\d{1,2}):(\d{2})/g)];
+    const times = legs.length ? legs.map(m => [+m[2], +m[3]]) : [...text.matchAll(/(\d{1,2}):(\d{2})/g)].slice(0, 2).map(m => [+m[1], +m[2]]);
+    if (!times.length) continue;
+    while (k < duties.length) {
+      const d = duties[k];
+      const dep = at(Math.max(d.start, last), ...times[0]);
+      if (d.end == null || dep <= d.end) { e.dep = dep; break; }
+      k += 1; last = -Infinity;
+    }
+    if (k >= duties.length) break;
+    e.arr = times[1] ? at(e.dep, ...times[1]) : null;
+    last = e.arr ?? e.dep;
+    e.legs = legs;
+    const crewText = [text.slice(legs.length ? legs.at(-1).index + legs.at(-1)[0].length : 0).replace(/^\s*(\d{1,2}:\d{2}\s*)*/, ''), ...e.crewItems.sort((a, b) => a.y - b.y).map(i => i.text)].join(' ').replace(/^\s*-\s*$/, '').trim();
+    e.crew = [...crewText.matchAll(/([A-Z][A-Z .'-]*?) \(([A-Z]\d)\)/g)].map(m => ({ name: m[1].trim(), role: m[2] }))
+      .filter(c => !(meWords.size && c.name.split(' ').every(w => meWords.has(w))));
+    duties[k].entries.push(e);
+  }
+  const hm = (t) => { const d = new Date(t); return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`; };
+  const day = (t) => Math.floor(t / 86400000);
+  const end = (t, from) => (t == null ? '' : `${hm(t)}${day(t) > day(from) ? `+${day(t) - day(from)}` : ''}`);
+  const add = (r, marks) => { const row = { notes: [], ...r }; rows.push(row); for (const [f, it] of marks) if (it && [].concat(it).length) mark(row, f, it); return row; };
+  for (const d of duties) {
+    const flights = d.entries.filter(e => /^[A-Z0-9]{2}\d{1,4}[A-Z]?$/.test(e.code.text));
+    if (flights.length) add({ ...dateOf(d.start), duty: 'C/I', dep: flights[0].legs[0]?.[1] || '', begin: hm(d.start) }, [['date', pieceOf(d.startItem, 0, d.startItem.text.indexOf(' '))], ['ci', pieceOf(d.startItem, d.startItem.text.indexOf(' ') + 1, 5)]]);
+    for (const e of d.entries) {
+      const [dep, arr] = [e.legs[0]?.[1] || '', e.legs[1]?.[1] || ''];
+      add({ ...dateOf(e.dep), duty: e.code.text, dep, arr: arr && arr !== dep ? arr : '', begin: hm(e.dep), end: end(e.arr, e.dep), crew: e.crew.map(c => `[${c.role} - ${c.name}]`).join('') },
+        [['duty', e.code], ['dep', e.parts[0]], ['crew', e.crewItems]]);
+    }
+    if (flights.length && d.end != null) {
+      const lastF = flights.at(-1);
+      add({ ...dateOf(lastF.dep), duty: 'C/O', arr: lastF.legs[1]?.[1] || '', end: end(d.end, lastF.dep) }, [['co', pieceOf(d.endItem, d.endItem.text.indexOf(' ') + 1, 5)]]);
+      // the layover printed in this duty's lines (up to the next duty's start)
+      const next = duties.find(x => x.page > d.page || (x.page === d.page && x.y > d.y));
+      const lo = layovers.find(l => (l.page > d.page || (l.page === d.page && l.y > d.y)) && (!next || l.page < next.page || (l.page === next.page && l.y < next.y)));
+      if (lo) { const [st, rest] = lo.item.text.split('/'); add({ ...dateOf(lastF.dep), duty: 'H', dep: st, notes: [`[Layover: ${rest}]`] }, [['dep', pieceOf(lo.item, 0, 3)], ['info', pieceOf(lo.item, 4, rest.length)]]); }
+    }
+  }
+  const out = rows.map(r => outputRow({ ...r, info: r.notes.join(' ') }, 'L'));
+  const fmt = (dd, m, y) => `${dd}${MONTHS[mon(m)]}${String(y ?? yearOf(mon(m))).slice(-2)}`;
+  return { format: 'monthly-flight-program', period: pm ? `${fmt(pm[1], pm[2], pm[3])} - ${fmt(pm[4], pm[5], pm[6])}` : null,
+    notices: [], recognized: out.length > 0, published: out, planned: [], _trace: trace, _rows: rows };
+}
+
+const isNumberedLogbook = (page) => ['AIRCRAFT', 'DEPARTURE', 'ARRIVAL', 'SYNTHETIC DEVICES'].every(t => page.items.some(i => i.text === t)) && page.items.some(i => i.text === 'Regist');
+
+/**
+ * A pilot logbook with numbered columns (Turkish Airlines; "072905 JURGEN ... 14/07/2024 15:20" above it):
+ *   1 Date | 2 AIRCRAFT Type, Registration | 3 DEPARTURE Place, Time | 4 ARRIVAL Place, Time | 5 SINGLE PILOT SE, ME | Multi Pilot |
+ *   Total Time | Name of PIC | 9 LANDING Day, Night | 10 OPERATION CONDITION Night, IFR | 11 PILOT FUNCTION PIC, Co-Pilot, Dual |
+ *   Instructor | 13 SYNTHETIC DEVICES Date, Type, Time | 14 Remarks and Endorsements
+ * Rows: a flight (no number; "[Flight: total]", night / IFR / function times as tags), a simulator line (its place and times
+ * with the synthetic device's date and time: "SIM", "[Sim: 04:00]"). Times taken as UTC, as logbooks keep them.
+ */
+function parseNumberedLogbook(pages) {
+  const trace = startTrace();
+  const rows = [];
+  const NAMES = { Date: ['date'], Type: ['ac'], Regist: ['reg'], 'Dep.': ['depPlace', 'depTime'], 'Arr.': ['arrPlace', 'arrTime'], SE: ['se'], ME: ['me'], Multi: ['multi'],
+    Total: ['total'], 'Name of': ['pic'], Landing: ['ldgDay', 'ldgNight'], Operation: ['night', 'ifr'], Function: ['fPic', 'fCo', 'fDual'], Instr: ['instructor'],
+    'STDS (Date)': ['simDate'], STDS: ['simType', 'simTime'], Remarks: ['remark'] };
+  const DATE = /^(\d{2})\/(\d{2})\/(\d{4})$/;
+  const dur = (t) => (/^\d{1,3}:\d{2}$/.test(t || '') && /[1-9]/.test(t) ? t : '');
+  let first = null, last = null;
+  for (const page of pages) {
+    const head = page.items.find(i => i.text === 'Regist');
+    if (!head) continue;
+    const seen = {};
+    const cols = page.items.filter(i => Math.abs(i.y - head.y) < 3).sort((a, b) => a.x - b.x)
+      .map(i => { const n = seen[i.text] = (seen[i.text] || 0) + 1; return { name: NAMES[i.text]?.[n - 1] || i.text, x: i.x }; });
+    const nearest = (x) => cols.reduce((a, c) => (Math.abs(c.x - x) < Math.abs(a.x - x) ? c : a)).name;
+    // a line without a date holds the wrapped ends of the cells above ("O" / "7M")
+    const lines = [];
+    for (const line of toLines(page.items.filter(i => i.y > head.y + 15), 2)) {
+      if (lines.length && !line.items.some(i => DATE.test(i.text)) && line.y - lines.at(-1).y < 12) lines.at(-1).items.push(...line.items); else lines.push(line);
+    }
+    for (const line of lines) {
+      const cell = {};
+      for (const it of line.items) (cell[nearest(it.x)] ||= []).push(it);
+      const get = (c) => (cell[c] || []).map(i => i.text).join(c === 'ac' ? '' : ' ').trim();
+      // (the line's number stands left of its date)
+      cell.date = (cell.date || []).filter(i => DATE.test(i.text));
+      const m = DATE.exec(get('date'));
+      if (!m) continue;
+      const t = Date.UTC(+m[3], +m[2] - 1, +m[1]);
+      const plus = get('arrTime') && get('arrTime') < get('depTime') ? '+1' : '';
+      const sim = dur(get('simTime'));
+      const tag = (k, c) => { const v = dur(get(c)); return v && `[${k}: ${v}]`; };
+      const r = {
+        ...dateOf(t), duty: sim && !get('ac') ? 'SIM' : '', dep: get('depPlace'), arr: get('arrPlace') !== get('depPlace') || !sim ? get('arrPlace') : '', begin: get('depTime'),
+        end: get('arrTime') ? `${get('arrTime')}${plus}` : '', ac: get('ac'), registration: get('reg'), crew: get('pic') ? `[PIC - ${get('pic')}]` : '',
+        notes: [sim && `[Sim: ${sim}]`, tag('Flight', 'total'), ...[['Landing Day', 'ldgDay'], ['Landing Night', 'ldgNight']].filter(([, c]) => /^[1-9]\d*$/.test(get(c))).map(([k, c]) => `[${k}: ${get(c)}]`),
+          tag('Night', 'night'), tag('IFR', 'ifr'), tag('PIC', 'fPic'), tag('CoPilot', 'fCo'), tag('Dual', 'fDual'), tag('Instructor', 'instructor'), get('remark')].filter(Boolean),
+      };
+      rows.push(r);
+      for (const [f, c] of [['date', 'date'], ['dep', 'depPlace'], ['begin', 'depTime'], ['arr', 'arrPlace'], ['end', 'arrTime'], ['ac', 'ac'], ['registration', 'reg'], ['crew', 'pic'],
+        ['info', 'simTime'], ['info', 'total'], ['info', 'night'], ['info', 'ifr'], ['info', 'fPic'], ['info', 'fCo'], ['info', 'fDual'], ['info', 'instructor'], ['info', 'remark']]) mark(r, f, cell[c]);
+      first ??= t; last = t;
+    }
+  }
+  const fmt = (t) => { const x = new Date(t); return `${String(x.getUTCDate()).padStart(2, '0')}${MONTHS[x.getUTCMonth()]}${String(x.getUTCFullYear() % 100).padStart(2, '0')}`; };
+  const out = rows.map(r => outputRow({ ...r, info: r.notes.join(' ') }, 'Z'));
+  return { format: 'numbered-logbook', period: first != null ? `${fmt(first)} - ${fmt(last)}` : null, notices: [], recognized: out.length > 0, published: out, planned: [], _trace: trace, _rows: rows };
+}
+
+const isRulerLogbook = (page) => page.items.some(i => /^(Merged Logbook Records - from|Log Book record of Flight Duties from) /.test(i.text)) && page.items.some(i => /^Off-Blk/.test(i.text));
+const RULER_COLS = ['date', 'flt', 'sector', 'reg', 'block', 'off', 'air', 'land', 'on', 'to', 'ld', 'auto', 'commander', 'ac', 'catg', 'training'];
+
+/**
+ * A logbook printed as fixed-width text (Cathay Pacific: "Merged Logbook Records - from 2025-04-01 to 2025-07-01", "Log Book record of
+ * Flight Duties from ..."), its columns marked by a ruler of dashes under the header:
+ *   Date(UTC) | Flt No. | Sector "HKG LHR" | Reg | Block Time | UTC Off-Blk | Airborne | Landing | On-Blk | Take Off | Land | Auto Land |
+ *   Commander | AC Type | Catg | Training Type
+ * A row per flight (UTC; "05:39+1" / "16:26-1" a day after / before the date): block off / on as begin / end, airborne / landing as
+ * take-off / landing, "[Block: 14:23] [Takeoff Day/Night: 1] [Landing Day/Night: 1]", "[Commander - HUI WAI YAN C]".
+ */
+function parseRulerLogbook(pages) {
+  const trace = startTrace();
+  const rows = [];
+  const DATE = /^(\d{4})\/(\d{2})\/(\d{2})$/;
+  for (const page of pages) {
+    const lines = toLines(page.items, 2);
+    const ruler = lines.find(l => l.items.length >= 8 && l.items.every(i => /^-+$/.test(i.text)));
+    if (!ruler) continue;
+    const xs = ruler.items.map(i => i.x);
+    for (const l of lines.filter(x => x.y > ruler.y && DATE.test(x.items[0].text))) {
+      // (the data may stand left of the ruler by a few characters: the shift of the date column)
+      const shift = l.items[0].x - xs[0];
+      const cell = {};
+      const rest = [];
+      for (const it of l.items) {
+        const k = xs.reduce((b, x, j) => (it.x - shift >= x - 8 ? j : b), 0);
+        if (k < RULER_COLS.indexOf('on') || (k === RULER_COLS.indexOf('on') && /^\d{2}:\d{2}/.test(it.text))) (cell[RULER_COLS[k]] ||= []).push(it); else rest.push(it);
+      }
+      // the counts and names after On-Blk do not keep to the ruler in every print: in their order (take-offs, landings, autoland Y/N,
+      // the commander, the aircraft type ...)
+      for (const it of rest) {
+        const k = /^\d+$/.test(it.text) && !cell.to ? 'to' : /^\d+$/.test(it.text) && !cell.ld ? 'ld' : /^[YN]$/.test(it.text) && !cell.auto ? 'auto'
+          : RULER_COLS.slice(RULER_COLS.indexOf('commander')).find(c => !cell[c]);
+        if (k) cell[k] = [it];
+      }
+      const get = (k) => (cell[k] || []).map(i => i.text).join(' ');
+      const [, y, mo, d] = DATE.exec(get('date'));
+      const sec = /^([A-Z]{3}) ([A-Z]{3})$/.exec(get('sector'));
+      const t = (k) => (/^\d{2}:\d{2}([+-]\d)?$/.test(get(k)) ? get(k) : '');
+      const n = (k) => (/^[1-9]\d*$/.test(get(k)) ? +get(k) : 0);
+      const row = {
+        ...dateOf(Date.UTC(+y, +mo - 1, +d)), duty: get('flt'), registration: get('reg'), dep: sec?.[1] || '', arr: sec?.[2] || '',
+        begin: t('off'), takeoff: t('air'), landing: t('land'), end: t('on'), ac: get('ac'), crew: get('commander') ? `[Commander - ${get('commander')}]` : '',
+        notes: [/^\d{2}:\d{2}$/.test(get('block')) && /[1-9]/.test(get('block')) && `[Block: ${get('block')}]`, n('to') && `[Takeoff Day/Night: ${n('to')}]`, n('ld') && `[Landing Day/Night: ${n('ld')}]`,
+          /^Y/.test(get('auto')) && '[Autoland: Y]', get('catg') && `[Catg: ${get('catg')}]`, get('training')].filter(Boolean),
+      };
+      rows.push(row);
+      for (const [f, k] of [['date', 'date'], ['duty', 'flt'], ['registration', 'reg'], ['dep', 'sector'], ['begin', 'off'], ['takeoff', 'air'], ['landing', 'land'], ['end', 'on'], ['ac', 'ac'], ['crew', 'commander'],
+        ['info', 'block'], ['info', 'to'], ['info', 'ld']]) mark(row, f, cell[k]);
+    }
+  }
+  const head = pages.flatMap(p => p.items).map(i => /from (\d{4})-(\d{2})-(\d{2}) to (\d{4})-(\d{2})-(\d{2})/.exec(i.text)).find(Boolean);
+  const out = rows.map(r => outputRow({ ...r, info: r.notes.join(' ') }, 'Z'));
+  return { format: 'ruler-logbook', period: head ? `${head[3]}${MONTHS[+head[2] - 1]}${head[1].slice(2)} - ${head[6]}${MONTHS[+head[5] - 1]}${head[4].slice(2)}` : null,
+    notices: [], recognized: out.length > 0, published: out, planned: [], _trace: trace, _rows: rows };
+}
+
+const isAcknowledgedRoster = (page) => page.items.some(i => i.text === 'Acknowledged Roster') && page.items.some(i => i.text === 'Date (LT)') && page.items.some(i => i.text === 'Start (UTC)');
+const ACK_COLS = [['Trip ID', 'trip'], ['Report (LT)', 'report'], ['Pos', 'pos'], ['Activity', 'act'], ['From', 'dep'], ['To', 'arr'], ['Start (UTC)', 'start'], ['End (UTC)', 'end'],
+  ['A/C', 'ac'], ['Layover', 'layover'], ['Timezone', 'tz'], ['LSW', 'lsw'], ['BZW', 'bzw'], ['Tags', 'tags'], ['Blocktime', 'block'], ['FDP', 'fdp']];
+
+/**
+ * Lufthansa "Acknowledged Roster" (Jeppesen; "Month: March 2026"): the month as a grid of days, then a line per event:
+ *   Date (LT) "21 Sat" | Trip ID | Report (LT) | Pos | Activity "412" / "RES" | From | To | Start (UTC) | End (UTC) "(22) 00:05" (another
+ *   day of the month) | A/C | Layover "24:15" | Timezone Difference | LSW | BZW | Tags | Blocktime | FDP ... rest times
+ * A flight over midnight may print its departure on one day's line and its arrival on the next ("22 Sun 20:50 FO 413 EWR (23) 01:50",
+ * "23 Mon FO 413 MUC 09:25"): one row. Rows: C/I (Report, local), the flights (UTC, "[Block: 08:55]"), a hotel row after a leg with
+ * a layover ("[Layover: 24:15]"); an activity with its station and times. "Layover: CPT" lines are the nights already given.
+ */
+function parseAcknowledgedRoster(pages) {
+  const trace = startTrace();
+  const rows = [];
+  const all = pages.flatMap(p => p.items);
+  const mm = /^([A-Z][a-z]+) (\d{4})$/.exec(all.find((i, k, a) => a[k - 1]?.text === 'Month:')?.text || all.find(i => /^[A-Z][a-z]+ \d{4}$/.test(i.text) && monthIndex(i.text.slice(0, 3)) >= 0)?.text || '');
+  const mi = mm ? monthIndex(mm[1].slice(0, 3)) : -1, year = mm ? +mm[2] : new Date().getUTCFullYear();
+  const DAY = /^(\d{2}) (Mon|Tue|Wed|Thu|Fri|Sat|Sun)$/;
+  const add = (r, marks) => { const row = { notes: [], ...r }; rows.push(row); for (const [f, it] of marks) if (it && [].concat(it).length) mark(row, f, it); return row; };
+  let cur = null, lastFlight = null;
+  for (const page of pages) {
+    const head = page.items.find(i => i.text === 'Date (LT)');
+    if (!head || mi < 0) continue;
+    const hl = page.items.filter(i => Math.abs(i.y - head.y) < 3);
+    const cols = ACK_COLS.map(([t, k]) => ({ k, x: hl.find(i => i.text === t)?.x })).filter(c => c.x != null).sort((a, b) => a.x - b.x);
+    const colOf = (i) => cols.reduce((b, c) => (c.x <= i.x + 12 ? c.k : b), 'date');
+    const end = page.items.find(i => /^Created .* by /.test(i.text))?.y ?? Infinity;
+    for (const l of toLines(page.items.filter(i => i.y > head.y + 45 && i.y < end), 2)) {
+      const dItem = l.items.find(i => DAY.test(i.text) && i.x < head.x + 20);
+      if (dItem) cur = Date.UTC(year, mi, +DAY.exec(dItem.text)[1]);
+      if (cur == null) continue;
+      const cell = {};
+      for (const it of l.items.filter(i => i !== dItem)) (cell[colOf(it)] ||= []).push(it);
+      const get = (k) => (cell[k] || []).map(i => i.text).join(' ');
+      const act = get('act');
+      if (!act || /^Layover:/.test(l.items.map(i => i.text).join(' '))) continue;
+      // "(22) 00:05": a time on another day of the month than the line's
+      const stamp = (k) => {
+        const m = /^(?:\((\d{1,2})\) )?(\d{2}:\d{2})$/.exec(get(k));
+        if (!m) return null;
+        let t = cur;
+        if (m[1]) { t = Date.UTC(year, mi, +m[1]); if (t < cur - 15 * 86400000) t = Date.UTC(year, mi + 1, +m[1]); }
+        return { t, hhmm: m[2], item: (cell[k] || []).at(-1) };
+      };
+      const s = stamp('start'), e = stamp('end');
+      const plus = (x, from) => (x && from && x.t > from.t ? ` +${Math.round((x.t - from.t) / 86400000)}` : '');
+      const hm = (x, from) => (x ? `${x.hhmm}${plus(x, from)}`.replace(' +', '+') : '');
+      const flight = /^\d{1,4}[A-Z]?$/.test(act);
+      // the arrival of the flight on the line before
+      if (flight && lastFlight && lastFlight.duty === act && !lastFlight.arr && !get('dep')) {
+        Object.assign(lastFlight, { arr: get('arr'), end: hm(e, lastFlight._s) });
+        mark(lastFlight, 'arr', cell.arr); mark(lastFlight, 'end', e?.item);
+        if (get('block') && /[1-9]/.test(get('block'))) lastFlight.notes.push(`[Block: ${get('block')}]`);
+        if (/[1-9]/.test(get('layover'))) add({ ...dateOf(lastFlight._s?.t ?? cur), duty: 'H', dep: get('arr'), notes: [`[Layover: ${get('layover')}]`] }, [['info', cell.layover]]);
+        lastFlight = null;
+        continue;
+      }
+      const report = /^\d{2}:\d{2}$/.test(get('report')) ? cell.report[0] : null;
+      if (report) add({ ...dateOf(cur), duty: 'C/I', dep: get('dep'), begin: `!${report.text}` }, [['date', dItem], ['ci', report]]);
+      const base = s || { t: cur };
+      const row = add({
+        ...dateOf(base.t), duty: act, dep: get('dep'), arr: flight || get('arr') !== get('dep') ? get('arr') : '', begin: s?.hhmm || '', end: hm(e, base), ac: get('ac'),
+        notes: flight ? [get('block') && /[1-9]/.test(get('block')) && `[Block: ${get('block')}]`, get('pos') && `[Pos: ${get('pos')}]`].filter(Boolean) : [],
+      }, [['date', report ? null : dItem], ['duty', cell.act], ['dep', cell.dep], ['arr', cell.arr], ['begin', s?.item], ['end', e?.item], ['ac', cell.ac], ['info', flight ? [...(cell.block || []), ...(cell.pos || [])] : null]]);
+      row._s = s;
+      lastFlight = flight && !get('arr') ? row : null;
+      if (flight && get('arr') && /[1-9]/.test(get('layover'))) add({ ...dateOf(base.t), duty: 'H', dep: get('arr'), notes: [`[Layover: ${get('layover')}]`] }, [['info', cell.layover]]);
+    }
+  }
+  const out = rows.map(r => outputRow({ ...r, info: r.notes.join(' ') }, 'Z'));
+  const last = mi >= 0 ? new Date(Date.UTC(year, mi + 1, 0)).getUTCDate() : 0;
+  return { format: 'acknowledged-roster', period: mi >= 0 ? `01${MONTHS[mi]}${String(year).slice(2)} - ${last}${MONTHS[mi]}${String(year).slice(2)}` : null,
+    notices: [], recognized: out.length > 0, published: out, planned: [], _trace: trace, _rows: rows };
+}
+
+const isCrewBriefing = (page) => page.items.some(i => i.text === 'Crew Briefing') && page.items.some(i => i.text === 'Duty Detail') && page.items.some(i => /^Timed Mode:$/.test(i.text));
+
+/**
+ * "Crew Briefing" (Cebu Pacific; "Timed Mode: Local"), a block per duty:
+ *   "Duty : 2P2043/2P2044/..." / "02-Jul-2026 14:20(L) ~ 03-Jul-2026 01:10(L)" (the duty's start and end), "Duty Detail", then per flight
+ *   Assignment | Flight No. | DEP | ARR | STD | STA | Acting | Reg No. | Fleet | Conx, its Block / Pax / Cred Hours and crew lines
+ *   "CP : Singh Shah,Shamsher/100872/MNL/FLY  FO : Ampong,Alfe/103273/MNL/FLY"; a day off: Assignment | Location | Date | Start Time | End Time
+ * Rows: C/I (the duty's start), the flights ("[Block: 1:00]", the other crew "[FO - 103273 - Ampong,Alfe]"), C/O (the duty's end);
+ * a day's assignment (DOFF) with its times. Local times.
+ */
+function parseCrewBriefing(pages) {
+  const trace = startTrace();
+  const rows = [];
+  const all = pages.flatMap(p => p.items);
+  const me = all.find(i => i.y < 70 && /,/.test(i.text) && !/:/.test(i.text))?.text?.trim();
+  const zone = all.some(i => i.text === 'UTC' || i.text === 'GMT') ? 'Z' : 'L';
+  const STAMP = /(\d{2})-([A-Z][a-z]{2})-(\d{4}) (\d{2}):(\d{2})\(L\) ~ (\d{2})-([A-Z][a-z]{2})-(\d{4}) (\d{2}):(\d{2})\(L\)/;
+  const day = (d, m, y) => Date.UTC(+y, monthIndex(m), +d);
+  const add = (r, marks) => { const row = { notes: [], ...r }; rows.push(row); for (const [f, it] of marks) if (it && [].concat(it).length) mark(row, f, it); return row; };
+  // the stream of lines over all pages
+  const lines = pages.flatMap(p => toLines(p.items, 2).map(l => ({ ...l, page: p.page })));
+  let duty = null; // { start, end, startItem, flights: [] }
+  const close = () => {
+    if (duty?.flights.length && duty.end) {
+      const last = duty.flights.at(-1);
+      const d0 = Math.floor(last.t / 86400000);
+      const dd = Math.floor(duty.end.t / 86400000) - d0;
+      add({ ...dateOf(last.t), duty: 'C/O', arr: last.arr, end: `${duty.end.hhmm}${dd > 0 ? `+${dd}` : ''}` }, [['co', duty.endItem]]);
+    }
+    duty = null;
+  };
+  for (const [k, l] of lines.entries()) {
+    const text = l.items.map(i => i.text).join(' ');
+    const head = l.items.find(i => /^Duty : /.test(i.text));
+    if (head) {
+      close();
+      // the duty's start and end, on the line below its name
+      const sl = lines.slice(k, k + 3).find(x => x.items.some(i => STAMP.test(i.text)));
+      const si = sl?.items.find(i => STAMP.test(i.text));
+      const m = si && STAMP.exec(si.text);
+      duty = { flights: [], start: m && { t: day(m[1], m[2], m[3]), hhmm: `${m[4]}:${m[5]}` }, end: m && { t: day(m[6], m[7], m[8]) + (+m[9] * 60 + +m[10]) * 60000, hhmm: `${m[9]}:${m[10]}` },
+        startItem: si && pieceOf(si, 12, 5), endItem: si && pieceOf(si, si.text.indexOf('~') + 14, 5), ciDone: false };
+      continue;
+    }
+    if (!duty?.start) continue;
+    // a flight: FLY | 2P2043 | MNL | MPH | 15:50 | 16:55 | CP | RP-C8933 | 320 | 0:50
+    const fl = l.items.find(i => /^[A-Z0-9]{2}\d{1,4}[A-Z]?$/.test(i.text) && i.x > 80 && i.x < 140);
+    const st = l.items.filter(i => /^[A-Z]{3}$/.test(i.text) && i.x > 150 && i.x < 250);
+    const tm = l.items.filter(i => /^\d{2}:\d{2}$/.test(i.text) && i.x > 250 && i.x < 350);
+    if (fl && st.length === 2 && tm.length === 2) {
+      // its date: the duty's start day, a day on when its time is earlier than the duty's start or the leg before
+      const mins = (t) => +t.slice(0, 2) * 60 + +t.slice(3);
+      const prev = duty.flights.at(-1);
+      let t = duty.start.t + mins(tm[0].text) * 60000;
+      while (t < (prev ? prev.arrT : duty.start.t + mins(duty.start.hhmm) * 60000 - 3600000)) t += 86400000;
+      let arrT = Math.floor(t / 86400000) * 86400000 + mins(tm[1].text) * 60000;
+      while (arrT < t) arrT += 86400000;
+      if (!duty.ciDone) { add({ ...dateOf(duty.start.t), duty: 'C/I', dep: st[0].text, begin: duty.start.hhmm }, [['ci', duty.startItem]]); duty.ciDone = true; }
+      const acting = l.items.find(i => i.x > 360 && i.x < 400), reg = l.items.find(i => i.x > 405 && i.x < 470), fleet = l.items.find(i => i.x > 470 && i.x < 530);
+      // the block hours two lines down, the crew after them (up to the next flight's header)
+      const after = lines.slice(k + 1, k + 9);
+      const stop = after.findIndex(x => x.items.some(i => i.text === 'Assignment' || /^Duty : /.test(i.text)));
+      const below = stop < 0 ? after : after.slice(0, stop);
+      const blk = below.find(x => x.items.some(i => i.text === 'Block Hours'));
+      const blkItem = blk && below[below.indexOf(blk) + 1]?.items.find(i => i.x < 80 && /^\d{1,2}:\d{2}$/.test(i.text));
+      const crewItems = below.flatMap(x => x.items).filter(i => /^\S+ : .+\/\d+\//.test(i.text));
+      const crew = crewItems.map(i => /^(\S+) : (.+?)\/(\d+)\//.exec(i.text)).filter(m => m && m[2] !== me).map(m => `[${m[1] === '-' ? 'Crew' : m[1]} - ${m[3]} - ${m[2]}]`).join('');
+      const row = add({ ...dateOf(t), duty: fl.text, dep: st[0].text, arr: st[1].text, begin: tm[0].text, end: `${tm[1].text}${Math.floor(arrT / 86400000) > Math.floor(t / 86400000) ? '+1' : ''}`,
+        registration: reg?.text || '', ac: fleet?.text || '', crew,
+        notes: [acting && `[Acting: ${acting.text}]`, blkItem && /[1-9]/.test(blkItem.text) && `[Block: ${blkItem.text}]`].filter(Boolean) },
+      [['duty', fl], ['dep', st[0]], ['arr', st[1]], ['begin', tm[0]], ['end', tm[1]], ['registration', reg], ['ac', fleet], ['info', [acting, blkItem].filter(Boolean)], ['crew', crewItems]]);
+      duty.flights.push({ t, arrT, arr: st[1].text, row });
+      continue;
+    }
+    // a day's assignment: DOFF | MNL | 01-Jul-2026 | 00:00 | 23:59
+    const dm = /^([A-Z0-9_]{2,8}) ([A-Z]{3}) (\d{2})-([A-Z][a-z]{2})-(\d{4}) (\d{2}:\d{2}) (\d{2}:\d{2})/.exec(text);
+    if (dm && !duty.flights.length) {
+      add({ ...dateOf(day(dm[3], dm[4], dm[5])), duty: dm[1], dep: dm[2], begin: dm[6], end: `${dm[7]}${dm[7] < dm[6] ? '+1' : ''}` }, [['date', l.items[2]], ['duty', l.items[0]], ['dep', l.items[1]], ['begin', l.items[3]], ['end', l.items[4]]]);
+    }
+  }
+  close();
+  const out = rows.map(r => outputRow({ ...r, info: r.notes.join(' ') }, zone));
+  const fmt = (s) => { const [d, m, y] = s.split(' '); return `${d.padStart(2, '0')}${m}${y}`; };
+  return { format: 'crew-briefing', period: rows.length ? `${fmt(rows[0].date)} - ${fmt(rows.at(-1).date)}` : null, notices: [], recognized: out.length > 0, published: out, planned: [], _trace: trace, _rows: rows };
+}
+
+const isLegalBrLogbook = (page) => page.items.some(i => /^LOGBOOK - /.test(i.text)) && ['Flight', 'Dep', 'Arr', 'Reg', 'Out Z', 'In Z', 'Block Time'].every(t => page.items.some(i => i.text === t));
+
+/**
+ * LATAM "LEGAL_BR_Logbook" (Looker; "LOGBOOK - LATAM Airlines"): Flight | Dep | Arr | Reg | Aircraft | Function | Vim Date "2024-06-04" |
+ * Out Z | In Z | Day Time | Night Time | Block Time. A row per flight (UTC, "+1" when In is earlier than Out), "[Function: PIC]
+ * [Day: 01:05] [Night: 00:40] [Block: 01:08]" (zeros left out).
+ */
+function parseLegalBrLogbook(pages) {
+  const trace = startTrace();
+  const rows = [];
+  const NAMES = { Flight: 'flight', Dep: 'dep', Arr: 'arr', Reg: 'reg', Aircraft: 'ac', Function: 'fn', 'Vim Date': 'date', 'Out Z': 'out', 'In Z': 'in', 'Day Time': 'day', 'Night Time': 'night', 'Block Time': 'block' };
+  for (const page of pages) {
+    const head = page.items.find(i => i.text === 'Out Z');
+    if (!head) continue;
+    const cols = page.items.filter(i => Math.abs(i.y - head.y) < 3 && NAMES[i.text]).map(i => ({ k: NAMES[i.text], x: i.x }));
+    const colOf = (i) => cols.reduce((b, c) => (Math.abs(c.x - i.x) < Math.abs(b.x - i.x) ? c : b)).k;
+    for (const l of toLines(page.items.filter(i => i.y > head.y + 5), 2)) {
+      const cell = {};
+      for (const it of l.items) (cell[colOf(it)] ||= []).push(it);
+      const get = (k) => (cell[k] || []).map(i => i.text).join(' ');
+      const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(get('date'));
+      if (!m || !/^[A-Z]{3}$/.test(get('dep'))) continue;
+      const dur = (k) => (/^\d{2}:\d{2}$/.test(get(k)) && /[1-9]/.test(get(k)) ? get(k) : '');
+      const row = {
+        ...dateOf(Date.UTC(+m[1], +m[2] - 1, +m[3])), duty: get('flight'), dep: get('dep'), arr: get('arr'), registration: get('reg'), ac: get('ac'),
+        begin: get('out'), end: get('in') ? `${get('in')}${get('in') < get('out') ? '+1' : ''}` : '',
+        notes: [get('fn') && `[Function: ${get('fn')}]`, dur('day') && `[Day: ${dur('day')}]`, dur('night') && `[Night: ${dur('night')}]`, dur('block') && `[Block: ${dur('block')}]`].filter(Boolean),
+      };
+      rows.push(row);
+      for (const [f, k] of [['date', 'date'], ['duty', 'flight'], ['dep', 'dep'], ['arr', 'arr'], ['registration', 'reg'], ['ac', 'ac'], ['begin', 'out'], ['end', 'in'], ['info', 'fn'],
+        ['info', dur('day') ? 'day' : null], ['info', dur('night') ? 'night' : null], ['info', dur('block') ? 'block' : null]]) if (k) mark(row, f, cell[k]);
+    }
+  }
+  const pm = pages.flatMap(p => p.items).map(i => /from (\d{4})\/(\d{2})\/(\d{2}) until (\d{4})\/(\d{2})\/(\d{2})/.exec(i.text)).find(Boolean);
+  const out = rows.map(r => outputRow({ ...r, info: r.notes.join(' ') }, 'Z'));
+  return { format: 'legal-br-logbook', period: pm ? `${pm[3]}${MONTHS[+pm[2] - 1]}${pm[1].slice(2)} - ${pm[6]}${MONTHS[+pm[5] - 1]}${pm[4].slice(2)}` : null,
+    notices: [], recognized: out.length > 0, published: out, planned: [], _trace: trace, _rows: rows };
+}
+
+const isAimsConvertedGrid = (page) => page.items.some(i => /^Escala de Tripulante Convertida/.test(i.text)) && page.items.some(i => /^Tripulante: .* \d{2}\/\d{2}\/\d{4} até \d{2}\/\d{2}\/\d{4}$/.test(i.text));
+
+/**
+ * "Escala de Tripulante Convertida para padrão AIMS" (LATAM Brasil): a column a day ("01Jun" / "Sat"), in it each activity as a block
+ * of lines: code "DO" / "A320" / "EMG", its start twice, its station twice, its end twice. A row per activity: code, station, start,
+ * end ("+1" when earlier than the start). Times as printed, taken as local.
+ */
+function parseAimsConvertedGrid(pages) {
+  const trace = startTrace();
+  const rows = [];
+  const all = pages.flatMap(p => p.items);
+  const pm = /(\d{2})\/(\d{2})\/(\d{4}) até (\d{2})\/(\d{2})\/(\d{4})$/.exec(all.find(i => /^Tripulante: /.test(i.text))?.text || '');
+  const y0 = pm ? +pm[3] : new Date().getUTCFullYear(), m0 = pm ? +pm[2] - 1 : 0;
+  const DAY = /^(\d{2})([A-Z][a-z]{2})$/;
+  const events = [];
+  for (const page of pages) {
+    const days = page.items.filter(i => DAY.test(i.text) && monthIndex(DAY.exec(i.text)[2]) >= 0);
+    if (!days.length) continue;
+    const top = Math.max(...days.map(d => d.y)) + 10;
+    const foot = page.items.find(i => /^Confira na escala/.test(i.text))?.y ?? Infinity;
+    for (const d of days) {
+      const [, dd, mon] = DAY.exec(d.text);
+      const mi = monthIndex(mon);
+      const t = Date.UTC(y0 + (mi < m0 - 6 ? 1 : 0), mi, +dd);
+      const col = page.items.filter(i => i.y > top && i.y < foot && Math.abs(i.x - d.x) < 13).sort((a, b) => a.y - b.y);
+      // a block of seven lines per activity: its code, start, start, station, station, end, end ("EMG" is a code, not a station)
+      for (let k = 0; k < col.length; k += 1) {
+        const it = col[k];
+        if (/^\d{2}:\d{2}$/.test(it.text)) continue;
+        const next = col.slice(k + 1, k + 7);
+        const times = next.filter(i => /^\d{2}:\d{2}$/.test(i.text)), st = next.find(i => /^[A-Z]{3}$/.test(i.text));
+        if (times.length < 2) continue;
+        events.push({ t, d, code: it, st, start: times[0], end: times.at(-1) });
+        k += next.length;
+      }
+    }
+  }
+  for (const e of events.sort((a, b) => a.t - b.t || a.code.y - b.code.y)) {
+    const row = { ...dateOf(e.t), duty: e.code.text, dep: e.st?.text || '', begin: e.start.text, end: `${e.end.text}${e.end.text < e.start.text ? '+1' : ''}`, notes: [] };
+    rows.push(row);
+    mark(row, 'date', e.d); mark(row, 'duty', e.code); mark(row, 'dep', e.st); mark(row, 'begin', e.start); mark(row, 'end', e.end);
+  }
+  const out = rows.map(r => outputRow({ ...r, info: '' }, 'L'));
+  return { format: 'aims-converted-grid', period: pm ? `${pm[1]}${MONTHS[+pm[2] - 1]}${pm[3].slice(2)} - ${pm[4]}${MONTHS[+pm[5] - 1]}${pm[6].slice(2)}` : null,
+    notices: [], recognized: out.length > 0, published: out, planned: [], _trace: trace, _rows: rows };
+}
+
+const isMonthRosterSectors = (page) => page.items.some(i => /^[A-Z]+ \d{4} ROSTER$/.test(i.text)) && ['DATE', 'DAY', 'DUTY', 'SECTOR', 'REPORTING', 'BLOCK HOUR'].every(t => page.items.some(i => i.text === t));
+
+/**
+ * "FEBRUARY 2026 ROSTER" (Malaysia Airlines group): DATE | DAY | DUTY "3507" / "382/383" / "STANDBY 4" / "NS HKG" | SECTOR "KUL-SIN-KUL" /
+ * "STANDBY HOME" | REPORTING "20:20" | TIME "21:20/01:30" (a departure and arrival per leg) | BLOCK HOUR | REMARKS
+ * Rows: C/I (Reporting, when not 0:00), a flight a leg ("+1" when it lands earlier than it left), "NS HKG" a hotel row, others
+ * (STANDBY 4, DO) with their times ("22:00/08:00 +1"); ">> END DUTY" is the end of the night before. Local times.
+ */
+function parseMonthRosterSectors(pages) {
+  const trace = startTrace();
+  const rows = [];
+  const all = pages.flatMap(p => p.items);
+  const tm = /^([A-Z]+) (\d{4}) ROSTER$/.exec(all.find(i => /^[A-Z]+ \d{4} ROSTER$/.test(i.text)).text);
+  const mi = monthIndex(tm[1].slice(0, 3)), year = +tm[2];
+  const add = (r, marks) => { const row = { notes: [], ...r }; rows.push(row); for (const [f, it] of marks) if (it && [].concat(it).length) mark(row, f, it); return row; };
+  for (const page of pages) {
+    const head = page.items.find(i => i.text === 'SECTOR');
+    if (!head) continue;
+    const hx = (t) => page.items.find(i => i.text === t && Math.abs(i.y - head.y) < 3)?.x;
+    const X = { date: hx('DATE'), duty: hx('DUTY'), sector: hx('SECTOR'), rep: hx('REPORTING'), time: hx('TIME'), block: hx('BLOCK HOUR'), rem: hx('REMARKS') ?? Infinity };
+    const colOf = (i) => (i.x >= X.rem - 5 ? 'rem' : i.x >= X.block - 5 ? 'block' : i.x >= X.time - 5 ? 'time' : i.x >= X.rep - 5 ? 'rep' : i.x >= X.sector - 5 ? 'sector' : i.x >= X.duty - 5 ? 'duty' : 'date');
+    for (const l of toLines(page.items.filter(i => i.y > head.y + 5), 2)) {
+      const cell = {};
+      for (const it of l.items) (cell[colOf(it)] ||= []).push(it);
+      const get = (k) => (cell[k] || []).map(i => i.text).join(' ');
+      const dm = /^(\d{1,2}) [A-Z]{3}$/.exec(get('date'));
+      if (!dm || !get('duty')) continue;
+      const base = dateOf(Date.UTC(year, mi, +dm[1]));
+      const duty = get('duty'), sector = get('sector'), time = get('time');
+      if (/^>>/.test(duty)) continue;
+      const times = time.split('/').map(t => t.trim()).filter(t => /^\d{1,2}:\d{2}( \+1)?$/.test(t));
+      const pad = (t) => t.replace(/^(\d):/, '0$1:').replace(' +1', '+1');
+      const later = (a, b) => (b && !/\+1/.test(b) && pad(b) < pad(a) ? '+1' : '');
+      const legs = /^[A-Z]{3}(-[A-Z]{3})+$/.test(sector) ? sector.split('-') : null;
+      if (legs && /^\d{2,4}[A-Z]?(\/\d{2,4}[A-Z]?)*$/.test(duty)) {
+        const nums = duty.split('/');
+        if (/^\d{1,2}:\d{2}$/.test(get('rep')) && /[1-9]/.test(get('rep'))) add({ ...base, duty: 'C/I', dep: legs[0], begin: pad(get('rep')) }, [['date', cell.date], ['ci', cell.rep]]);
+        for (let k = 0; k < legs.length - 1; k += 1) {
+          const [b, e] = [times[2 * k], times[2 * k + 1]];
+          add({ ...base, duty: nums[Math.min(k, nums.length - 1)], dep: legs[k], arr: legs[k + 1], begin: b ? pad(b) : '', end: e ? `${pad(e)}${later(b, e)}` : '',
+            notes: k === 0 && /[1-9]/.test(get('block')) ? [`[Block: ${get('block')}]`] : [] },
+          [['date', k === 0 && !/[1-9]/.test(get('rep')) ? cell.date : null], ['duty', cell.duty], ['dep', cell.sector], ['begin', cell.time], ['info', k === 0 ? cell.block : null]]);
+        }
+        continue;
+      }
+      const ns = /^NS ([A-Z]{3})$/.exec(duty);
+      const [b, e] = times;
+      add({ ...base, duty: ns ? 'H' : duty, dep: ns ? ns[1] : '', begin: b && /[1-9]/.test(b) || e ? pad(b || '') : '', end: e ? `${pad(e)}${later(b, e)}` : '', notes: ns || duty === sector ? [] : [sector] },
+        [['date', cell.date], ['duty', cell.duty], ['begin', cell.time], ['info', ns ? null : cell.sector]]);
+    }
+  }
+  const out = rows.map(r => outputRow({ ...r, info: r.notes.filter(Boolean).join(' ') }, 'L'));
+  const last = new Date(Date.UTC(year, mi + 1, 0)).getUTCDate();
+  return { format: 'month-roster-sectors', period: `01${MONTHS[mi]}${String(year).slice(2)} - ${last}${MONTHS[mi]}${String(year).slice(2)}`, notices: [], recognized: out.length > 0,
+    published: out, planned: [], _trace: trace, _rows: rows };
+}
+
+const isRocsIndividualPlan = (page) => page.items.some(i => i.text === 'Individual plan') && page.items.some(i => i.text === 'ROCS') && ['Duty', 'Departure', 'Arrival', 'Info'].every(t => page.items.some(i => i.text === t));
+
+/**
+ * "Individual plan" (ROCS; "01-01-2024 - 31-12-2024"): Date ("MON 2024" over "01 Jan") | Duty (the kind "FLIGHT DUTY" / "OFF" / "ABSENCE"
+ * over its code "FR 5521" / "OFF" / "C/SICK") | Departure (station, time) | Arrival (time, station) | AC | Info ("FT 08:37", "DP 10:19",
+ * "FDP 09:49": flight time, duty period, flight duty period of the day). A row per code line: a flight "FR5521" with its stations and times
+ * ("+1" when it lands earlier), others with theirs; the day's FT / DP / FDP as "[FT: 08:37] [DP: 10:19] [FDP: 09:49]" on its first row.
+ * Times as printed, taken as UTC.
+ */
+function parseRocsIndividualPlan(pages) {
+  const trace = startTrace();
+  const rows = [];
+  const pm = pages.flatMap(p => p.items).map(i => /^(\d{2})-(\d{2})-(\d{4}) - (\d{2})-(\d{2})-(\d{4})$/.exec(i.text)).find(Boolean);
+  const DAY = /^(\d{2}) ([A-Z][a-z]{2})$/;
+  let year = pm ? +pm[3] : new Date().getUTCFullYear(), cur = null, curItem = null, dayRow = null;
+  for (const page of pages) {
+    const head = page.items.find(i => i.text === 'Departure');
+    if (!head) continue;
+    const hx = (t) => page.items.find(i => i.text === t && Math.abs(i.y - head.y) < 3)?.x;
+    const X = { duty: hx('Duty'), dep: hx('Departure'), arr: hx('Arrival'), ac: hx('AC'), info: hx('Info') };
+    const body = page.items.filter(i => i.y > head.y + 5);
+    // the day's FT / DP / FDP (label and value side by side in Info)
+    const infos = toLines(body.filter(i => i.x >= X.info - 5), 2).map(l => ({ y: l.y, text: l.items.map(i => i.text).join(' ') }));
+    for (const l of toLines(body.filter(i => i.x < X.info - 5), 2)) {
+      const yItem = l.items.find(i => /^[A-Z]{3} (\d{4})$/.test(i.text) && i.x < X.duty - 5);
+      if (yItem) year = +yItem.text.slice(4);
+      const dItem = l.items.find(i => DAY.test(i.text) && i.x < X.duty - 5);
+      if (dItem) { const [, dd, mon] = DAY.exec(dItem.text); cur = Date.UTC(year, monthIndex(mon), +dd); curItem = dItem; dayRow = null; }
+      if (cur == null) continue;
+      const code = l.items.find(i => i.x >= X.duty - 5 && i.x < X.dep - 5);
+      const dep = l.items.find(i => i.x >= X.dep - 5 && /^[A-Z]{3}$/.test(i.text) && i.x < X.dep + 25);
+      const tms = l.items.filter(i => /^\d{2}:\d{2}$/.test(i.text) && i.x >= X.dep && i.x < X.ac - 20);
+      // the kind of duty above its code ("FLIGHT DUTY", "DEAD HEAD", "OFF": no times, no station): not a row
+      if (!code || (!tms.length && !dep)) continue;
+      const arr = l.items.find(i => i.x > X.arr + 20 && i.x < X.ac - 5 && /^[A-Z]{3}$/.test(i.text));
+      const ac = l.items.find(i => i.x >= X.ac - 5 && i.x < X.info - 5);
+      const fl = /^([A-Z0-9]{2}) (\d{1,4}[A-Z]?)$/.exec(code.text);
+      const [b, e] = tms;
+      const row = { ...dateOf(cur), duty: fl ? `${fl[1]}${fl[2]}` : code.text, dep: dep?.text || '', arr: arr?.text || '', begin: b?.text || '', end: e ? `${e.text}${b && e.text < b.text ? '+1' : ''}` : '', ac: ac?.text || '', notes: [] };
+      rows.push(row);
+      if (curItem) { mark(row, 'date', curItem); curItem = null; }
+      mark(row, 'duty', code); mark(row, 'dep', dep); mark(row, 'arr', arr); mark(row, 'begin', b); mark(row, 'end', e); mark(row, 'ac', ac);
+      if (!dayRow) {
+        dayRow = row;
+        // this day's info lines: from its line down to the next day
+        const next = body.filter(i => DAY.test(i.text) && i.x < X.duty - 5 && i.y > l.y + 3).map(i => i.y).sort((a, c) => a - c)[0] ?? Infinity;
+        for (const inf of infos.filter(x => x.y >= l.y - 2 && x.y < next - 12)) {
+          const m = /^(FT|DP|FDP) (\d{2}:\d{2})$/.exec(inf.text);
+          if (m) row.notes.push(`[${m[1]}: ${m[2]}]`);
+        }
+      }
+    }
+  }
+  const out = rows.map(r => outputRow({ ...r, info: r.notes.join(' ') }, 'Z'));
+  return { format: 'rocs-individual-plan', period: pm ? `${pm[1]}${MONTHS[+pm[2] - 1]}${pm[3].slice(2)} - ${pm[4]}${MONTHS[+pm[5] - 1]}${pm[6].slice(2)}` : null,
+    notices: [], recognized: out.length > 0, published: out, planned: [], _trace: trace, _rows: rows };
+}
+
+const isPortLocalRosterReport = (page) => lineTexts(page).some(t => /^Roster Report from \d{2}[A-Z]{3}\d{2}/.test(t.replace(/\s+/g, ' ')))
+  && lineTexts(page).some(t => /Times shown are in Port Local times/.test(t.replace(/\s+/g, ' ')));
+
+/**
+ * Korean Air "Roster Report from 01JUN24 - 30JUN24" ("Times shown are in Port Local times"), a line per flight or day:
+ *   Start Date "02JUN24 SUN" | Flight Number "KE 0101" | Sector "ICN NKG" | A/C "7MQ" | Duty "FLY" | Pairing | Duty Crew | Rank | Rpt | STD |
+ *   STA | Flt Time "01 59" | Duty Time "07 41" | Hotel | Training | Remarks; a day: "01JUN24 SAT ICN DO 0"
+ * Rows: C/I (Rpt, on a duty's first flight), the flights ("DH" duty: dc DH; "+1" when STA is earlier; "[Flight: 01:59] [Duty: 07:41]"),
+ * a day's code (DO, RESERVE, ALV) at its station. Local times.
+ */
+function parsePortLocalRosterReport(pages) {
+  const trace = startTrace();
+  const rows = [];
+  let cur = null, curItem = null;
+  const FLT = /^(?:(\d{2}[A-Z]{3}\d{2}) [A-Z]{3} )?([A-Z0-9]{2}) (\d{1,4}) ([A-Z]{3}) ([A-Z]{3}) (\w{2,4}) ([A-Z]+)\b.*?\b(\d{4}) (\d{4})(?: (\d{4}))? (\d{2}) (\d{2})(?: (\d{2}) (\d{2}))?/;
+  const DAYLINE = /^(\d{2}[A-Z]{3}\d{2}) [A-Z]{3} ([A-Z]{3}) ([A-Z][A-Z0-9/-]*)\b/;
+  const hm = (t) => `${t.slice(0, 2)}:${t.slice(2)}`;
+  for (const page of pages) {
+    const head = page.items.find(i => /^DateDay$/.test(i.text) || /^Start$/.test(i.text) && page.items.some(j => j.text === 'Sector' && Math.abs(j.y - i.y) < 3));
+    if (!head) continue;
+    // (the print has NUL characters as items between some cells)
+    for (const l of toLines(page.items.filter(i => i.y > head.y + 5 && i.text.replace(/\u0000/g, '').trim()), 2)) {
+      const its = l.items;
+      const text = its.map(i => i.text.trim()).join(' ').replace(/\s+/g, ' ');
+      const dd = /^(\d{2}[A-Z]{3}\d{2})\b/.exec(text);
+      if (dd) { const p = parseDdMonYy(`${dd[1].slice(0, 2)}${dd[1].slice(2, 3)}${dd[1].slice(3, 5).toLowerCase()}${dd[1].slice(5)}`); if (p) { cur = Date.UTC(2000 + p.year, p.month, p.day); curItem = its[0]; } }
+      if (cur == null) continue;
+      let m;
+      if ((m = FLT.exec(text))) {
+        const [, , al, num, dep, arr, ac, kind, t1, t2, t3, f1, f2, d1, d2] = m;
+        const [rpt, std, sta] = t3 ? [t1, t2, t3] : [null, t1, t2];
+        const add = (r, f) => { const row = { ...dateOf(cur), notes: [], ...r }; rows.push(row); if (curItem) { mark(row, 'date', curItem); curItem = null; } f?.(row); return row; };
+        if (rpt) add({ duty: 'C/I', dep, begin: hm(rpt) });
+        add({ duty: `${al}${num}`, dc: /^DH/.test(kind) ? 'DH' : '', dep, arr, ac, begin: hm(std), end: `${hm(sta)}${sta < std ? '+1' : ''}`,
+          notes: [`[Flight: ${f1}:${f2}]`, d1 && `[Duty: ${d1}:${d2}]`].filter(Boolean) }, (row) => {
+          const find = (re) => its.find(i => re.test(i.text.trim()));
+          mark(row, 'duty', find(new RegExp(`^${num}$`)));
+          mark(row, 'begin', find(new RegExp(`(^| )${std}( |$)`)));
+        });
+        continue;
+      }
+      if ((m = DAYLINE.exec(text)) && !/^\d/.test(m[3])) {
+        const row = { ...dateOf(cur), duty: m[3], dep: m[2], notes: [] };
+        rows.push(row);
+        if (curItem) { mark(row, 'date', curItem); curItem = null; }
+      }
+    }
+  }
+  const pm = pages.flatMap(p => lineTexts(p)).map(t => /Roster Report from (\d{2})([A-Z]{3})(\d{2})\W+(\d{2})([A-Z]{3})(\d{2})/.exec(t.replace(/[\s\u0000]+/g, ' '))).find(Boolean);
+  const cap = (s) => s[0] + s.slice(1).toLowerCase();
+  const out = rows.map(r => outputRow({ ...r, info: r.notes.join(' ') }, 'L'));
+  return { format: 'port-local-roster-report', period: pm ? `${pm[1]}${cap(pm[2])}${pm[3]} - ${pm[4]}${cap(pm[5])}${pm[6]}` : null,
+    notices: [], recognized: out.length > 0, published: out, planned: [], _trace: trace, _rows: rows };
+}
+
+const isProgrammazioneIndividuale = (page) => page.items.some(i => i.text === 'Programmazione Individuale') && page.items.some(i => /^Data e Ora = UTC$/.test(i.text));
+
+/**
+ * Mistral Air "Crew Schedule - Programmazione Individuale dei Turni" ("Data e Ora = UTC"): Data "Tue-15-Mar" | Tipo (CHECKIN, FLIGHT,
+ * POSITION) | Da | A ("==>>": it ends on a later day's "<<== 01:25" line) | Descrizione "VBS(A)-CAG(B)", under it "M4 783 EIGHA" (airline,
+ * number, registration) or the activity's name ("OFF RICHIESTO", "HOTEL ACCOMODATION") | rank | Membri Equipaggio | ... | Ore Volo "001:30".
+ * A day's label stands on its first line (the lines above the first label are the day before). Rows: CHECKIN -> C/I, FLIGHT / POSITION
+ * (dc DH) a flight ("[Block: 01:30]"), HOTEL a hotel row, others (OFF, CORSO ...) by their name. UTC.
+ */
+function parseProgrammazioneIndividuale(pages) {
+  const trace = startTrace();
+  const rows = [];
+  const DAY = /^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)-(\d{2})-([A-Z][a-z]{2})$/;
+  const printed = pages.flatMap(p => p.items).map(i => /^Stampato il (\d{2})-(\d{2})-(\d{4})/.exec(i.text)).find(Boolean);
+  const py = printed ? +printed[3] : new Date().getUTCFullYear(), pmo = printed ? +printed[2] - 1 : 0;
+  const lines = [];
+  for (const page of pages) {
+    const head = page.items.find(i => i.text === 'Descrizione' && i.x > 100);
+    if (!head) continue;
+    lines.push(...toLines(page.items.filter(i => i.y > head.y + 5 && !/^Pagina /.test(i.text)), 2));
+  }
+  // the date of each line: from its day's label down; the lines above the first label are the day before
+  const first = lines.findIndex(l => l.items.some(i => DAY.test(i.text)));
+  if (first < 0) return { format: 'programmazione-individuale', period: null, notices: [], recognized: false, published: [], planned: [], _trace: trace, _rows: [] };
+  const dayOfLabel = (t) => { const [, , dd, mon] = DAY.exec(t); const mi = monthIndex(mon); return Date.UTC(py - (mi > pmo + 6 ? 1 : 0), mi, +dd); };
+  let cur = dayOfLabel(lines[first].items.find(i => DAY.test(i.text)).text) - 86400000;
+  const dated = lines.map((l) => { const lab = l.items.find(i => DAY.test(i.text)); if (lab) cur = dayOfLabel(lab.text); return { ...l, t: cur, lab }; });
+  const TIME = /^\d{2}:\d{2}$/;
+  const add = (r, marks) => { const row = { notes: [], ...r }; rows.push(row); for (const [f, it] of marks) if (it && [].concat(it).length) mark(row, f, it); return row; };
+  for (const [k, l] of dated.entries()) {
+    const at = (lo, hi) => l.items.filter(i => i.x >= lo && i.x < hi);
+    const kind = at(90, 170)[0];
+    const da = at(170, 225).find(i => TIME.test(i.text)), a = at(225, 280)[0];
+    const desc = at(280, 350)[0];
+    if (!da && !kind) continue;
+    if (!da && kind?.text !== 'CHECKIN') continue;
+    // the end: "A", or on the "<<==" line of a later day
+    let end = a && TIME.test(a.text) ? { item: a, t: l.t } : null;
+    if (a?.text === '==>>') {
+      const cont = dated.slice(k + 1).find(x => x.items.some(i => i.text === '<<=='));
+      const ce = cont?.items.find(i => TIME.test(i.text) && i.x >= 225 && i.x < 280);
+      if (ce) end = { item: ce, t: cont.t };
+    }
+    const endText = end ? `${end.item.text}${end.t > l.t ? `+${Math.round((end.t - l.t) / 86400000)}` : ''}` : '';
+    const under = dated[k + 1]?.items.filter(i => i.x >= 280 && i.x < 450) || [];
+    const base = dateOf(l.t);
+    const dateMark = l.lab ? [['date', l.lab]] : [];
+    if (kind?.text === 'CHECKIN') {
+      const next = dated.slice(k + 1).find(x => x.items.some(i => /^(FLIGHT|POSITION)$/.test(i.text)));
+      const route = next?.items.find(i => /^[A-Z]{3}(\([A-Z]\))?-[A-Z]{3}/.test(i.text));
+      add({ ...base, duty: 'C/I', dep: route ? route.text.slice(0, 3) : '', begin: da?.text || '' }, [...dateMark, ['ci', da]]);
+      continue;
+    }
+    if (/^(FLIGHT|POSITION)$/.test(kind?.text || '')) {
+      const r = /^([A-Z]{3})(?:\([A-Z]\))?-([A-Z]{3})/.exec(desc?.text || '');
+      const [al, num, reg] = under.map(i => i.text);
+      const rank = at(350, 400)[0];
+      const blk = l.items.find(i => /^\d{3}:\d{2}$/.test(i.text) && i.x > 680 && i.x < 740);
+      const b = blk && /[1-9]/.test(blk.text) ? blk.text.replace(/^0/, '') : '';
+      add({ ...base, duty: al && /^\d+$/.test(num || '') ? `${al}${num}` : '', dc: kind.text === 'POSITION' ? 'DH' : '', dep: r?.[1] || '', arr: r?.[2] || '', begin: da.text, end: endText,
+        registration: /^[A-Z0-9]{4,6}$/.test(reg || '') ? reg : '', notes: [rank && `[Rank: ${rank.text}]`, b && `[Block: ${b}]`].filter(Boolean) },
+      [...dateMark, ['duty', under.slice(0, 2)], ['dep', desc], ['begin', da], ['end', end?.item], ['registration', under[2]], ['info', [rank, blk].filter(Boolean)]]);
+      continue;
+    }
+    // an activity: its station, its name on the line under it ("OFF RICHIESTO", "HOTEL ACCOMODATION", "CORSO - ADDESTRAMENTI ...")
+    const name = under.filter(i => i.x < 450).map(i => i.text).join(' ');
+    if (!name) continue;
+    const hotel = /^HOTEL\b/.test(name);
+    add({ ...base, duty: hotel ? 'H' : name.split(' ')[0], dep: /^[A-Z]{3}$/.test(desc?.text || '') ? desc.text : '', begin: da.text, end: endText, notes: hotel || name.split(' ').length === 1 ? [] : [name] },
+      [...dateMark, ['duty', under[0]], ['dep', desc], ['begin', da], ['end', end?.item]]);
+  }
+  const fmt = (r) => { const [d, m, y] = r.date.split(' '); return `${d.padStart(2, '0')}${m}${y}`; };
+  const out = rows.map(r => outputRow({ ...r, info: r.notes.join(' ') }, 'Z'));
+  return { format: 'programmazione-individuale', period: rows.length ? `${fmt(rows[0])} - ${fmt(rows.at(-1))}` : null, notices: [], recognized: out.length > 0, published: out, planned: [], _trace: trace, _rows: rows };
+}
+
+const isFlightInformation = (page) => page.items.some(i => i.text === 'Flight Information') && ['Flight No.:', 'Origin:', 'Destination:', 'OFF Block Time:'].every(t => page.items.some(i => i.text === t));
+
+/**
+ * A flight's "Flight Information" sheet (Icelandair; "Digitally Signed By:", "Pre Flight Received (UTC)"): Flight No. "FI630(630)", Date
+ * "10052022", Origin / Destination, Registration, the crew "CMD: KGA (Konrad ...)" / "F/O: ...", and the times "OFF Block Time: 0043",
+ * "Take-Off Time", "Landing Time", "ON Block Time", "Total Block Time" / "Total Airborne Time". One row (UTC; "+1" when it lands or blocks
+ * on earlier than it left), the crew "[CMD - KGA - Konrad ...]", "[Block: 05:15] [Flight: 05:00]".
+ */
+function parseFlightInformation(pages) {
+  const trace = startTrace();
+  const rows = [];
+  for (const page of pages) {
+    const label = (t) => page.items.find(i => i.text === t);
+    const value = (t, dx = 30, re = /\S/) => { const l = label(t); return l && page.items.filter(i => i !== l && i.x > l.x && i.x < l.x + l.text.length * 6 + dx + 120 && Math.abs(i.y - l.y) < 6 && re.test(i.text)).sort((a, b) => a.x - b.x)[0]; };
+    const fn = value('Flight No.:'), d = value('Date:', 30, /^\d{8}$/);
+    if (!fn || !d) continue;
+    const fl = /^([A-Z0-9]{2,3}\d{1,4}[A-Z]?)/.exec(fn.text);
+    const t = Date.UTC(+d.text.slice(4), +d.text.slice(2, 4) - 1, +d.text.slice(0, 2));
+    const time = (n) => value(n, 30, /^\d{4}$/);
+    const [off, tk, ld, on] = ['OFF Block Time:', 'Take-Off Time:', 'Landing Time:', 'ON Block Time:'].map(time);
+    const hm = (i) => (i ? `${i.text.slice(0, 2)}:${i.text.slice(2)}` : '');
+    const later = (i) => (i && off && i.text < off.text ? '+1' : '');
+    const dur = (n) => { const i = time(n); return i && /[1-9]/.test(i.text) ? hm(i) : ''; };
+    const crewItems = page.items.filter(i => /^[A-Z/0-9]{2,4}:$/.test(i.text) && /^(CMD|F\/O|SO|CC\d|FO|CPT|FE)/.test(i.text));
+    // the crew but the one it is signed by (the roster's owner)
+    const signer = value('Digitally Signed By:')?.text;
+    crewItems.sort((a, b) => a.y - b.y || a.x - b.x);
+    const crew = crewItems.map(c => ({ c, v: page.items.find(i => i.x > c.x && i.x < c.x + 60 && Math.abs(i.y - c.y) < 4 && /\(/.test(i.text)) })).filter(x => x.v && !(signer && x.v.text.startsWith(`${signer} (`)))
+      .map(({ c, v }) => { const m = /^(\S+) \((.+)\)$/.exec(v.text); return { text: m ? `[${c.text.slice(0, -1)} - ${m[1]} - ${m[2]}]` : `[${c.text.slice(0, -1)} - ${v.text}]`, items: [c, v] }; });
+    const row = {
+      ...dateOf(t), duty: fl ? fl[1] : fn.text, registration: value('Registration:')?.text || '', dep: value('Origin:', 30, /^[A-Z]{4}$/)?.text || '', arr: value('Destination:', 30, /^[A-Z]{4}$/)?.text || '',
+      begin: hm(off), takeoff: tk ? `${hm(tk)}${later(tk)}` : '', landing: ld ? `${hm(ld)}${later(ld)}` : '', end: on ? `${hm(on)}${later(on)}` : '',
+      crew: crew.map(c => c.text).join(''), notes: [dur('Total Block Time:') && `[Block: ${dur('Total Block Time:')}]`, dur('Total Airborne Time:') && `[Flight: ${dur('Total Airborne Time:')}]`].filter(Boolean),
+    };
+    rows.push(row);
+    for (const [f, it] of [['date', d], ['duty', fn], ['registration', value('Registration:')], ['dep', value('Origin:')], ['arr', value('Destination:')], ['begin', off], ['takeoff', tk], ['landing', ld], ['end', on],
+      ['crew', crew.flatMap(c => c.items)], ['info', [time('Total Block Time:'), time('Total Airborne Time:')].filter(Boolean)]]) mark(row, f, it);
+  }
+  const fmt = (r) => { const [d, m, y] = r.date.split(' '); return `${d.padStart(2, '0')}${m}${y}`; };
+  const out = rows.map(r => outputRow({ ...r, info: r.notes.join(' ') }, 'Z'));
+  return { format: 'flight-information', period: rows.length ? `${fmt(rows[0])} - ${fmt(rows.at(-1))}` : null, notices: [], recognized: out.length > 0, published: out, planned: [], _trace: trace, _rows: rows };
+}
+
+const isJourneyLog = (page) => page.items.some(i => i.text === 'Journey Log') && page.items.some(i => i.text === 'Date of flight:') && page.items.some(i => i.text === 'Routing');
+
+/**
+ * A business jet's "Journey Log" page (VistaJet): "Date of flight: 05 Feb 24", Registration, A/C Type, then three lines a leg:
+ *   PIC "1JSC" | C/H | From "LFSB" | Off Block "10:00" | T/O "10:12" ...                  (above)
+ *   Leg No. "1" | Flight No. "VJH727" | ... | Pax | Block Time "05:35" | Air Time "05:19" | Ldgs | APP ...
+ *   F/O "1JCH" | ACM | To "OBBI" | On Block "15:35" | Landing "15:31" ...                   (below)
+ * A row per leg (UTC): block off / on, take-off / landing, the crew "[PIC - 1JSC][C/H - 1ERI][F/O - 1JCH]", "[Block: 05:35] [Flight: 05:19] [Pax: 3]".
+ */
+function parseJourneyLog(pages) {
+  const trace = startTrace();
+  const rows = [];
+  for (const page of pages) {
+    const dl = page.items.find(i => i.text === 'Date of flight:');
+    if (!dl) continue;
+    const below = (l) => page.items.filter(i => i.y > l.y + 3 && i.y < l.y + 16 && Math.abs(i.x - l.x) < 20).sort((a, b) => a.y - b.y)[0];
+    const dv = below(dl), reg = below(page.items.find(i => i.text === 'Registration:') || dl), type = below(page.items.find(i => i.text === 'A/C Type:') || dl);
+    const dm = /^(\d{2}) ([A-Z][a-z]{2}) (\d{2})$/.exec(dv?.text || '');
+    if (!dm) continue;
+    const t = Date.UTC(2000 + +dm[3], monthIndex(dm[2]), +dm[1]);
+    const typeText = [type, type && page.items.find(i => i.y > type.y + 5 && i.y < type.y + 25 && Math.abs(i.x - type.x - 10) < 15 && /^\d{3}$/.test(i.text))].filter(Boolean).map(i => i.text).join(' ');
+    const lines = toLines(page.items, 2);
+    for (const [k, l] of lines.entries()) {
+      const leg = l.items[0], fl = l.items[1];
+      if (!leg || !/^\d$/.test(leg.text) || leg.x > 50 || !fl || !/^[A-Z]{2,3}\d{1,4}[A-Z]?$/.test(fl.text)) continue;
+      const above = [...lines.slice(Math.max(0, k - 3), k)].reverse().find(x => x.items.some(i => /^[A-Z]{4}$/.test(i.text) && i.x > 180 && i.x < 230));
+      const under = lines.slice(k + 1, k + 4).find(x => x.items.some(i => /^[A-Z]{4}$/.test(i.text) && i.x > 180 && i.x < 230));
+      if (!above || !under) continue;
+      const TIME = /^\d{2}:\d{2}$/;
+      const ap = (x) => x.items.find(i => /^[A-Z]{4}$/.test(i.text) && i.x > 180 && i.x < 230);
+      const tm = (x, lo, hi) => x.items.find(i => TIME.test(i.text) && i.x >= lo && i.x < hi);
+      const [off, tk] = [tm(above, 230, 290), tm(above, 290, 330)], [on, ld] = [tm(under, 230, 290), tm(under, 290, 330)];
+      const [blk, air] = [tm(l, 265, 330), tm(l, 330, 360)];
+      const pax = l.items.find(i => /^\d{1,2}$/.test(i.text) && i.x > 160 && i.x < 180);
+      const codes = (x) => x.items.filter(i => /^\d?[A-Z]{3}$/.test(i.text) && i.x > 80 && i.x < 140);
+      const [pic, ch] = codes(above), [fo, acm] = codes(under);
+      const later = (i) => (i && off && i.text < off.text ? '+1' : '');
+      const row = {
+        ...dateOf(t), duty: fl.text, registration: reg?.text || '', ac: typeText, dep: ap(above).text, arr: ap(under).text,
+        begin: off?.text || '', takeoff: tk ? `${tk.text}${later(tk)}` : '', landing: ld ? `${ld.text}${later(ld)}` : '', end: on ? `${on.text}${later(on)}` : '',
+        crew: [['PIC', pic], ['C/H', ch], ['F/O', fo], ['ACM', acm]].filter(([, i]) => i).map(([n, i]) => `[${n} - ${i.text}]`).join(''),
+        notes: [blk && `[Block: ${blk.text}]`, air && `[Flight: ${air.text}]`, pax && `[Pax: ${pax.text}]`].filter(Boolean),
+      };
+      rows.push(row);
+      for (const [f, it] of [['date', dv], ['duty', fl], ['registration', reg], ['ac', type], ['dep', ap(above)], ['arr', ap(under)], ['begin', off], ['takeoff', tk], ['landing', ld], ['end', on],
+        ['crew', [pic, ch, fo, acm].filter(Boolean)], ['info', [blk, air, pax].filter(Boolean)]]) mark(row, f, it);
+    }
+  }
+  const fmt = (r) => { const [d, m, y] = r.date.split(' '); return `${d.padStart(2, '0')}${m}${y}`; };
+  const out = rows.map(r => outputRow({ ...r, info: r.notes.join(' ') }, 'Z'));
+  return { format: 'journey-log', period: rows.length ? `${fmt(rows[0])} - ${fmt(rows.at(-1))}` : null, notices: [], recognized: out.length > 0, published: out, planned: [], _trace: trace, _rows: rows };
+}
+
+/**
+ * Papers about one flight, a row each (UTC):
+ *   NAVBLUE flight plan: "LZB563 -LBSF/LPPT 02MAY26 ... ACFT. LZROM / A220-300S2", "STD UTC : 16:40  STA UTC : 21:15"
+ *   flight plan ("BTI604 EBBR/EVRA 09 Jan 2022"): AC ID, "SCHEDULED DEPARTING: 09 Jan 2022 18 : 05 UTC", "SCHEDULED ARRIVING: ..."
+ *   RVSM / ATIS report: "FLT NBR FB0563  SKD 02 May 16:40", "FROM LBSF  TO LPPT" (the year from the report's date)
+ *   Virgin "Flight Report": Date | Registration | FLIGHT No., FROM / TO, STD / STA, ATD / ATA "2022-01-12T22:26:00", BLOCK TIME, and per pilot
+ *   NAME | STAFF No. | RANK with ON DUTY / OFF DUTY (C/I and C/O from the first pilot's), the crew "[CAP - 407254 - John Margetts]"
+ */
+const SINGLE_FLIGHT_KINDS = [
+  ['navblue-plan', (all) => all.some(i => /^\*\*\*NAVBLUE FLIGHT PLAN\*\*\*$/.test(i.text))],
+  ['flight-plan', (all) => all.some(i => i.text === 'Flight Plan') && all.some(i => /^[A-Z0-9]{3,8} [A-Z]{4}\/[A-Z]{4} \d{2} [A-Z][a-z]{2} \d{4}$/.test(i.text)) && all.some(i => i.text === 'FLT SUMMARY')],
+  ['flight-report-sheet', (all) => all.some(i => /^(RVSM|ATIS) Report - \d{2} [A-Z][a-z]{2} \d{4}/.test(i.text)) && all.some(i => i.text === 'FLT NBR')],
+  ['virgin-flight-report', (all) => all.some(i => i.text === 'Flight Report') && all.some(i => i.text === 'ACTUAL SECTORS FLOWN') && all.some(i => i.text === 'FLIGHT No.')],
+];
+const isSingleFlightPaper = (pages) => { const all = pages.flatMap(p => p.items); return SINGLE_FLIGHT_KINDS.find(([, test]) => test(all))?.[0] || null; };
+
+function parseSingleFlightPaper(pages, kind) {
+  const trace = startTrace();
+  // the pages one under the other (a page's items never meet another's), the trace on the real items
+  const all = pages.flatMap((p, k) => p.items.map(i => ({ ...i, y: i.y + k * 10000, _src: i._src || i })));
+  const row = { notes: [] };
+  const right = (label, re, dy = 3, dx = 400) => { const l = all.find(i => i.text === label); return l && all.filter(i => i !== l && Math.abs(i.y - l.y) < dy && i.x > l.x && i.x < l.x + dx && (!re || re.test(i.text))).sort((a, b) => a.x - b.x)[0]; };
+  const day = (d, mon, y) => Date.UTC(+y < 100 ? 2000 + +y : +y, monthIndex(mon), +d);
+  let t = null, marks = [];
+  if (kind === 'navblue-plan') {
+    const h = all.map(i => ({ i, m: /^-([A-Z]{4})\/([A-Z]{4}) (\d{2})([A-Z]{3})(\d{2})$/.exec(i.text) })).find(x => x.m);
+    const fl = h && all.find(i => Math.abs(i.y - h.i.y) < 3 && i.x < h.i.x && /^[A-Z0-9]{3,8}$/.test(i.text));
+    if (!h) return null;
+    t = day(h.m[3], h.m[4], h.m[5]);
+    const acft = all.find(i => /^\/ \S+/.test(i.text) && Math.abs(i.y - h.i.y) < 3), reg = acft && all.find(i => Math.abs(i.y - acft.y) < 3 && i.x < acft.x && i.x > acft.x - 60);
+    const std = all.find(i => /^: \d{2}:\d{2}$/.test(i.text) && all.some(j => j.text === 'UTC' && Math.abs(j.y - i.y) < 3 && j.x < i.x));
+    const sta = all.find(i => /^STA UTC$/.test(i.text));
+    const staV = sta && all.find(i => Math.abs(i.y - sta.y) < 3 && i.x > sta.x && /^: \d{2}:\d{2}$/.test(i.text));
+    Object.assign(row, { duty: fl?.text || '', dep: h.m[1], arr: h.m[2], registration: reg?.text || '', ac: acft ? acft.text.slice(2) : '', begin: std ? std.text.slice(2) : '', end: staV ? staV.text.slice(2) : '' });
+    if (row.end && row.begin && row.end < row.begin) row.end += '+1';
+    marks = [['duty', fl], ['dep', h.i], ['registration', reg], ['begin', std], ['end', staV]];
+  } else if (kind === 'flight-plan') {
+    const h = all.map(i => ({ i, m: /^([A-Z0-9]{3,8}) ([A-Z]{4})\/([A-Z]{4}) (\d{2}) ([A-Z][a-z]{2}) (\d{4})$/.exec(i.text) })).find(x => x.m);
+    t = day(h.m[4], h.m[5], h.m[6]);
+    const sched = (label) => {
+      const l = all.find(i => i.text === label);
+      const its = l && all.filter(i => i.y > l.y - 2 && i.y < l.y + 8 && i.x > l.x + 100).sort((a, b) => a.x - b.x);
+      const m = its && /(\d{2}) ([A-Z][a-z]{2}) (\d{4}) (\d{2}) ?: ?(\d{2}) UTC/.exec(its.map(i => i.text).join(' '));
+      return m ? { t: day(m[1], m[2], m[3]), hm: `${m[4]}:${m[5]}`, items: its } : null;
+    };
+    const dep = sched('DEPARTING:'), arr = sched('ARRIVING:');
+    const acId = all.find(i => i.text === 'AC ID:'), reg = acId && all.find(i => i.y > acId.y - 2 && i.y < acId.y + 6 && i.x > acId.x + 100);
+    if (dep) t = dep.t;
+    Object.assign(row, { duty: h.m[1], dep: h.m[2], arr: h.m[3], registration: reg?.text || '', begin: dep?.hm || '', end: arr ? `${arr.hm}${dep && arr.t > dep.t ? '+1' : ''}` : '' });
+    marks = [['duty', pieceOf(h.i, 0, h.m[1].length)], ['dep', pieceOf(h.i, h.m[1].length + 1, 4)], ['arr', pieceOf(h.i, h.m[1].length + 6, 4)], ['registration', reg], ['begin', dep?.items], ['end', arr?.items]];
+  } else if (kind === 'flight-report-sheet') {
+    const yr = all.map(i => /^(?:RVSM|ATIS) Report - \d{2} [A-Z][a-z]{2} (\d{4})/.exec(i.text)).find(Boolean)[1];
+    const fl = right('FLT NBR', /^[A-Z0-9]{3,8}$/), skd = right('SKD', /^\d{2} [A-Z][a-z]{2} \d{2}:\d{2}$/), from = right('FROM', /^[A-Z]{4}$/), to = right('TO', /^[A-Z]{4}$/);
+    if (!fl || !skd) return null;
+    const [dd, mon, hm] = skd.text.split(' ');
+    t = day(dd, mon, yr);
+    Object.assign(row, { duty: fl.text, dep: from?.text || '', arr: to?.text || '', begin: hm });
+    marks = [['duty', fl], ['date', pieceOf(skd, 0, 6)], ['begin', pieceOf(skd, 7, 5)], ['dep', from], ['arr', to]];
+  } else if (kind === 'virgin-flight-report') {
+    const below = (label, re) => { const l = all.find(i => i.text === label); return l && all.filter(i => i.y > l.y + 5 && i.y < l.y + 40 && Math.abs(i.x - l.x) < 14 && (!re || re.test(i.text))).sort((a, b) => a.y - b.y)[0]; };
+    const d = below('Date', /^\d{4}-\d{2}-\d{2}$/), reg = below('Registration'), fl = below('FLIGHT No.'), from = below('FROM', /^[A-Z]{3,4}$/), to = below('TO', /^[A-Z]{3,4}$/);
+    const ISO = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/;
+    const stamp = (label) => { const i = below(label, ISO); const m = i && ISO.exec(i.text); return m ? { t: Date.UTC(+m[1], +m[2] - 1, +m[3]), hm: `${m[4]}:${m[5]}`, item: i } : null; };
+    const atd = stamp('ATD') || stamp('STD'), ata = stamp('ATA') || stamp('STA');
+    const blk = below('BLOCK TIME', /^\d{2}:\d{2}$/);
+    if (!atd) return null;
+    t = atd.t;
+    const plus = (x) => (x && x.t > atd.t ? `+${Math.round((x.t - atd.t) / 86400000)}` : '');
+    // the crew: NAME | STAFF No. | RANK (where the header puts them: the cabin crew's stand elsewhere), then their ON DUTY / OFF DUTY
+    const names = all.filter(i => i.text === 'NAME').map(n => ({ n, v: all.find(i => i.y > n.y + 10 && i.y < n.y + 35 && Math.abs(i.x - n.x) < 8) }));
+    const crew = names.map(({ n, v }) => {
+      const hx = (t) => all.find(i => i.text === t && Math.abs(i.y - n.y) < 3)?.x;
+      const near = (x) => v && x != null && all.find(i => Math.abs(i.y - v.y) < 3 && Math.abs(i.x - x) < 12 && i.text.trim());
+      const staff = near(hx('STAFF No.')), rank = near(hx('RANK'));
+      return v && { text: `[${rank?.text || 'Crew'} - ${staff ? `${staff.text} - ` : ''}${v.text}]`, items: [v, staff, rank].filter(Boolean), n };
+    }).filter(Boolean);
+    const on = stamp('ON DUTY'), off = stamp('OFF DUTY');
+    const rows = [];
+    if (on) rows.push({ ...dateOf(on.t), duty: 'C/I', dep: from?.text || '', begin: on.hm, notes: [], _m: [['ci', on.item]] });
+    Object.assign(row, { duty: fl?.text || '', registration: reg?.text || '', dep: from?.text || '', arr: to?.text || '', begin: atd.hm, end: ata ? `${ata.hm}${plus(ata)}` : '', crew: crew.map(c => c.text).join(''),
+      notes: blk && /[1-9]/.test(blk.text) ? [`[Block: ${blk.text}]`] : [] });
+    marks = [['duty', fl], ['registration', reg], ['dep', from], ['arr', to], ['begin', atd.item], ['end', ata?.item], ['crew', crew.flatMap(c => c.items)], ['info', blk]];
+    rows.push({ ...dateOf(t), ...row, _m: [['date', d], ...marks] });
+    if (off) rows.push({ ...dateOf(t), duty: 'C/O', arr: to?.text || '', end: `${off.hm}${plus(off)}`, notes: [], _m: [['co', off.item]] });
+    for (const r of rows) for (const [f, it] of r._m) if (it) mark(r, f, it);
+    const out = rows.map(r => outputRow({ ...r, info: r.notes.join(' ') }, 'Z'));
+    const p = dateOf(t).date.split(' ');
+    return { format: kind, period: `${p[0].padStart(2, '0')}${p[1]}${p[2]} - ${p[0].padStart(2, '0')}${p[1]}${p[2]}`, notices: [], recognized: true, published: out, planned: [], _trace: trace, _rows: rows };
+  }
+  if (t == null) return null;
+  const r = { ...dateOf(t), ...row };
+  for (const [f, it] of marks) if (it) mark(r, f, it);
+  const p = r.date.split(' ');
+  return { format: kind, period: `${p[0].padStart(2, '0')}${p[1]}${p[2]} - ${p[0].padStart(2, '0')}${p[1]}${p[2]}`, notices: [], recognized: true, published: [outputRow({ ...r, info: r.notes.join(' ') }, 'Z')], planned: [], _trace: trace, _rows: [r] };
+}
+
+function dateOf(t) {
+  const d = new Date(t);
+  return { section: 'published', date: `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${String(d.getUTCFullYear() % 100).padStart(2, '0')}`, day: WEEKDAYS[d.getUTCDay()] };
+}
+
 const isEmiratesPdf = (page) => page.items.some(i => i.text === 'Emirates Crew Roster (Detailed Report)') && page.items.some(i => i.text === 'Duty Details');
 
 /**
@@ -5316,6 +8624,46 @@ function parseAny(pages) {
   const table = parseTableRoster(pages, { mark, startTrace });
   if (table) return table;
   if (pages.some(isEmiratesPdf)) { const t = parseTableRoster(emiratesGrids(pages), { mark, startTrace }); if (t?.recognized) return t; }
+  if (pages.some(isQatarScheduleReport)) return parseQatarScheduleReport(pages);
+  if (pages.some(isSwissRoster)) return parseSwissRoster(pages);
+  if (pages.some(isPlanningNavigant)) return parsePlanningNavigant(pages);
+  if (pages.some(isIberiaMonthly)) return parseIberiaMonthly(pages);
+  if (pages.some(isOfp)) return parseOfp(pages);
+  if (pages.some(isScheduleSummary)) return parseScheduleSummary(pages);
+  if (pages.some(isPortCrewRosterReport)) return parsePortCrewRosterReport(pages);
+  if (pages.some(isFlightLogSummary)) return parseFlightLogSummary(pages);
+  if (pages.some(isQatarLogbook)) return parseQatarLogbook(pages);
+  if (pages.some(isRolIndividual)) return parseRolIndividual(pages);
+  if (pages.some(isFlightSheet)) return parseFlightSheet(pages);
+  if (pages.some(isProgrammeDu)) return parseProgrammeDu(pages);
+  if (pages.some(isMonthCalendar)) return parseMonthCalendar(pages);
+  if (pages.some(isDayLineRoster)) return parseDayLineRoster(pages);
+  if (pages.some(isMonthPlanDetail)) return parseMonthPlanDetail(pages);
+  if (pages.some(isPilotLogBookReport)) return parsePilotLogBookReport(pages);
+  if (pages.some(isSequenceLogbook)) return parseSequenceLogbook(pages);
+  if (pages.some(isCrewLegExport)) return parseCrewLegExport(pages);
+  if (pages.some(isCarnetDeVol)) return parseCarnetDeVol(pages);
+  if (pages.some(isStartEndLogbook)) return parseStartEndLogbook(pages);
+  if (pages.some(isCrewAccessDetail)) return parseCrewAccessDetail(pages);
+  if (pages.some(isDayTableRoster)) return parseDayTableRoster(pages);
+  if (pages.some(isMinhaEscala)) return parseMinhaEscala(pages);
+  if (pages.some(isLatamRosterReport)) return parseLatamRosterReport(pages);
+  if (pages.some(isCrewScheduleList)) return parseCrewScheduleList(pages);
+  if (pages.some(isMonthlyFlightProgram)) return parseMonthlyFlightProgram(pages);
+  if (pages.some(isNumberedLogbook)) return parseNumberedLogbook(pages);
+  if (pages.some(isRulerLogbook)) return parseRulerLogbook(pages);
+  if (pages.some(isAcknowledgedRoster)) return parseAcknowledgedRoster(pages);
+  if (pages.some(isCrewBriefing)) return parseCrewBriefing(pages);
+  if (pages.some(isLegalBrLogbook)) return parseLegalBrLogbook(pages);
+  if (pages.some(isAimsConvertedGrid)) return parseAimsConvertedGrid(pages);
+  if (pages.some(isMonthRosterSectors)) return parseMonthRosterSectors(pages);
+  if (pages.some(isRocsIndividualPlan)) return parseRocsIndividualPlan(pages);
+  if (pages.some(isPortLocalRosterReport)) return parsePortLocalRosterReport(pages);
+  if (pages.some(isProgrammazioneIndividuale)) return parseProgrammazioneIndividuale(pages);
+  if (pages.some(isFlightInformation)) return parseFlightInformation(pages);
+  if (pages.some(isJourneyLog)) return parseJourneyLog(pages);
+  const single = isSingleFlightPaper(pages);
+  if (single) { const r = parseSingleFlightPaper(pages, single); if (r) return r; }
   if (pages.some(isPerformedActivities)) return parsePerformedActivities(pages);
   if (pages.some(isUtcPilotRoster)) return parseUtcPilotRoster(pages);
   if (pages.some(isNzPublishedRoster)) return parseNzPublishedRoster(pages);
@@ -5674,4 +9022,4 @@ function parseFrom(pages, period, start) {
 }
 
 // Document-level helpers, shared with the learned extractor (services/pdf-row-assembler.js).
-export { findPeriod, findNotices, findHotels, findLegend, findGridLegend, findOtherCrew, setDutyCrews, findCrewIdLists, setFlightCrews, findTrainings, isTrainingOf, findMemos, findHotelStays, toLines, PLANNED_RE, MONTHS };
+export { findPeriod, findNotices, findHotels, findLegend, findGridLegend, findOtherCrew, setDutyCrews, findCrewIdLists, setFlightCrews, findTrainings, isTrainingOf, findMemos, findHotelStays, toLines, PLANNED_RE, MONTHS, monthIndex };

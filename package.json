@@ -7,10 +7,12 @@
   "dependencies": {
     "@fortawesome/fontawesome-free": "^6.7.2",
     "express": "^5.2.1",
+    "firebase-admin": "^13.10.0",
     "form-data": "^4.0.6",
     "leaflet": "^1.9.4",
     "maplibre-gl": "6.4.1",
     "minio": "^8.0.7",
+    "mongodb": "^6.21.0",
     "multer": "^2.4.0",
     "nodemailer": "^10.1.7",
     "pdfjs-dist": "^4.10.38",
@@ -21,7 +23,8 @@
   },
   "scripts": {
     "start": "node --env-file=.env src/index.js",
-    "tunnel": "                                                                                                                      cloudflare tunnel --url http://localhost:3000",
+    "tunnel": "cloudflared tunnel --url http://localhost:3000",
+    "docker:up": "docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build app",
     "media:import": "node --env-file=.env src/scripts/media-import.mjs",
     "models:archive": "node --env-file=.env src/scripts/models-archive.mjs",
     "test": "node --test --test-concurrency=1 tests",
@@ -42,7 +45,9 @@
     "label:audit": "node --env-file=.env src/scripts/label-audit.mjs",
     "label:draft-tables": "node --env-file=.env src/scripts/label-draft-tables.mjs",
     "label:review": "node --env-file=.env src/scripts/label-review.mjs",
-    "airports:update": "node src/scripts/airports-update.mjs"
+    "deploy": "node src/scripts/deploy.mjs",
+    "auth:grant": "node --env-file=.env src/scripts/auth-grant.mjs",
+    "airports:update": "node --env-file=.env src/scripts/airports-update.mjs"
   },
   "author": "ThuanND",
   "license": "ISC"

@@ -6,7 +6,7 @@
 //   POST /api/route-map         rosters -> their routes on a world map, and a /route-map link that shows them (views/assets/route-map.js)
 import { Router } from 'express';
 import { createRequire } from 'node:module';
-import { findByCode } from './airports-api.js';
+import { findByCode, loadAirports } from './airports-api.js';
 import '../views/assets/ics.js';
 import '../views/assets/route-map.js';
 
@@ -41,7 +41,10 @@ const hm = (min) => `${Math.floor(min / 60)}:${String(min % 60).padStart(2, '0')
  *   sunrise?: "06:00", sunset?: "18:00" (rule fixed: local time at the aircraft), track?: true }
  * dep / arr: an airport code (IATA, ICAO, FAA, ...) or "lat,lon"; off / on: ISO 8601 times (UTC with Z).
  */
-router.post('/night-time/calc', (req, res) => {
+// the routes that look up airports load them first (from the site data bucket)
+const withAirports = (req, res, next) => loadAirports().then(() => next(), (e) => res.status(e.status || 500).json({ error: e.message }));
+
+router.post('/night-time/calc', withAirports, (req, res) => {
   const body = req.body || {};
   const { dep, arr, off, on, rule = 'civil', sunrise = '06:00', sunset = '18:00' } = body;
   if (!dep || !arr || !off || !on) return bad(res, 'dep, arr, off and on are required');
@@ -107,7 +110,7 @@ const RouteMap = globalThis.RouteMap;
 const { flightsFromRows, flightsFromEvents, toParam, greatCircle } = RouteMap;
 const { parseIcs } = globalThis.RosterIcs;
 const MAX_ROSTERS = 20, MAX_FLIGHTS = 20000;
-router.post('/route-map', (req, res) => {
+router.post('/route-map', withAirports, (req, res) => {
   const body = req.body || {};
   const given = Array.isArray(body.rosters) ? body.rosters : ['published', 'planned', 'ics', 'flights'].some(k => body[k]) ? [body] : [];
   if (!given.length) return bad(res, 'Send "rosters": [{ name, published / planned rows, ics, or flights: [{ dep, arr }] }]');

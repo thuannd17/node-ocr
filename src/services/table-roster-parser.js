@@ -37,6 +37,26 @@
  *   flight-records one row per flight: flightDate | flightNumber | from | actualDepartureTime | onDutyTime | takeoffTime | to |
  *                  landingTime | actualArrivalTime | offDutyTime | selectedAircraftType | selectedAircraftID | ... | totalTime
  *                  ("2025/08/05 06:40", UTC); C/I from onDutyTime, C/O from offDutyTime, takeoff / landing times of their own
+ *   blocks-logbook  business-aviation export: Crew | Blocks Off/On Estimated/Actual "06.07.2024 05:05" | From/To Airport | ... | Block Time Actual "1h55"
+ *   duty-legs      FTL record: Date | AC | Funct. | Duty "EGLK - EGAE" | Start Duty | Off-Block | Take Off | Ldg | On-Block | Check-Out | ... (C/I, C/O)
+ *   duty-sectors   Duty Start "05/06/2020 1100L" | Flt/GD | SD | Sector "HKG-TPE" | A/C | Dep | Arr | Duty End (local)
+ *   aircraft-id-logbook  Date | Aircraft ID | Aircraft Type | Out | In | PIC/P1 Crew | SIC/P2 Crew | Total Time | Remarks | Flight # | From | To | Total Pax
+ *   utc-legs       Start UTC | From | End UTC | To | Flight time "11h16" | SIMU ins | SIMU trg | Type | Function | Aircraft "FHMIB A35K"
+ *   far-logbook    Name | Date "2022-11-14 14:14:00.0 Z" | Typename | Tail | From | To | Blk Hrs | FAR 91 | ... | Paired With "Beliard, Laurent PIC"
+ *   planning-checkin  "Planning from ... till ...": Check-in | Start | City | End | Debrief end | Duty end | City | Duty | ... | Description | Notes | Pax
+ *   saudia-duties  DUTY_CD | PRNG_NUM | FLT_NUM | DEPARURE_PORT | ARRIVAL_PORT | ... | ACTUAL_START_DATE_GMT | ... | ACTUAL_END_TIME_LOCAL ("Z / L")
+ *   german-logbook  Flugbuch: Datum | LFZ Typ | Kennzeichen | von | nach | Start | Landung | BlockOff | BlockOn | ... | Schüler; or Datum | Lfz. |
+ *                  Startort "Goch-Asperden EDLG" | Landeort | Off-Block | On-Block | ... | Pilot | Begleiter/FI | Flugzeit (minutes) | Lfz.-Muster
+ *   brakes-logbook  Date | Aircraft | Flight Log | From | To | Brakes Off | Take Off | Landing | Brakes On | PIC | Student | Defects
+ *   pf-legs        Flight Date "21-Sep-25" | Flight Number | Takeoff (as PF) | TO Location | Out Time | ... | Ldg Location | In Time | ... | Airline
+ *   utc-crew-legs  departUTC | arriveUTC | fltNum | origin | destination | acRegistration | acType | crew "CA: .. / FO: .." | hours
+ *   school-flights  id | date | reg | type | flight_type | pic | customer | instructor | from | to | off_blocks_utc | takeoff_utc | ... | total_block
+ *   activity-lines  SAS: Day | Date "01AUG2025" | Duty | Meal | Activity (checkin, a flight, NightStop, checkout) | From | STD | STA | To | Stop time
+ *   dhd-flights    Southwest: DATE | Flight | dhd | From | Depart "1411" | To | Arrive | Block "213" | Tail_Number | A_C_Type | CoPilot
+ *   stamp-logbook  date_of_flight | call_sign | departure_airport | off_block "22/05/2015 06:22" | take_off | ... | on_block | ... | capt_on_flight
+ *   block-time-report  Actual Out | Actual In | Orig | Dest | Crew Count ("DHD": deadhead) | Block Time ("12+33")
+ *   outlook-calendar  Outlook calendar export (Iberia, Spanish): Asunto | Fecha de comienzo | Comienzo | ... | Todo el día | ... | Description
+ *                  ("Firma 14:30 Pairing 1589" -> C/I, "IB721  MAD1345-LHR1615 / 350 +O" a flight in UTC, "X - DIA LIBRE" codes, crew lines)
  * Rows follow the labels' conventions (services/pdf-roster-parser.js): date "1 Aug 24",
  * day "Thu", times "HH:MM Z" (or L when the file says local; takeoff / landing too, where the file has them), "+1" only where the
  * file prints it next to the time ("2259+"); airports as printed (both, also for a
@@ -960,6 +980,693 @@ const LAYOUTS = [
             ['ac', c('ac')], ['registration', c('registration')], ['crew', c('crew')], ['info', c('block')], ['info', c('stick')],
             ['info', c('takeoff').text === 'Y' ? c('takeoff') : null], ['info', c('landing').text === 'Y' ? c('landing') : null], ['info', c('sdc')]],
         });
+      }
+      return out;
+    },
+  },
+  {
+    name: 'blocks-logbook',
+    // business-aviation logbook export: Crew | Blocks Off Estimated | Blocks Off Actual | From Airport (AF_DEP) | To Airport (AF_ARR) |
+    // Blocks On Estimated | Blocks On Actual | Funct. | ... | Booking | Flight # | Aircraft Registration (AC_REG) | Aircraft Model (AC_MODEL) |
+    // ... | Takeoffs Day | Takeoffs Night | ... | Landings Day | Landings Night | ... | Block Time Actual (TIME_TOTAL) | Flight Time Actual |
+    // Flight Time Pilot | PIC Time | SIC Time | Night Time | Inst Time ("1h55", "48'"); "06.07.2024 05:05" stamps (UTC)
+    find(h) {
+      const at = (...names) => { const i = h.findIndex(t => names.includes(t)); return i < 0 ? null : i; };
+      const cols = {
+        crew: at('Crew'), off: at('Blocks Off Actual'), dep: at('From Airport', 'AF_DEP'), arr: at('To Airport', 'AF_ARR'), on: at('Blocks On Actual'),
+        flight: at('Flight #'), registration: at('Aircraft Registration', 'AC_REG'), ac: at('Aircraft Model', 'AC_MODEL'), sim: at('SIM Time'),
+        tkDay: at('Takeoffs Day'), tkNight: at('Takeoffs Night'), ldDay: at('Landings Day'), ldNight: at('Landings Night'),
+        block: at('Block Time Actual', 'TIME_TOTAL'), flt: at('Flight Time Actual'), pic: at('PIC Time'), sic: at('SIC Time'), night: at('Night Time'), inst: at('Inst Time'),
+      };
+      return ['off', 'dep', 'arr', 'on', 'block'].every(k => cols[k] != null) ? cols : null;
+    },
+    // A row per flight: begin / end = blocks off / on (actual), "+1" on a later day; duty the flight number; crew "[Crew - Quentin Roland]"
+    // per name; info "[Block: 01:55] [Flight: 01:42] [Takeoff Day: 1] [Landing Day: 1] [PIC: 01:55] [SIC: ..] [Night: ..] [IFR: ..] [Sim: ..]".
+    rows(data, cols) {
+      const out = [];
+      const dur = (t) => {
+        const m = /^(?:(\d+)h)?(\d{2})?'?$/.exec(String(t || '').trim());
+        if (!m || (!m[1] && !m[2])) return '';
+        const mins = (+(m[1] || 0)) * 60 + +(m[2] || 0);
+        return mins ? `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}` : '';
+      };
+      const stamp = (cell) => {
+        const m = /^(\d{2})\.(\d{2})\.(\d{4}) (\d{2}):(\d{2})$/.exec(cell.text);
+        if (!m) return null;
+        const it = cell.items[0];
+        return { day: dayOf(+m[1], +m[2] - 1, +m[3]), hhmm: `${m[4]}:${m[5]}`, timeCell: { items: it ? [{ ...it, text: `${m[4]}:${m[5]}`, _src: it._src || it, _off: (it._off || 0) + 11 }] : [] } };
+      };
+      for (const row of data) {
+        const c = (k) => cellOf(row, cols[k]);
+        const off = stamp(c('off')), on = stamp(c('on'));
+        if (!off || !AIRPORT_ICAO_OR_IATA.test(c('dep').text)) continue;
+        const info = [
+          ...[['Block', 'block'], ['Flight', 'flt']].filter(([, k]) => dur(c(k).text)).map(([n, k]) => `[${n}: ${dur(c(k).text)}]`),
+          ...countTags([['Takeoff Day', c('tkDay')], ['Takeoff Night', c('tkNight')], ['Landing Day', c('ldDay')], ['Landing Night', c('ldNight')]]),
+          ...[['PIC', 'pic'], ['SIC', 'sic'], ['Night', 'night'], ['IFR', 'inst'], ['Sim', 'sim']].filter(([, k]) => dur(c(k).text)).map(([n, k]) => `[${n}: ${dur(c(k).text)}]`),
+        ].join(' ');
+        out.push({
+          ...off.day, duty: c('flight').text, dep: c('dep').text, arr: c('arr').text, begin: formatTime(off.hhmm, 'Z'),
+          end: on ? `${formatTime(on.hhmm, 'Z')}${on.day.ymd > off.day.ymd ? ' +1' : ''}` : '',
+          registration: c('registration').text, ac: c('ac').text,
+          crew: c('crew').text.split(/\s*,\s*/).filter(Boolean).map(n => `[Crew - ${n}]`).join(''), info,
+          _marks: [['date', c('off')], ['duty', c('flight')], ['dep', c('dep')], ['arr', c('arr')], ['begin', off.timeCell], ['end', on?.timeCell], ['registration', c('registration')],
+            ['ac', c('ac')], ['crew', c('crew')], ...['block', 'flt', 'pic', 'sic', 'night', 'inst', 'sim'].filter(k => dur(c(k).text)).map(k => ['info', c(k)]),
+            ...countMarks(c('tkDay'), c('tkNight'), c('ldDay'), c('ldNight'))],
+        });
+      }
+      return out;
+    },
+  },
+  {
+    name: 'duty-legs',
+    // FTL record, a line per leg: Date | AC | Funct. | Duty "EGLK - EGAE" (or a code: OFF) | Start Duty | Off-Block | Take Off | Ldg | On-Block |
+    // Check-Out | Reason | Break time | Sct | Flight Time | Block Time (DP) | 28d | 3m | 12m | ... | Flight Duty Period (act) | ... | Duty Period (DP) | ...
+    find(h) {
+      const at = (n) => { const i = h.indexOf(n); return i < 0 ? null : i; };
+      if (!['Start Duty', 'Off-Block', 'On-Block', 'Check-Out'].every(n => h.includes(n))) return null;
+      return {
+        date: at('Date'), registration: at('AC'), duty: at('Duty'), ci: at('Start Duty'), off: at('Off-Block'), takeoff: at('Take Off'), landing: at('Ldg'), on: at('On-Block'),
+        co: at('Check-Out'), flt: at('Flight Time'), block: at('Block Time (DP)'), fdp: at('Flight Duty Period (act)'), dp: at('Duty Period (DP)'),
+      };
+    },
+    // Start Duty -> a C/I row, Check-Out -> a C/O row with the duty's "[Flight: 02:16] [Block: 02:45] [FDP: 07:55] [Duty: 08:10]";
+    // a leg "EGLK - EGAE" with off / take-off / landing / on (UTC); a code ("OFF") with its start / end.
+    rows(data, cols, { dateOf }) {
+      const out = [];
+      const dur = (cell) => (/^\d{1,2}:\d{2}$/.test(cell.text) && /[1-9]/.test(cell.text) ? cell.text.padStart(5, '0') : '');
+      for (const row of data) {
+        const c = (k) => cellOf(row, cols[k]);
+        const d = dateOf(c('date').text);
+        if (!d) continue;
+        const leg = /^([A-Z]{3,4}) - ([A-Z]{3,4})$/.exec(c('duty').text);
+        if (!leg) {
+          if (c('duty').text) out.push({ ...d, duty: c('duty').text, begin: timeOf(c('ci').text, 'Z'), end: timeOf(c('co').text, 'Z'), _marks: [['date', c('date')], ['duty', c('duty')], ['begin', c('ci')], ['end', c('co')]] });
+          continue;
+        }
+        if (c('ci').text) out.push({ ...d, duty: 'C/I', dep: leg[1], begin: timeOf(c('ci').text, 'Z'), _marks: [['ci', c('ci')]] });
+        out.push({
+          ...d, dep: leg[1], arr: leg[2], registration: c('registration').text,
+          begin: timeOf(c('off').text, 'Z'), takeoff: timeOf(c('takeoff').text, 'Z'), landing: timeOf(c('landing').text, 'Z'), end: timeOf(c('on').text, 'Z'),
+          _marks: [['date', c('date')], ['registration', c('registration')], ...[['dep', 1, 0], ['arr', 2, c('duty').text.length - leg[2].length]].map(([f, g, off]) => {
+            const it = c('duty').items[0];
+            return [f, { items: it ? [{ ...it, text: leg[g], _src: it._src || it, _off: (it._off || 0) + off }] : [] }];
+          }),
+            ['begin', c('off')], ['takeoff', c('takeoff')], ['landing', c('landing')], ['end', c('on')]],
+        });
+        if (c('co').text) {
+          const info = [['Flight', 'flt'], ['Block', 'block'], ['FDP', 'fdp'], ['Duty', 'dp']].filter(([, k]) => dur(c(k))).map(([n, k]) => `[${n}: ${dur(c(k))}]`).join(' ');
+          out.push({ ...d, duty: 'C/O', arr: leg[2], end: timeOf(c('co').text, 'Z'), info, _marks: [['co', c('co')], ...['flt', 'block', 'fdp', 'dp'].filter(k => dur(c(k))).map(k => ['info', c(k)])] });
+        }
+      }
+      return out;
+    },
+  },
+  {
+    name: 'duty-sectors',
+    // duty list ("Generated 20/05/20 10:26 - AHK1555 ..."): Duty Start "05/06/2020 1100L" | Flt/GD | SD | Sector "HKG-TPE" | A/C | Dep "1900L" |
+    // Arr "2050L" | Duty End "07/06/2020 0020L"; the duty's later legs have no Duty Start; day codes alone ("DO", "O").
+    find(h) {
+      if (!['Duty Start', 'Flt/GD', 'Sector', 'Dep', 'Arr', 'Duty End'].every(n => h.includes(n))) return null;
+      const at = (n) => { const i = h.indexOf(n); return i < 0 ? null : i; };
+      return { date: at('Duty Start'), duty: at('Flt/GD'), sd: at('SD'), sector: at('Sector'), ac: at('A/C'), dep: at('Dep'), arr: at('Arr'), end: at('Duty End') };
+    },
+    // Duty Start -> a C/I row, Duty End -> a C/O row ("+1" on a later day); a leg dep-arr with its local times ("+1" when it lands
+    // earlier than it left), "[SD: CD]"; a code with a duty start / end: one row with those times.
+    rows(data, cols, { dateOf }) {
+      const out = [];
+      let cur = null;
+      const stamp = (t) => { const m = /^(\S+) (\d{4})L$/.exec(t); return m && { d: dateOf(m[1]), t: m[2] }; };
+      for (const row of data) {
+        const c = (k) => cellOf(row, cols[k]);
+        const start = stamp(c('date').text), end = stamp(c('end').text);
+        const d = start?.d || dateOf(c('date').text);
+        if (d) cur = d;
+        if (!cur || !c('duty').text) continue;
+        const sec = /^([A-Z]{3})-([A-Z]{3})$/.exec(c('sector').text);
+        const plus = (e) => (e?.d && e.d.ymd > cur.ymd ? ' +1' : '');
+        if (!sec) {
+          out.push({ ...cur, duty: c('duty').text, begin: start ? timeOf(start.t, 'L') : '', end: end ? `${timeOf(end.t, 'L')}${plus(end)}` : '', info: c('sd').text ? `[SD: ${c('sd').text}]` : '',
+            _marks: [['date', c('date')], ['duty', c('duty')], ['info', c('sd')]] });
+          continue;
+        }
+        if (start) out.push({ ...cur, duty: 'C/I', dep: sec[1], begin: timeOf(start.t, 'L'), _marks: [['date', c('date')], ['ci', c('date')]] });
+        const t1 = c('dep').text.replace(/L$/, ''), t2 = c('arr').text.replace(/L$/, '');
+        out.push({ ...cur, duty: c('duty').text, dep: sec[1], arr: sec[2], begin: timeOf(t1, 'L'), end: timeOf(t2, 'L', t2 < t1), ac: c('ac').text, info: c('sd').text ? `[SD: ${c('sd').text}]` : '',
+          _marks: [['duty', c('duty')], ['dep', c('sector')], ['begin', c('dep')], ['end', c('arr')], ['ac', c('ac')], ['info', c('sd')]] });
+        if (end) out.push({ ...cur, duty: 'C/O', arr: sec[2], end: `${timeOf(end.t, 'L')}${plus(end)}`, _marks: [['co', c('end')]] });
+      }
+      return out;
+    },
+  },
+  {
+    name: 'aircraft-id-logbook',
+    // Date "5/28/2026" | Aircraft ID | Aircraft Type | Out | In | PIC/P1 Crew | SIC/P2 Crew | Total Time | Remarks | Flight # | From | To | Total Pax
+    find(h) {
+      if (!['Aircraft ID', 'Out', 'In', 'PIC/P1 Crew', 'Flight #', 'From', 'To'].every(n => h.includes(n))) return null;
+      const at = (n) => { const i = h.indexOf(n); return i < 0 ? null : i; };
+      return { date: at('Date'), registration: at('Aircraft ID'), ac: at('Aircraft Type'), out: at('Out'), in: at('In'), pic: at('PIC/P1 Crew'), sic: at('SIC/P2 Crew'),
+        total: at('Total Time'), remark: at('Remarks'), flight: at('Flight #'), dep: at('From'), arr: at('To'), pax: at('Total Pax') };
+    },
+    // A row per flight (times as printed, taken as UTC; "+1" when In is earlier than Out), crew "[PIC - Lonsdale, Daniel][SIC - ...]",
+    // info "[Total Time: 1.20] [Pax: 126]" and the remark.
+    rows(data, cols, { dateOf, zone }) {
+      const out = [];
+      for (const row of data) {
+        const c = (k) => cellOf(row, cols[k]);
+        const d = dateOf(c('date').text);
+        if (!d || !AIRPORT_ICAO_OR_IATA.test(c('dep').text)) continue;
+        out.push({
+          ...d, duty: c('flight').text, registration: c('registration').text, ac: c('ac').text, dep: c('dep').text, arr: c('arr').text,
+          begin: timeOf(c('out').text, zone), end: timeOf(c('in').text, zone, c('in').text < c('out').text),
+          crew: [['PIC', 'pic'], ['SIC', 'sic']].filter(([, k]) => c(k).text).map(([n, k]) => `[${n} - ${c(k).text}]`).join(''),
+          info: [c('total').text && `[Total Time: ${c('total').text}]`, c('pax').text && `[Pax: ${c('pax').text}]`, c('remark').text].filter(Boolean).join(' '),
+          _marks: [['date', c('date')], ['duty', c('flight')], ['registration', c('registration')], ['ac', c('ac')], ['dep', c('dep')], ['arr', c('arr')], ['begin', c('out')], ['end', c('in')],
+            ['crew', c('pic')], ['crew', c('sic')], ['info', c('total')], ['info', c('pax')], ['info', c('remark')]],
+        });
+      }
+      return out;
+    },
+  },
+  {
+    name: 'utc-legs',
+    // Start UTC "03/08/2024 07:54" | From | End UTC | To | Flight time "11h16" | SIMU ins | SIMU trg | Type (Flight) | Function | Aircraft "FHMIB A35K"
+    find(h) {
+      if (!['Start UTC', 'From', 'End UTC', 'To', 'Aircraft'].every(n => h.includes(n))) return null;
+      const at = (n) => { const i = h.indexOf(n); return i < 0 ? null : i; };
+      return { date: at('Start UTC'), dep: at('From'), end: at('End UTC'), arr: at('To'), flt: at('Flight time'), simIns: at('SIMU ins'), simTrg: at('SIMU trg'), type: at('Type'), fn: at('Function'), aircraft: at('Aircraft') };
+    },
+    // A row per leg (UTC; "+1" when it ends on a later date), registration and type from Aircraft, "[Flight: 11:16] [Function: CC]"; a simulator
+    // session (Type other than Flight) its Type as duty, "[Sim: ..]".
+    rows(data, cols, { dateOf }) {
+      const out = [];
+      const dur = (t) => { const m = /^(\d+)h(\d{2})$/.exec(t || ''); return m ? `${m[1].padStart(2, '0')}:${m[2]}` : ''; };
+      for (const row of data) {
+        const c = (k) => cellOf(row, cols[k]);
+        const s = /^(\S+) (\d{2}:\d{2})$/.exec(c('date').text), e = /^(\S+) (\d{2}:\d{2})$/.exec(c('end').text);
+        const d = s && dateOf(s[1]);
+        if (!d) continue;
+        const ed = e && dateOf(e[1]);
+        const [reg, type] = c('aircraft').text.split(/\s+/);
+        const flight = !c('type').text || /^Flight$/i.test(c('type').text);
+        const sim = dur(c('simIns').text) || dur(c('simTrg').text);
+        out.push({
+          ...d, duty: flight ? '' : c('type').text, dep: c('dep').text, arr: c('arr').text, begin: timeOf(s[2], 'Z'), end: e ? timeOf(e[2], 'Z', ed && ed.ymd > d.ymd) : '',
+          registration: reg || '', ac: type || '',
+          info: [dur(c('flt').text) && `[Flight: ${dur(c('flt').text)}]`, sim && `[Sim: ${sim}]`, c('fn').text && `[Function: ${c('fn').text}]`].filter(Boolean).join(' '),
+          _marks: [['date', c('date')], ['dep', c('dep')], ['arr', c('arr')], ['end', c('end')], ['registration', c('aircraft')], ['info', c('flt')], ['info', c('fn')]],
+        });
+      }
+      return out;
+    },
+  },
+  {
+    name: 'far-logbook',
+    // Name | Date "2022-11-14 14:14:00.0 Z" | Typename | Tail | From | To | Blk Hrs | FAR 91 | FAR 91k | FAR 135 | PIC | SIC | NFC | Day T/O | Day Ldg |
+    // Night T/O | Night Ldg | Night Hrs | IFR Hrs | IFR Appr | Paired With "Beliard, Laurent PIC" (decimal hours)
+    find(h) {
+      if (!['Typename', 'Tail', 'From', 'To', 'Blk Hrs', 'Paired With'].every(n => h.includes(n))) return null;
+      const at = (n) => { const i = h.indexOf(n); return i < 0 ? null : i; };
+      return { date: at('Date'), ac: at('Typename'), registration: at('Tail'), dep: at('From'), arr: at('To'), block: at('Blk Hrs'), far91: at('FAR 91'), far91k: at('FAR 91k'), far135: at('FAR 135'),
+        pic: at('PIC'), sic: at('SIC'), tkDay: at('Day T/O'), ldDay: at('Day Ldg'), tkNight: at('Night T/O'), ldNight: at('Night Ldg'), night: at('Night Hrs'), ifr: at('IFR Hrs'), paired: at('Paired With') };
+    },
+    // A row per flight: begin the Date's time (UTC), crew from Paired With "[PIC - Beliard, Laurent]", info "[Block: 2.5] [FAR 135: 2.5] [SIC: 2.5]
+    // [Takeoff Day: 1] [Landing Night: 1] [Night: 1.6] [IFR: 1.6]" (decimal hours as printed, zeros left out).
+    rows(data, cols) {
+      const out = [];
+      const hrs = (cell) => (/^\d+(\.\d+)?$/.test(cell.text) && +cell.text > 0 ? cell.text : '');
+      for (const row of data) {
+        const c = (k) => cellOf(row, cols[k]);
+        const m = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})/.exec(c('date').text);
+        if (!m || !AIRPORT_ICAO_OR_IATA.test(c('dep').text)) continue;
+        const it = c('date').items[0];
+        const pm = /^(.+?)\s+([A-Z]{2,4})$/.exec(c('paired').text);
+        out.push({
+          ...dayOf(+m[3], +m[2] - 1, +m[1]), ac: c('ac').text, registration: c('registration').text, dep: c('dep').text, arr: c('arr').text, begin: formatTime(`${m[4]}${m[5]}`, 'Z'),
+          crew: c('paired').text ? (pm ? `[${pm[2]} - ${pm[1]}]` : `[Crew - ${c('paired').text}]`) : '',
+          info: [...[['Block', 'block'], ['FAR 91', 'far91'], ['FAR 91k', 'far91k'], ['FAR 135', 'far135'], ['PIC', 'pic'], ['SIC', 'sic']].filter(([, k]) => hrs(c(k))).map(([n, k]) => `[${n}: ${c(k).text}]`),
+            ...countTags([['Takeoff Day', c('tkDay')], ['Takeoff Night', c('tkNight')], ['Landing Day', c('ldDay')], ['Landing Night', c('ldNight')]]),
+            ...[['Night', 'night'], ['IFR', 'ifr']].filter(([, k]) => hrs(c(k))).map(([n, k]) => `[${n}: ${c(k).text}]`)].join(' '),
+          _marks: [['date', c('date')], ['begin', { items: it ? [{ ...it, text: `${m[4]}:${m[5]}`, _src: it._src || it, _off: (it._off || 0) + 11 }] : [] }], ['ac', c('ac')],
+            ['registration', c('registration')], ['dep', c('dep')], ['arr', c('arr')], ['crew', c('paired')],
+            ...['block', 'far91', 'far91k', 'far135', 'pic', 'sic', 'night', 'ifr'].filter(k => hrs(c(k))).map(k => ['info', c(k)]), ...countMarks(c('tkDay'), c('tkNight'), c('ldDay'), c('ldNight'))],
+        });
+      }
+      return out;
+    },
+  },
+  {
+    name: 'planning-checkin',
+    // "Planning from 01/05/2025 till 31/05/2025": (weekday) | Check-in | Start | City | End | Debrief end | Duty end | City | Duty | Rest / End rest |
+    // Description | Extensions | Notes | Pax; stamps "01/05/2025 12:15" (UTC)
+    find(h) {
+      if (!['Check-in', 'Start', 'End', 'Duty end', 'Duty', 'Description', 'Notes'].every(n => h.includes(n))) return null;
+      const at = (n, k = 0) => colIndex(h, n, { nth: k });
+      return { ci: at('Check-in'), date: at('Start'), dep: at('City'), end: at('End'), co: at('Duty end'), arr: at('City', 1), duty: at('Duty'), desc: at('Description'), notes: at('Notes'), pax: at('Pax') };
+    },
+    // A flight ("AEA1173"): C/I from Check-in at the duty's first leg, registration / type from Notes ("Aircraft : ECNAB Aircraft type : B738-738"),
+    // crew from Description ("TEC : PM:JULIO CO:ALHAMA" -> "[PM - JULIO][CO - ALHAMA]"), "[Pax: 182]"; Duty end -> a C/O row; VS (positioning,
+    // dc DH) with its Notes ("FR 2629 PWS13C Transport:Aircraft"); HOTEL a hotel row; other duties ("IMAGINARIA EN BASE", "LIBRE") with their times.
+    rows(data, cols, { dateOf }) {
+      const out = [];
+      let inDuty = false;
+      for (const row of data) {
+        const c = (k) => cellOf(row, cols[k]);
+        const s = /^(\S+) (\d{2}:\d{2})$/.exec(c('date').text), e = /^(\S+) (\d{2}:\d{2})$/.exec(c('end').text), ci = /^(\S+) (\d{2}:\d{2})$/.exec(c('ci').text);
+        const d = s && dateOf(s[1]);
+        if (!d || !c('duty').text) continue;
+        const ed = e && dateOf(e[1]);
+        const end = e ? timeOf(e[2], 'Z', ed && ed.ymd > d.ymd) : '';
+        const duty = c('duty').text;
+        const flight = /^[A-Z]{2,3}\d{1,4}[A-Z]?$/.test(duty) && duty !== 'VS';
+        if ((flight || duty === 'VS') && ci && !inDuty) out.push({ ...d, duty: 'C/I', dep: c('dep').text, begin: timeOf(ci[2], 'Z'), _marks: [['date', c('date')], ['ci', c('ci')]] });
+        if (flight || duty === 'VS') inDuty = true;
+        const acm = /Aircraft : (\S+) Aircraft type : ([A-Z0-9]+)/.exec(c('notes').text);
+        const crew = [...c('desc').text.matchAll(/([A-Z]{2,3}):([A-ZÀ-Ü][A-ZÀ-Ü' -]*?)(?=\s+[A-Z]{2,3}:|$)/g)].map(m => `[${m[1]} - ${m[2].trim()}]`).join('');
+        const r = {
+          ...d, duty: duty === 'HOTEL' ? 'H' : duty, dc: duty === 'VS' ? 'DH' : '', dep: c('dep').text, arr: c('arr').text !== c('dep').text || flight ? c('arr').text : '',
+          begin: timeOf(s[2], 'Z'), end, registration: acm ? acm[1] : '', ac: acm ? acm[2] : '', crew: flight ? crew : '',
+          info: [flight && c('pax').text && `[Pax: ${c('pax').text}]`, duty === 'VS' && c('notes').text, !flight && duty !== 'VS' && duty !== 'HOTEL' && c('notes').text !== duty && c('notes').text].filter(Boolean).join(' '),
+          _marks: [['date', c('date')], ['duty', c('duty')], ['dep', c('dep')], ['arr', c('arr')], ['begin', c('date')], ['end', c('end')], ['registration', c('notes')], ['crew', flight ? c('desc') : null]],
+        };
+        out.push(r);
+        const co = /^(\d{2}:\d{2})$/.exec(c('co').text);
+        if (co && inDuty) { out.push({ ...d, duty: 'C/O', arr: c('arr').text, end: timeOf(co[1], 'Z', co[1] < s[2]), _marks: [['co', c('co')]] }); inDuty = false; }
+      }
+      return out;
+    },
+  },
+  {
+    name: 'saudia-duties',
+    // STAFF_NUM | ... | DUTY_STR_DATE | DUTY_END_DATE | DUTY_CD | PRNG_NUM | FLT_NUM | DEPARURE_PORT | ARRIVAL_PORT | ... | FLEET_CD | TAIL_NUM |
+    // ACTUAL_START_DATE_GMT | ACTUAL_START_TIME_GMT | ACTUAL_END_DATE_GMT | ACTUAL_END_TIME_GMT | ACTUAL_START_DATE_LOCAL | ... (dates "17-AUG-17")
+    find(h) {
+      if (!['DUTY_CD', 'FLT_NUM', 'ACTUAL_START_TIME_GMT', 'ACTUAL_END_TIME_GMT'].every(n => h.includes(n))) return null;
+      const at = (n) => { const i = h.indexOf(n); return i < 0 ? null : i; };
+      return { code: at('DUTY_CD'), pairing: at('PRNG_NUM'), flight: at('FLT_NUM'), dep: at('DEPARURE_PORT') ?? at('DEPARTURE_PORT'), arr: at('ARRIVAL_PORT'), ac: at('FLEET_CD'), registration: at('TAIL_NUM'),
+        sd: at('ACTUAL_START_DATE_GMT'), st: at('ACTUAL_START_TIME_GMT'), ed: at('ACTUAL_END_DATE_GMT'), et: at('ACTUAL_END_TIME_GMT'),
+        sdl: at('ACTUAL_START_DATE_LOCAL'), stl: at('ACTUAL_START_TIME_LOCAL'), edl: at('ACTUAL_END_DATE_LOCAL'), etl: at('ACTUAL_END_TIME_LOCAL') };
+    },
+    // A row per line: a flight number (not "0") as duty, else the duty code (OR, RST, GS ...); times "12:00 Z / 15:00 L" ("+1" on a later
+    // date); "[Pairing: 8770244]"; fleet / tail when given ("-" left out).
+    rows(data, cols) {
+      const out = [];
+      const ddMonYy2 = (t) => { const m = /^(\d{2})-([A-Z]{3})-(\d{2})$/.exec(t); const mon = m && MONTHS.findIndex(x => x.toUpperCase() === m[2]); return m && mon >= 0 ? dayOf(+m[1], mon, +m[3]) : null; };
+      for (const row of data) {
+        const c = (k) => cellOf(row, cols[k]);
+        const d = ddMonYy2(c('sd').text);
+        if (!d) continue;
+        const zl = (dk, tk, ldk, ltk) => {
+          const z = c(tk).text, l = c(ltk).text;
+          if (!z) return '';
+          const zd = ddMonYy2(c(dk).text), ld = ddMonYy2(c(ldk).text);
+          const p = (x) => (x && x.ymd > d.ymd ? ` +${Math.round((x.ymd - d.ymd) / 86400000)}` : '');
+          return l ? `${z} Z${p(zd)} / ${l} L${p(ld)}` : `${z} Z${p(zd)}`;
+        };
+        const flight = /^\d+$/.test(c('flight').text) && c('flight').text !== '0';
+        out.push({
+          ...d, duty: flight ? c('flight').text : c('code').text, dep: c('dep').text, arr: c('arr').text !== c('dep').text || flight ? c('arr').text : '',
+          begin: zl('sd', 'st', 'sdl', 'stl'), end: zl('ed', 'et', 'edl', 'etl'),
+          ac: /^[A-Z0-9]{3,4}$/.test(c('ac').text) ? c('ac').text : '', registration: /^[A-Z0-9-]{4,}$/.test(c('registration').text) ? c('registration').text : '',
+          info: c('pairing').text ? `[Pairing: ${c('pairing').text}]` : '',
+          _marks: [['date', c('sd')], ['duty', flight ? c('flight') : c('code')], ['dep', c('dep')], ['arr', c('arr')], ['begin', c('st')], ['begin', c('stl')], ['end', c('et')], ['end', c('etl')],
+            ['ac', c('ac')], ['registration', c('registration')], ['info', c('pairing')]],
+        });
+      }
+      return out;
+    },
+  },
+  {
+    name: 'german-logbook',
+    // German flight-school / club logbooks: "Flugbuch" Datum "01.09.22" | LFZ Typ | Kennzeichen | von | nach | Start | Landung | BlockOff | BlockOn |
+    // Landungen | Flugstunden | Blockzeit | ... | Schüler | Bemerkung; or (Vereinsflieger) Datum | Lfz. | Startort "Goch-Asperden EDLG" | Landeort |
+    // Off-Block | Start | Landung | On-Block | Blockzeit in hh:mm | Landungen | Pilot | Begleiter/FI | Flugzeit (minutes) | ... | Lfz.-Muster
+    find(h) {
+      const at = (n) => { const i = h.indexOf(n); return i < 0 ? null : i; };
+      if (!h.includes('Datum') || !(h.includes('BlockOff') || h.includes('Off-Block'))) return null;
+      if (!((h.includes('von') && h.includes('nach')) || (h.includes('Startort') && h.includes('Landeort')))) return null;
+      return { date: at('Datum'), reg: at('Kennzeichen') ?? at('Lfz.'), ac: at('LFZ Typ') ?? at('Lfz.-Muster'), dep: at('von') ?? at('Startort'), arr: at('nach') ?? at('Landeort'),
+        off: at('BlockOff') ?? at('Off-Block'), takeoff: at('Start'), landing: at('Landung'), on: at('BlockOn') ?? at('On-Block'), ldg: at('Landungen'),
+        flight: at('Flugstunden') ?? at('Flugzeit'), block: at('Blockzeit') ?? at('Blockzeit in hh:mm'), student: at('Schüler'), pilot: at('Pilot'), fi: at('Begleiter/FI'), remark: at('Bemerkung') };
+    },
+    // A row per flight: the airfield's ICAO code ("Goch-Asperden EDLG" -> EDLG), block off / on as begin / end, take-off / landing times,
+    // "[Block: 00:50] [Flight: 00:40] [Landing Day/Night: 1]" (Flugzeit in minutes -> hh:mm), crew "[Pilot - ...][FI - ...]" / "[Student - ...]".
+    // Times as printed, taken as UTC.
+    rows(data, cols, { dateOf }) {
+      const out = [];
+      const icao = (t) => /([A-Z]{4})$/.exec(t)?.[1] || (AIRPORT_ICAO_OR_IATA.test(t) ? t : '');
+      const hm = (t) => (/^\d{1,3}$/.test(t) ? `${String(Math.floor(+t / 60)).padStart(2, '0')}:${String(+t % 60).padStart(2, '0')}` : /^\d{1,2}:\d{2}$/.test(t) ? t.padStart(5, '0') : '');
+      for (const row of data) {
+        const c = (k) => cellOf(row, cols[k]);
+        const d = dateOf(c('date').text);
+        const dep = icao(c('dep').text), arr = icao(c('arr').text);
+        if (!d || !dep) continue;
+        const off = c('off').text, on = c('on').text;
+        out.push({
+          ...d, registration: c('reg').text, ac: cols.ac === cols.reg ? '' : c('ac').text, dep, arr,
+          begin: timeOf(off, 'Z'), end: on ? timeOf(on, 'Z', on < off) : '', takeoff: timeOf(c('takeoff').text, 'Z'), landing: timeOf(c('landing').text, 'Z'),
+          crew: [['Pilot', 'pilot'], ['FI', 'fi'], ['Student', 'student']].filter(([, k]) => c(k).text).map(([n, k]) => `[${n} - ${c(k).text}]`).join(''),
+          info: [hm(c('block').text) && /[1-9]/.test(hm(c('block').text)) && `[Block: ${hm(c('block').text)}]`, hm(c('flight').text) && /[1-9]/.test(hm(c('flight').text)) && `[Flight: ${hm(c('flight').text)}]`,
+            counted(c('ldg')) && `[Landing Day/Night: ${+c('ldg').text}]`, c('remark').text].filter(Boolean).join(' '),
+          _marks: [['date', c('date')], ['registration', c('reg')], ['ac', cols.ac === cols.reg ? null : c('ac')], ['dep', c('dep')], ['arr', c('arr')], ['begin', c('off')], ['end', c('on')],
+            ['takeoff', c('takeoff')], ['landing', c('landing')], ['crew', c('pilot')], ['crew', c('fi')], ['crew', c('student')], ['info', c('block')], ['info', c('flight')], ['info', c('ldg')], ['info', c('remark')]],
+        });
+      }
+      return out;
+    },
+  },
+  {
+    name: 'brakes-logbook',
+    // flight-school log: Date | Aircraft (registration) | Flight Log | From | To | Brakes Off | Take Off | Landing | Brakes On | PIC | Student | Defects
+    find(h) {
+      if (!['Aircraft', 'From', 'To', 'Brakes Off', 'Take Off', 'Landing', 'Brakes On', 'PIC'].every(n => h.includes(n))) return null;
+      const at = (n) => { const i = h.indexOf(n); return i < 0 ? null : i; };
+      return { date: at('Date'), reg: at('Aircraft'), dep: at('From'), arr: at('To'), off: at('Brakes Off'), takeoff: at('Take Off'), landing: at('Landing'), on: at('Brakes On'),
+        pic: at('PIC'), student: at('Student'), defects: at('Defects') };
+    },
+    // A row per flight (airports upper-cased: "eglk"), brakes off / on as begin / end, take-off / landing, "[PIC - ..][Student - ..]", a defect
+    // other than NIL as info. Times taken as UTC.
+    rows(data, cols, { dateOf }) {
+      const out = [];
+      for (const row of data) {
+        const c = (k) => cellOf(row, cols[k]);
+        const d = dateOf(c('date').text);
+        const dep = c('dep').text.toUpperCase(), arr = c('arr').text.toUpperCase();
+        if (!d || !AIRPORT_ICAO_OR_IATA.test(dep)) continue;
+        const hm = (k) => c(k).text.replace(/^(\d{1,2}:\d{2}):\d{2}$/, '$1'); // (the CSV keeps the seconds: "15:37:49")
+        const off = hm('off'), on = hm('on');
+        out.push({
+          ...d, registration: c('reg').text, dep, arr, begin: timeOf(off, 'Z'), end: on ? timeOf(on, 'Z', on < off) : '', takeoff: timeOf(hm('takeoff'), 'Z'), landing: timeOf(hm('landing'), 'Z'),
+          crew: [['PIC', 'pic'], ['Student', 'student']].filter(([, k]) => c(k).text).map(([n, k]) => `[${n} - ${c(k).text}]`).join(''),
+          info: c('defects').text && !/^NIL$/i.test(c('defects').text) ? c('defects').text : '',
+          _marks: [['date', c('date')], ['registration', c('reg')], ['dep', c('dep')], ['arr', c('arr')], ['begin', c('off')], ['end', c('on')], ['takeoff', c('takeoff')], ['landing', c('landing')],
+            ['crew', c('pic')], ['crew', c('student')]],
+        });
+      }
+      return out;
+    },
+  },
+  {
+    name: 'pf-legs',
+    // pilot's flights export (WestJet): EmployeeID | Crew Name | Flight Date "21-Sep-25" | Flight Number | Takeoff (as PF) | TO Location | Out Time |
+    // TO Daytime/Nightime | Landing (as PF) | Ldg Location | In Time | ... | Flight Hours (Block) | ... | Rank | ... | Airline | Tail Number |
+    // Airline Registration | Aircraft Type | Paired Crew Member
+    find(h) {
+      if (!['Flight Date', 'Flight Number', 'TO Location', 'Out Time', 'Ldg Location', 'In Time'].every(n => h.includes(n))) return null;
+      const at = (n) => { const i = h.indexOf(n); return i < 0 ? null : i; };
+      return { date: at('Flight Date'), flight: at('Flight Number'), tkPf: at('Takeoff (as PF)'), dep: at('TO Location'), out: at('Out Time'), tkNight: at('TO Daytime/Nightime'),
+        ldPf: at('Landing (as PF)'), arr: at('Ldg Location'), in: at('In Time'), ldNight: at('Ldg Daytime/Nightime'), block: at('Flight Hours (Block)'), rank: at('Rank'),
+        airline: at('Airline'), reg: at('Airline Registration'), ac: at('Aircraft Type'), paired: at('Paired Crew Member') };
+    },
+    // A row per flight: the airline's code with the number ("WS2931"), out / in (taken as UTC; "+1" when In is earlier), "[Block: 03:43]",
+    // take-off / landing as pilot flying by day or night ("[Takeoff Night: 1]"), "[Rank: Captain - PIC]", the paired crew member.
+    rows(data, cols, { dateOf }) {
+      const out = [];
+      const dmy = (t) => { const m = /^(\d{1,2})-([A-Za-z]{3})-(\d{2})$/.exec(t); const mon = m && MONTHS.findIndex(x => x.toLowerCase() === m[2].toLowerCase()); return m && mon >= 0 ? dayOf(+m[1], mon, +m[3]) : dateOf(t); };
+      for (const row of data) {
+        const c = (k) => cellOf(row, cols[k]);
+        const d = dmy(c('date').text);
+        if (!d || !AIRPORT_ICAO_OR_IATA.test(c('dep').text)) continue;
+        const pf = (k, night, name) => (/^true$/i.test(c(k).text) ? `[${name} ${/^true$/i.test(c(night).text) ? 'Night' : 'Day'}: 1]` : '');
+        out.push({
+          ...d, duty: `${/^[A-Z0-9]{2}$/.test(c('airline').text) ? c('airline').text : ''}${c('flight').text}`, registration: c('reg').text, ac: c('ac').text, dep: c('dep').text, arr: c('arr').text,
+          begin: timeOf(c('out').text, 'Z'), end: timeOf(c('in').text, 'Z', c('in').text < c('out').text),
+          crew: c('paired').text ? `[Crew - ${c('paired').text}]` : '',
+          info: [c('block').text && `[Block: ${c('block').text}]`, pf('tkPf', 'tkNight', 'Takeoff'), pf('ldPf', 'ldNight', 'Landing'), c('rank').text && `[Rank: ${c('rank').text}]`].filter(Boolean).join(' '),
+          _marks: [['date', c('date')], ['duty', c('airline')], ['duty', c('flight')], ['registration', c('reg')], ['ac', c('ac')], ['dep', c('dep')], ['arr', c('arr')], ['begin', c('out')], ['end', c('in')],
+            ['crew', c('paired')], ['info', c('block')], ['info', c('rank')]],
+        });
+      }
+      return out;
+    },
+  },
+  {
+    name: 'utc-crew-legs',
+    // departUTC "2024-08-25T02:13" | arriveUTC | fltNum | origin | destination | acRegistration | acType | crew "CA: Matthew Davis / FO: ..." | hours
+    find(h) {
+      if (!['departUTC', 'arriveUTC', 'fltNum', 'origin', 'destination'].every(n => h.includes(n))) return null;
+      const at = (n) => { const i = h.indexOf(n); return i < 0 ? null : i; };
+      return { dep_t: at('departUTC'), arr_t: at('arriveUTC'), flight: at('fltNum'), dep: at('origin'), arr: at('destination'), reg: at('acRegistration'), ac: at('acType'), crew: at('crew'), hours: at('hours') };
+    },
+    // A row per flight (UTC; "+1" when it arrives on a later date), crew "[CA - Matthew Davis][FO - Christopher Baron]", "[Block: 4.8]" (decimal hours)
+    rows(data, cols) {
+      const out = [];
+      const stamp = (t) => /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(t);
+      for (const row of data) {
+        const c = (k) => cellOf(row, cols[k]);
+        const s = stamp(c('dep_t').text), e = stamp(c('arr_t').text);
+        if (!s) continue;
+        const d = dayOf(+s[3], +s[2] - 1, +s[1]);
+        const later = e && dayOf(+e[3], +e[2] - 1, +e[1]).ymd > d.ymd;
+        out.push({
+          ...d, duty: c('flight').text, registration: c('reg').text, ac: c('ac').text, dep: c('dep').text, arr: c('arr').text,
+          begin: formatTime(`${s[4]}${s[5]}`, 'Z'), end: e ? `${formatTime(`${e[4]}${e[5]}`, 'Z')}${later ? ' +1' : ''}` : '',
+          crew: [...c('crew').text.matchAll(/([A-Z]{2,3}): ([^/]+?)(?=\s*\/|$)/g)].map(m => `[${m[1]} - ${m[2].trim()}]`).join(''),
+          info: c('hours').text ? `[Block: ${c('hours').text}]` : '',
+          _marks: [['date', c('dep_t')], ['duty', c('flight')], ['registration', c('reg')], ['ac', c('ac')], ['dep', c('dep')], ['arr', c('arr')], ['crew', c('crew')], ['info', c('hours')]],
+        });
+      }
+      return out;
+    },
+  },
+  {
+    name: 'school-flights',
+    // flight-school export: id | date | reg | type | flight_type | pic | customer | instructor | from | to | off_blocks_utc | takeoff_utc | landing_utc |
+    // on_blocks_utc | off_blocks_local | ... | total_block "0:54" | total_airborne | takeoffs_landings | student_takeoff_landings
+    find(h) {
+      if (!['reg', 'from', 'to', 'off_blocks_utc', 'on_blocks_utc'].every(n => h.includes(n))) return null;
+      const at = (n) => { const i = h.indexOf(n); return i < 0 ? null : i; };
+      return { date: at('date'), reg: at('reg'), ac: at('type'), kind: at('flight_type'), pic: at('pic'), customer: at('customer'), instructor: at('instructor'), dep: at('from'), arr: at('to'),
+        off: at('off_blocks_utc'), takeoff: at('takeoff_utc'), landing: at('landing_utc'), on: at('on_blocks_utc'), block: at('total_block'), air: at('total_airborne'), ldg: at('takeoffs_landings') };
+    },
+    // A row per flight (the UTC times), crew "[PIC - C Sarel][Customer - J Lilley][Instructor - ..]", "[Block: 00:54] [Flight: 00:39] [Landing Day/Night: 1]
+    // [Flight type: PPL]"
+    rows(data, cols, { dateOf }) {
+      const out = [];
+      const hm = (t) => (/^\d{1,2}:\d{2}$/.test(t) && /[1-9]/.test(t) ? t.padStart(5, '0') : '');
+      for (const row of data) {
+        const c = (k) => cellOf(row, cols[k]);
+        const d = dateOf(c('date').text);
+        if (!d || !AIRPORT_ICAO_OR_IATA.test(c('dep').text)) continue;
+        const off = c('off').text, on = c('on').text;
+        out.push({
+          ...d, registration: c('reg').text, ac: c('ac').text, dep: c('dep').text, arr: c('arr').text,
+          begin: timeOf(off, 'Z'), end: on ? timeOf(on, 'Z', on < off) : '', takeoff: timeOf(c('takeoff').text, 'Z'), landing: timeOf(c('landing').text, 'Z'),
+          crew: [['PIC', 'pic'], ['Customer', 'customer'], ['Instructor', 'instructor']].filter(([, k]) => c(k).text).map(([n, k]) => `[${n} - ${c(k).text}]`).join(''),
+          info: [hm(c('block').text) && `[Block: ${hm(c('block').text)}]`, hm(c('air').text) && `[Flight: ${hm(c('air').text)}]`, counted(c('ldg')) && `[Landing Day/Night: ${+c('ldg').text}]`,
+            c('kind').text && `[Flight type: ${c('kind').text}]`].filter(Boolean).join(' '),
+          _marks: [['date', c('date')], ['registration', c('reg')], ['ac', c('ac')], ['dep', c('dep')], ['arr', c('arr')], ['begin', c('off')], ['end', c('on')], ['takeoff', c('takeoff')], ['landing', c('landing')],
+            ['crew', c('pic')], ['crew', c('customer')], ['crew', c('instructor')], ['info', c('block')], ['info', c('air')], ['info', c('ldg')], ['info', c('kind')]],
+        });
+      }
+      return out;
+    },
+  },
+  {
+    name: 'activity-lines',
+    // SAS crew schedule export: Day | Date "01AUG2025" | Duty "IL" | Meal | Activity (checkin, a flight, NightStop, transport, checkout, F) |
+    // C/I | From | STD | STA | To | C/O | Stop time
+    find(h) {
+      if (!['Day', 'Date', 'Duty', 'Meal', 'Activity', 'From', 'STD', 'STA', 'To', 'Stop time'].every(n => h.includes(n))) return null;
+      const at = (n) => { const i = h.indexOf(n); return i < 0 ? null : i; };
+      return { date: at('Date'), duty: at('Duty'), meal: at('Meal'), act: at('Activity'), dep: at('From'), std: at('STD'), sta: at('STA'), arr: at('To'), stop: at('Stop time') };
+    },
+    // checkin -> C/I (at its STD), checkout -> C/O, a flight with its airports (local times, "+1" when STA is earlier), "[Duty: IL] [Meal: V]";
+    // NightStop -> a hotel row at the last arrival; others (F, transport) a row with their times
+    rows(data, cols, { dateOf }) {
+      const out = [];
+      let lastArr = '', nextDep = '';
+      const flightRe = /^[A-Z0-9]{2}\d{1,4}[A-Z]?$/;
+      // a C/I's station: the next flight's departure
+      const deps = data.map((row) => cellOf(row, cols.act).text).map((t, i) => (flightRe.test(t) ? cellOf(data[i], cols.dep).text : ''));
+      for (const [i, row] of data.entries()) {
+        const c = (k) => cellOf(row, cols[k]);
+        const d = dateOf(c('date').text) || ddMonYy(c('date').text);
+        if (!d || !c('act').text) continue;
+        const act = c('act').text, std = c('std').text, sta = c('sta').text;
+        nextDep = deps.slice(i).find(Boolean) || '';
+        if (/^checkin$/i.test(act)) { out.push({ ...d, duty: 'C/I', dep: nextDep, begin: timeOf(std, 'L'), _marks: [['date', c('date')], ['ci', c('std')]] }); continue; }
+        if (/^checkout$/i.test(act)) { out.push({ ...d, duty: 'C/O', arr: lastArr, end: timeOf(sta, 'L'), _marks: [['co', c('sta')]] }); continue; }
+        if (flightRe.test(act)) {
+          lastArr = c('arr').text;
+          out.push({
+            ...d, duty: act, dep: c('dep').text, arr: c('arr').text, begin: timeOf(std, 'L'), end: timeOf(sta, 'L', sta < std),
+            info: [c('duty').text && `[Duty: ${c('duty').text}]`, c('meal').text && `[Meal: ${c('meal').text}]`].filter(Boolean).join(' '),
+            _marks: [['date', c('date')], ['duty', c('act')], ['dep', c('dep')], ['arr', c('arr')], ['begin', c('std')], ['end', c('sta')], ['info', c('duty')], ['info', c('meal')]],
+          });
+          continue;
+        }
+        out.push({ ...d, duty: /^NightStop$/i.test(act) ? 'H' : act, dep: /^NightStop$/i.test(act) ? lastArr : '', begin: timeOf(std, 'L'), end: timeOf(sta, 'L', sta < std),
+          _marks: [['date', c('date')], ['duty', c('act')], ['begin', c('std')], ['end', c('sta')]] });
+      }
+      return out;
+    },
+  },
+  {
+    name: 'dhd-flights',
+    // Southwest pilot's flights (below "TotalBlockhrsmins" / TAFB gauge values): DATE "2022-02-05" | Flight "WN5695" | dhd "DH" | From | Depart "1411" |
+    // To | Arrive | Block "213" | Tail_Number | A_C_Type | (TakeOff | Landing) | CoPilot "FO BROCK TRAVIS *INTL* [124921]" / "Deadheading"
+    find(h) {
+      if (!['DATE', 'Flight', 'dhd', 'From', 'Depart', 'To', 'Arrive', 'Block'].every(n => h.includes(n))) return null;
+      const at = (n) => { const i = h.indexOf(n); return i < 0 ? null : i; };
+      return { date: at('DATE'), flight: at('Flight'), dhd: at('dhd'), dep: at('From'), std: at('Depart'), arr: at('To'), sta: at('Arrive'), block: at('Block'), reg: at('Tail_Number'),
+        ac: at('A_C_Type'), to: at('TakeOff'), ld: at('Landing'), copilot: at('CoPilot') };
+    },
+    // A row per flight (local times; "+1" when it arrives earlier than it left), "DH" -> dc DH, "[Block: 02:13]", the other pilot
+    // "[FO - 124921 - BROCK TRAVIS]", take-offs / landings "[Takeoff Day/Night: 1]"
+    rows(data, cols) {
+      const out = [];
+      for (const row of data) {
+        const c = (k) => cellOf(row, cols[k]);
+        const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(c('date').text);
+        if (!m || !AIRPORT_ICAO_OR_IATA.test(c('dep').text)) continue;
+        const std = c('std').text, sta = c('sta').text;
+        const b = /^\d{1,4}$/.test(c('block').text) && +c('block').text > 0 ? c('block').text.padStart(4, '0') : '';
+        const cp = /^([A-Z]{2,3}) (.+?)(?: \*\w+\*)?(?: \[(\d+)\])?$/.exec(c('copilot').text);
+        out.push({
+          ...dayOf(+m[3], +m[2] - 1, +m[1]), duty: c('flight').text, dc: /^DH/i.test(c('dhd').text) ? 'DH' : '', registration: c('reg').text, ac: c('ac').text, dep: c('dep').text, arr: c('arr').text,
+          begin: timeOf(std, 'L'), end: timeOf(sta, 'L', +sta.replace(':', '') < +std.replace(':', '')), // ("913", "9:13", "1046")
+          crew: cp && !/^Deadheading$/i.test(c('copilot').text) ? `[${cp[1]} - ${cp[3] ? `${cp[3]} - ` : ''}${cp[2]}]` : '',
+          info: [b && `[Block: ${b.slice(0, 2)}:${b.slice(2)}]`, counted(c('to')) && `[Takeoff Day/Night: ${+c('to').text}]`, counted(c('ld')) && `[Landing Day/Night: ${+c('ld').text}]`].filter(Boolean).join(' '),
+          _marks: [['date', c('date')], ['duty', c('flight')], ['registration', c('reg')], ['ac', c('ac')], ['dep', c('dep')], ['arr', c('arr')], ['begin', c('std')], ['end', c('sta')],
+            ['crew', cp ? c('copilot') : null], ['info', b ? c('block') : null], ...countMarks(c('to'), c('ld'))],
+        });
+      }
+      return out;
+    },
+  },
+  {
+    name: 'stamp-logbook',
+    // pilot logbook export: date_of_flight | call_sign | departure_airport | off_block "22/05/2015 06:22" | take_off | destination_airport | landing |
+    // on_block | aircraft_manufacturer | aircraft_model | aircraft_registration | ... | airtime | block_time | ... | night_landing | capt_on_flight |
+    // ... | role_on_flight | ...
+    find(h) {
+      if (!['date_of_flight', 'call_sign', 'departure_airport', 'off_block', 'destination_airport', 'on_block'].every(n => h.includes(n))) return null;
+      const at = (n) => { const i = h.indexOf(n); return i < 0 ? null : i; };
+      return { date: at('date_of_flight'), flight: at('call_sign'), dep: at('departure_airport'), off: at('off_block'), takeoff: at('take_off'), arr: at('destination_airport'), landing: at('landing'),
+        on: at('on_block'), ac: at('aircraft_model'), reg: at('aircraft_registration'), air: at('airtime'), block: at('block_time'), capt: at('capt_on_flight'), role: at('role_on_flight') };
+    },
+    // A row per flight (times from the stamps, taken as UTC; "+1" on a later date), "[Block: 02:48] [Flight: 02:36] [Role: Psv]", the captain "[CP - Paul BOWE]"
+    rows(data, cols, { dateOf }) {
+      const out = [];
+      const st = (t) => /^(\S+) (\d{1,2}:\d{2})$/.exec(t);
+      const hm = (t) => (/^\d{1,3}:\d{2}$/.test(t) && /[1-9]/.test(t) ? t.padStart(5, '0') : '');
+      for (const row of data) {
+        const c = (k) => cellOf(row, cols[k]);
+        const d = dateOf(c('date').text);
+        if (!d || !AIRPORT_ICAO_OR_IATA.test(c('dep').text)) continue;
+        const [off, tk, ld, on] = ['off', 'takeoff', 'landing', 'on'].map(k => st(c(k).text));
+        const later = (s) => { const x = s && dateOf(s[1]); return !!(x && x.ymd > d.ymd); };
+        out.push({
+          ...d, duty: c('flight').text, registration: c('reg').text, ac: c('ac').text, dep: c('dep').text, arr: c('arr').text,
+          begin: off ? timeOf(off[2], 'Z') : '', takeoff: tk ? timeOf(tk[2], 'Z', later(tk)) : '', landing: ld ? timeOf(ld[2], 'Z', later(ld)) : '', end: on ? timeOf(on[2], 'Z', later(on)) : '',
+          crew: c('capt').text ? `[CP - ${c('capt').text}]` : '',
+          info: [hm(c('block').text) && `[Block: ${hm(c('block').text)}]`, hm(c('air').text) && `[Flight: ${hm(c('air').text)}]`, c('role').text && `[Role: ${c('role').text}]`].filter(Boolean).join(' '),
+          _marks: [['date', c('date')], ['duty', c('flight')], ['registration', c('reg')], ['ac', c('ac')], ['dep', c('dep')], ['arr', c('arr')], ['begin', c('off')], ['takeoff', c('takeoff')],
+            ['landing', c('landing')], ['end', c('on')], ['crew', c('capt')], ['info', c('block')], ['info', c('air')], ['info', c('role')]],
+        });
+      }
+      return out;
+    },
+  },
+  {
+    name: 'block-time-report',
+    // crew block time report: "Actual Out" | "Actual In" | Orig | Dest | Crew Count | Block Time minutes tenth ("12+33") | ...; the crew member's
+    // name line ("Alexander, Aisha J. - 70722") above the legs; stamps "01/01/2022 22:21" (UTC)
+    find(h) {
+      if (!['Actual Out', 'Actual In', 'Orig', 'Dest'].every(n => h.includes(n))) return null;
+      const at = (n) => { const i = h.findIndex(t => t === n || t.startsWith(`${n} `)); return i < 0 ? null : i; };
+      return { date: at('Actual Out'), in: at('Actual In'), dep: at('Orig'), arr: at('Dest'), crewCount: at('Crew Count'), block: at('Block Time') };
+    },
+    rows(data, cols, { dateOf }) {
+      const out = [];
+      for (const row of data) {
+        const c = (k) => cellOf(row, cols[k]);
+        const s = /^(\S+) (\d{2}:\d{2})$/.exec(c('date').text), e = /^(\S+) (\d{2}:\d{2})$/.exec(c('in').text);
+        const d = s && dateOf(s[1]);
+        if (!d || !AIRPORT_ICAO_OR_IATA.test(c('dep').text)) continue;
+        const ed = e && dateOf(e[1]);
+        const bm = /^(\d+)\+(\d{2})$/.exec(c('block').text);
+        out.push({
+          ...d, dc: c('crewCount').text === 'DHD' ? 'DH' : '', dep: c('dep').text, arr: c('arr').text, begin: timeOf(s[2], 'Z'), end: e ? timeOf(e[2], 'Z', ed && ed.ymd > d.ymd) : '',
+          info: [bm && `[Block: ${bm[1].padStart(2, '0')}:${bm[2]}]`, /^\d+$/.test(c('crewCount').text) && `[Crew: ${c('crewCount').text}]`].filter(Boolean).join(' '),
+          _marks: [['date', c('date')], ['dep', c('dep')], ['arr', c('arr')], ['end', c('in')], ['info', c('block')], ['info', c('crewCount')]],
+        });
+      }
+      return out;
+    },
+  },
+  {
+    name: 'outlook-calendar',
+    // Iberia roster exported from Outlook (Spanish): Asunto | Fecha de comienzo | Comienzo | Fecha de finalización | Finalización |
+    // Todo el día | ... | Description (the crew, a line each). Subjects:
+    //   "Firma 14:30 Pairing 1589"            sign-on -> C/I at 14:30 (calendar time, local), "[Pairing: 1589]", dep of the next flight
+    //   "IB721  MAD1345-LHR1615 / 350 +O"     a flight, times in UTC; "/ 350" the aircraft; a mark after it ("+O", "H+") -> "[+O]"
+    //   "X - DIA LIBRE", "IM - IMAGINARIA"    a code and its meaning -> duty X "[X: DIA LIBRE]"; all day ("Todo el día" Verdadero):
+    //                                         a row per day from start to end date, else with the calendar's (local) times
+    // Crew "CT->I3 113794 ROSARIO SANCHEZ-SIMON , JAVIER VICENTE" -> "[CT - 113794 - ROSARIO SANCHEZ-SIMON, JAVIER VICENTE]".
+    find(h) {
+      const at = (re) => { const i = h.findIndex(t => re.test(t)); return i < 0 ? null : i; };
+      const cols = {
+        subject: at(/^(Asunto|Subject)$/), startDate: at(/^(Fecha de comienzo|Start Date)$/), start: at(/^(Comienzo|Start Time)$/),
+        endDate: at(/^(Fecha de finalizaci.n|End Date)$/), end: at(/^(Finalizaci.n|End Time)$/), allDay: at(/^(Todo el d.a|All day event)$/),
+      };
+      return Object.values(cols).every(v => v != null) ? cols : null;
+    },
+    rows(data, cols) {
+      const out = [];
+      const ddmmyyyy = (t) => { const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(t); return m ? dayOf(+m[1], +m[2] - 1, +m[3]) : null; };
+      const hhmm = (t) => { const m = /^(\d{2})(\d{2})$/.exec(t); return m ? `${m[1]}:${m[2]}` : null; };
+      let ci = null;
+      for (const row of data) {
+        const c = (k) => cellOf(row, cols[k]);
+        const subj = c('subject').text;
+        const it = c('subject').items[0];
+        // a part of the subject (regex group n, matched with the d flag), for the trace
+        const part = (m, n) => ({ items: it && m.indices[n] ? [{ ...it, text: m[n], _src: it._src || it, _off: (it._off || 0) + m.indices[n][0] }] : [] });
+        const d = ddmmyyyy(c('startDate').text);
+        if (!subj || !d) continue;
+        // the crew: lines of the other cells ("TECNICOS" / "TCP" titles, "---" rules left out)
+        const crewItems = row.slice(cols.allDay + 1).flat().filter(it => /^\S+\s+\d{5,6}\s+.+,/.test(it?.text || ''));
+        const crew = crewItems.map(it => {
+          const m = /^(\S+?)(?:->\S+)?\s+(\d{5,6})\s+(.+?)\s*,\s*(.+?)\s*$/.exec(it.text);
+          return m ? `[${m[1]} - ${m[2]} - ${m[3]}, ${m[4]}]` : '';
+        }).join('');
+        let m;
+        if ((m = /^Firma\s+(\d{2}:\d{2})(?:\s+Pairing\s+(\S+))?/d.exec(subj))) {
+          ci = { ...d, duty: 'C/I', begin: timeOf(m[1], 'L'), info: m[2] ? `[Pairing: ${m[2]}]` : '', _marks: [['date', c('startDate')], ['ci', part(m, 1)], ['info', m[2] ? part(m, 2) : null]] };
+          out.push(ci);
+          continue;
+        }
+        if ((m = /^([A-Z0-9]{2}\d{1,4}[A-Z]?)\s+([A-Z]{3})(\d{4})-([A-Z]{3})(\d{4})(?:\s*\/\s*(\S+))?(?:\s+(\S+))?\s*$/d.exec(subj))) {
+          const [, flight, dep, t1, arr, t2, ac, flag] = m;
+          if (ci && !ci.dep) ci.dep = dep;
+          ci = null;
+          out.push({
+            ...d, duty: flight, dep, arr, begin: formatTime(hhmm(t1), 'Z'), end: `${formatTime(hhmm(t2), 'Z')}${t2 < t1 ? ' +1' : ''}`, ac: ac || '', crew,
+            info: flag ? `[${flag}]` : '',
+            _marks: [['date', c('startDate')], ['duty', part(m, 1)], ['dep', part(m, 2)], ['begin', part(m, 3)], ['arr', part(m, 4)], ['end', part(m, 5)],
+              ['ac', ac ? part(m, 6) : null], ['info', flag ? part(m, 7) : null], ['crew', { items: crewItems }]],
+          });
+          continue;
+        }
+        ci = null;
+        m = /^(\S+?)\s*-\s*(.+?)\s*$/d.exec(subj);
+        const duty = m ? m[1] : subj.trim(), info = m ? `[${m[1]}: ${m[2]}]` : '';
+        const marks = m ? [['duty', part(m, 1)], ['info', part(m, 2)]] : [['duty', c('subject')]];
+        if (/^(Verdadero|True)$/i.test(c('allDay').text)) {
+          const e = ddmmyyyy(c('endDate').text) || d;
+          for (let t = d.ymd; t <= e.ymd; t += 86400000) {
+            const x = new Date(t);
+            out.push({ ...dayOf(x.getUTCDate(), x.getUTCMonth(), x.getUTCFullYear()), duty, info, _marks: t === d.ymd ? [['date', c('startDate')], ...marks] : [] });
+          }
+        } else {
+          const e = ddmmyyyy(c('endDate').text);
+          out.push({
+            ...d, duty, begin: timeOf(c('start').text, 'L'), end: timeOf(c('end').text, 'L', e && e.ymd > d.ymd), crew, info,
+            _marks: [['date', c('startDate')], ...marks, ['begin', c('start')], ['end', c('end')], ['crew', { items: crewItems }]],
+          });
+        }
       }
       return out;
     },

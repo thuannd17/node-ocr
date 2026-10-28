@@ -80,50 +80,57 @@ function rowMismatchCost(pred, exp) {
 /**
  * Align predicted and expected rows using sequence alignment.
  * This avoids catastrophic score drops when one inserted/missed row shifts all indexes.
+ * The rows the two lists start and end with alike are paired as they are, the alignment
+ * (rows normalized once, typed arrays) runs on what lies between: a 10 000-row file read
+ * right takes milliseconds, not the minutes and gigabyte of a full n x m table.
  */
 export function alignRows(predRows = [], expRows = []) {
-  const n = predRows.length;
-  const m = expRows.length;
   const gap = FIELDS.length;
+  const norm = (r) => FIELDS.map(f => normalizeField(f, r?.[f]));
+  const P = predRows.map(norm), E = expRows.map(norm);
+  const cost = (a, b) => { let miss = 0; for (let f = 0; f < gap; f++) if (a[f] !== b[f]) miss++; return miss; };
+  let head = 0;
+  while (head < P.length && head < E.length && cost(P[head], E[head]) === 0) head++;
+  let tail = 0;
+  while (tail < P.length - head && tail < E.length - head && cost(P[P.length - 1 - tail], E[E.length - 1 - tail]) === 0) tail++;
+  const n = P.length - head - tail;
+  const m = E.length - head - tail;
+  const W = m + 1;
 
-  const dp = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
-  const bt = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(''));
+  const dp = new Int32Array((n + 1) * W);
+  const bt = new Uint8Array((n + 1) * W); // 1 diag, 2 up, 3 left
+  for (let i = 1; i <= n; i++) { dp[i * W] = i * gap; bt[i * W] = 2; }
+  for (let j = 1; j <= m; j++) { dp[j] = j * gap; bt[j] = 3; }
 
   for (let i = 1; i <= n; i++) {
-    dp[i][0] = i * gap;
-    bt[i][0] = 'up';
-  }
-  for (let j = 1; j <= m; j++) {
-    dp[0][j] = j * gap;
-    bt[0][j] = 'left';
-  }
-
-  for (let i = 1; i <= n; i++) {
+    const a = P[head + i - 1];
     for (let j = 1; j <= m; j++) {
-      const diag = dp[i - 1][j - 1] + rowMismatchCost(predRows[i - 1], expRows[j - 1]);
-      const up = dp[i - 1][j] + gap;
-      const left = dp[i][j - 1] + gap;
+      const diag = dp[(i - 1) * W + j - 1] + cost(a, E[head + j - 1]);
+      const up = dp[(i - 1) * W + j] + gap;
+      const left = dp[i * W + j - 1] + gap;
       const best = Math.min(diag, up, left);
-      dp[i][j] = best;
-      bt[i][j] = best === diag ? 'diag' : (best === up ? 'up' : 'left');
+      dp[i * W + j] = best;
+      bt[i * W + j] = best === diag ? 1 : (best === up ? 2 : 3);
     }
   }
 
   const aligned = [];
+  for (let k = predRows.length - 1; k >= predRows.length - tail; k--) aligned.push({ pred: predRows[k], exp: expRows[k - predRows.length + expRows.length] });
   let i = n, j = m;
   while (i > 0 || j > 0) {
-    const move = bt[i][j] || (i > 0 ? 'up' : 'left');
-    if (move === 'diag') {
-      aligned.push({ pred: predRows[i - 1], exp: expRows[j - 1], idx: aligned.length });
+    const move = bt[i * W + j] || (i > 0 ? 2 : 3);
+    if (move === 1) {
+      aligned.push({ pred: predRows[head + i - 1], exp: expRows[head + j - 1] });
       i--; j--;
-    } else if (move === 'up') {
-      aligned.push({ pred: predRows[i - 1], exp: null, idx: aligned.length });
+    } else if (move === 2) {
+      aligned.push({ pred: predRows[head + i - 1], exp: null });
       i--;
     } else {
-      aligned.push({ pred: null, exp: expRows[j - 1], idx: aligned.length });
+      aligned.push({ pred: null, exp: expRows[head + j - 1] });
       j--;
     }
   }
+  for (let k = head - 1; k >= 0; k--) aligned.push({ pred: predRows[k], exp: expRows[k] });
   return aligned.reverse().map((r, idx) => ({ ...r, idx }));
 }
 

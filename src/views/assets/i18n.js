@@ -58,6 +58,17 @@
   document.documentElement.lang = lang;
   // Keep the cookie in step with localStorage, so the server answers in the same language.
   document.cookie = `lang=${lang}; path=/; max-age=31536000; SameSite=Lax`;
+  // ... and as a header on this site's fetch() calls too: Firebase Hosting passes no cookie but "__session" to the app
+  if (lang !== 'en' && typeof root.fetch === 'function') {
+    const plainFetch = root.fetch.bind(root);
+    root.fetch = (input, init = {}) => {
+      const url = new URL(typeof input === 'string' || input instanceof URL ? input : input.url, location.href);
+      if (url.origin !== location.origin) return plainFetch(input, init);
+      const headers = new Headers(init.headers || (input instanceof Request ? input.headers : undefined));
+      if (!headers.has('X-UI-Lang')) headers.set('X-UI-Lang', lang);
+      return plainFetch(input, { ...init, headers });
+    };
+  }
   const dict = lang === 'vi' ? root.I18N_VI || {} : null;
   const t = makeT(dict);
 

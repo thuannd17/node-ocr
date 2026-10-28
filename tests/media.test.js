@@ -236,3 +236,42 @@ test('delete duplicates: one copy of each content stays (the labeled one first),
     server.close();
   }
 });
+
+test('benchmark history: a finished run is kept (summary + result), listed newest first, noted, deleted to the trash', async () => {
+  const history = await import('../src/services/benchmark-history.js');
+  const result = (rows) => ({
+    model: { id: '20261015-065446', trainedAt: '2026-10-15T06:54:46Z', files: 9, dir: '/local/path' },
+    overall: { files: 2, rowMatches: rows, rowTotal: 10, rowExact: rows * 10, perField: { date: { matches: 9, total: 10, pct: 90 } } },
+    byType: { pdf: { files: 2, rowMatches: rows, rowTotal: 10, rowExact: rows * 10, perField: {} } },
+    errors: 1, labelsAfterTraining: 0, stopped: false,
+    files: [{ file: 'a.pdf', rowMatches: rows, rowTotal: 10 }, { file: 'b.pdf', error: 'broken' }],
+  });
+  assert.equal(await history.saveRun('model', { ...result(5), stopped: true }), null); // a stopped run is not kept
+  const first = await history.saveRun('model', result(5));
+  await new Promise(r => setTimeout(r, 1100)); // ids sort by the second
+  const second = await history.saveRun('model', result(7));
+  assert.match(first, /^\d{8}-\d{6}-[0-9a-f]{4}$/);
+
+  const runs = await history.listRuns('model');
+  assert.deepEqual(runs.map(r => r.id), [second, first]);
+  assert.deepEqual(runs[0].files, { 'a.pdf': [7, 10], 'b.pdf': null });
+  assert.deepEqual(runs[0].types, ['pdf']);
+  assert.equal(runs[0].overall.rowExact, 70);
+  assert.equal(runs[0].model.dir, undefined);
+
+  const { summary, result: full } = await history.getRun('model', first);
+  assert.equal(summary.id, first);
+  assert.equal(full.files.length, 2);
+  assert.equal(full.model.dir, undefined); // no local paths kept
+
+  assert.equal((await history.setNote('model', first, '  after the parser fix  ')).note, 'after the parser fix');
+  assert.equal((await history.listRuns('model')).find(r => r.id === first).note, 'after the parser fix');
+
+  await history.deleteRun('model', first);
+  assert.deepEqual((await history.listRuns('model')).map(r => r.id), [second]);
+  const day = new Date().toISOString().slice(0, 10);
+  assert.ok(fs.existsSync(path.join(tmp, 'store', 'trash', day, 'benchmarks', 'model', first, 'summary.json')));
+  await assert.rejects(history.getRun('model', first), { status: 404 });
+  await assert.rejects(history.listRuns('nope'), { status: 404 });
+  await assert.rejects(history.getRun('model', '../x'), { status: 404 });
+});

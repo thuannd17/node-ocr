@@ -16,6 +16,9 @@ import { readAcarsPicture } from './acars-read.js';
 import { compareAcars, ACARS_FIELDS } from './acars.js';
 import { modelInfo } from './pdf-ai-extract.js';
 import { saveBenchmark, syncModels } from './ai-models.js';
+import { saveRun } from './benchmark-history.js';
+import { ocrDevice } from './paddle-ocr.js';
+import { eachInPool, benchmarkConcurrency } from '../utils/pool.js';
 import { listReviewedLabels, dataFile, labelFile, ACARS_DATA_ROOT, ACARS_LABELS_ROOT } from '../utils/data-files.js';
 
 const pct = (m, t) => (t ? Math.round((1000 * m) / t) / 10 : null);
@@ -55,9 +58,7 @@ export async function runAcarsBenchmark({ onEvent, shouldStop } = {}) {
   const trainedAt = info.trainedAt ? Date.parse(info.trainedAt) : null;
   const todo = labeledAcars();
   onEvent?.({ type: 'start', total: todo.length, model: info });
-  const files = [];
-  for (const [i, name] of todo.entries()) {
-    if (shouldStop?.()) break;
+  const files = await eachInPool(todo, benchmarkConcurrency(), async (name) => {
     const t0 = Date.now();
     const lp = labelFile(ACARS_LABELS_ROOT, name);
     const entry = { kind: 'acars', file: name, afterTraining: trainedAt != null && fs.statSync(lp).mtimeMs > trainedAt };
@@ -71,9 +72,8 @@ export async function runAcarsBenchmark({ onEvent, shouldStop } = {}) {
       entry.error = e.message;
     }
     entry.ms = Date.now() - t0;
-    files.push(entry);
-    onEvent?.({ type: 'file', file: entry, progress: { current: i + 1, total: todo.length } });
-  }
+    return entry;
+  }, { shouldStop, onDone: (entry, done) => onEvent?.({ type: 'file', file: entry, progress: { current: done, total: todo.length } }) });
   const result = { model: info, ...summarize(files), errors: files.filter(f => f.error).length, files };
   result.stopped = files.length < todo.length;
   result.labelsAfterTraining = files.filter(f => f.afterTraining).length;
@@ -83,6 +83,8 @@ export async function runAcarsBenchmark({ onEvent, shouldStop } = {}) {
       acars: { pictures: result.pictures, allRight: result.allRight, fieldMatches: result.fieldMatches, fieldTotal: result.fieldTotal, fieldPct: result.fieldPct },
     });
   }
+  result.ocrDevice = await ocrDevice(); // GPU or CPU (shown on /benchmark and in the history)
+  result.historyId = await saveRun('acars', result); // /benchmark history (null: stopped part way)
   onEvent?.({ type: 'done', result });
   return result;
 }

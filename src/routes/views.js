@@ -43,6 +43,32 @@ router.get('/acars', (req, res) => {
 	res.sendFile(path.join(viewsDir, 'acars.html'));
 });
 
+// Sign-in for the admin pages (Firebase: routes/auth-api.js); ?next= the admin page to go back to
+router.get('/login', (req, res) => {
+	res.sendFile(path.join(viewsDir, 'login.html'));
+});
+// An account for the API (Google, GitHub or email + password), then its keys and usage on /account
+router.get('/signup', (req, res) => {
+	res.sendFile(path.join(viewsDir, 'signup.html'));
+});
+router.get('/account', (req, res) => {
+	res.sendFile(path.join(viewsDir, 'account.html'));
+});
+// Admin: every account, its role, plan, limits, keys and today's calls (routes/account-api.js)
+router.get('/users', (req, res) => {
+	res.sendFile(path.join(viewsDir, 'users.html'));
+});
+// The plans and their prices, bought with PayPal (routes/billing-api.js); an invoice to print; admin: every payment
+router.get('/pricing', (req, res) => {
+	res.sendFile(path.join(viewsDir, 'pricing.html'));
+});
+router.get('/invoice', (req, res) => {
+	res.sendFile(path.join(viewsDir, 'invoice.html'));
+});
+router.get('/billing', (req, res) => {
+	res.sendFile(path.join(viewsDir, 'billing.html'));
+});
+
 router.get('/label', (req, res) => {
 	res.sendFile(path.join(viewsDir, 'label.html'));
 });

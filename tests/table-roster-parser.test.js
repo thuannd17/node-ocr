@@ -315,3 +315,218 @@ test('Spanish pilot logbook: "01.18" times as 01:18, UTC, landings by day / nigh
     ['26 Feb 25', 'SIM-1192', '', '', '', '', '', '', '', '[Sim: 06:00]'],
   ]);
 });
+
+test('Outlook calendar export (Iberia, Spanish): "Firma" as C/I with pairing, flights from the subject in UTC with aircraft and mark, crew from the description, all-day codes a row per day', async () => {
+  const head = ['Asunto', 'Fecha de comienzo', 'Comienzo', 'Fecha de finalización', 'Finalización', 'Todo el día', 'Reminder on/off', 'Description', 'Location'];
+  const r = await parseCsv([head,
+    ['X - DIA LIBRE', '06/09/2025', '00:01', '07/09/2025', '23:59', 'Verdadero', 'Falso', '', ''],
+    ['Firma 14:30 Pairing 1589', '09/09/2025', '14:30', '09/09/2025', '15:45', 'Falso', 'Falso', '', ''],
+    ['IB721  AAA1345-BBB1615 / 350 +O', '09/09/2025', '15:45', '09/09/2025', '18:15', 'Falso', 'Verdadero',
+      'TECNICOS\n--------\nCT->I3 113794 DOE SMITH         , JOHN\nTCP\n---\nSC   291874 ROE                 ,ANN\n---', ''],
+    ['IB212  BBB2050-AAA0405 / 359', '13/09/2025', '22:50', '14/09/2025', '06:05', 'Falso', 'Falso', '', ''],
+    ['I4 - INSTRUCTOR / equipo: MZ3', '16/09/2025', '16:00', '16/09/2025', '17:30', 'Falso', 'Falso', '', ''],
+  ]);
+  assert.equal(r.format, 'table-outlook-calendar');
+  assert.deepEqual(r.published.map(x => [x.date, x.duty, x.dep, x.begin, x.end, x.arr, x.ac, x.crew, x.info]), [
+    ['6 Sep 25', 'X', '', '', '', '', '', '', '[X: DIA LIBRE]'],
+    ['7 Sep 25', 'X', '', '', '', '', '', '', '[X: DIA LIBRE]'],
+    ['9 Sep 25', 'C/I', 'AAA', '14:30 L', '', '', '', '', '[Pairing: 1589]'],
+    ['9 Sep 25', 'IB721', 'AAA', '13:45 Z', '16:15 Z', 'BBB', '350', '[CT - 113794 - DOE SMITH, JOHN][SC - 291874 - ROE, ANN]', '[+O]'],
+    ['13 Sep 25', 'IB212', 'BBB', '20:50 Z', '04:05 Z +1', 'AAA', '359', '', ''],
+    ['16 Sep 25', 'I4', '', '16:00 L', '17:30 L', '', '', '', '[I4: INSTRUCTOR / equipo: MZ3]'],
+  ]);
+});
+
+test('a CSV whose lines were quoted twice is unwrapped; blocks logbook (Blocks Off/On Actual, "1h55" durations, crew names)', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'roster-table-test-'));
+  const file = path.join(dir, 'log.csv');
+  try {
+    const head = ['Crew', 'Blocks Off Actual', 'AF_DEP', 'AF_ARR', 'Blocks On Actual', 'Flight #', 'AC_REG', 'AC_MODEL', 'Takeoffs Day', 'Landings Day', 'TIME_TOTAL', 'Flight Time Actual', 'PIC Time'];
+    const vals = ['06.07.2024 23:05', 'LFPB', 'LEMH', '07.07.2024 01:00', 'JFA06A', 'LX-PCI', 'PC24', '1', '1', '1h55', "48'", '1h55'];
+    // each line quoted once more by a second CSV writer; the export left the first field (with its comma) unquoted
+    const wrap = (inner) => `"${inner.replace(/"/g, '""')}"`;
+    fs.writeFileSync(file, [
+      wrap(head.map(h => `"${h}"`).join(',').replace(/^"Crew"/, 'Crew')),
+      wrap(`Ann Doe, Bob Roe ,${vals.map(v => `"${v}"`).join(',')}`),
+    ].join('\r\n'));
+    const r = parseNetlinePdf(await readPdfText(file));
+    assert.equal(r.format, 'table-blocks-logbook');
+    assert.deepEqual(r.published.map(x => [x.date, x.duty, x.registration, x.dep, x.begin, x.end, x.arr, x.ac, x.crew, x.info]), [
+      ['6 Jul 24', 'JFA06A', 'LX-PCI', 'LFPB', '23:05 Z', '01:00 Z +1', 'LEMH', 'PC24', '[Crew - Ann Doe][Crew - Bob Roe]', '[Block: 01:55] [Flight: 00:48] [Takeoff Day: 1] [Landing Day: 1] [PIC: 01:55]'],
+    ]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('FTL duty legs: Start Duty / Check-Out as C/I / C/O with the duty totals, a leg "EGLK - EGAE" with off / take-off / landing / on, a code', async () => {
+  const head = ['&nbsp;', 'Date', 'AC', 'Funct.', 'Duty', 'Start Duty', 'Off-Block', 'Take Off', 'Ldg', 'On-Block', 'Check-Out', 'Reason', 'Break time', 'Sct', 'Flight Time', 'Block Time (DP)',
+    'Flight Duty Period (act)', 'Duty Period (DP)'];
+  const r = await parseCsv([head,
+    ['', '11/10/2019', 'G-FFFC', 'SIC', 'EGLK - EGAE', '14:10', '14:40', '14:49', '16:15', '16:20', '22:20', 'Rest', '', '1', '1:26', '1:40', '7:55', '8:10'],
+    ['', '27/10/2019', '', '', 'OFF', '0:00', '', '', '', '', '23:59', 'Rest'],
+  ]);
+  assert.equal(r.format, 'table-duty-legs');
+  assert.deepEqual(r.published.map(x => [x.date, x.duty, x.registration, x.dep, x.begin, x.takeoff, x.landing, x.end, x.arr, x.info]), [
+    ['11 Oct 19', 'C/I', '', 'EGLK', '14:10 Z', '', '', '', '', ''],
+    ['11 Oct 19', '', 'G-FFFC', 'EGLK', '14:40 Z', '14:49 Z', '16:15 Z', '16:20 Z', 'EGAE', ''],
+    ['11 Oct 19', 'C/O', '', '', '', '', '', '22:20 Z', 'EGAE', '[Flight: 01:26] [Block: 01:40] [FDP: 07:55] [Duty: 08:10]'],
+    ['27 Oct 19', 'OFF', '', '', '00:00 Z', '', '', '23:59 Z', '', ''],
+  ]);
+});
+
+test('duty sectors list: Duty Start / Duty End as C/I / C/O (local, "+1"), legs AAA-BBB with local times, a code with its times, day codes', async () => {
+  const r = await parseCsv([['Generated 20/05/20 10:26 - X'], ['Duty Start', 'Flt/GD', 'SD', 'Sector', 'A/C', 'Dep', 'Arr', 'Duty End', 'GMT'],
+    ['01/06/2020', 'DO'],
+    ['05/06/2020 1100L', 'Z1204', 'CH', '', '', '', '', '05/06/2020 1630L'],
+    ['06/06/2020 1800L', 'LD680', '', 'AAA-BBB', 'ABY', '1900L', '2050L'],
+    ['', 'LD681', '', 'BBB-AAA', 'ABY', '2215L', '0005L', '07/06/2020 0020L'],
+  ]);
+  assert.equal(r.format, 'table-duty-sectors');
+  assert.deepEqual(r.published.map(x => [x.date, x.duty, x.dep, x.begin, x.end, x.arr, x.ac, x.info]), [
+    ['1 Jun 20', 'DO', '', '', '', '', '', ''],
+    ['5 Jun 20', 'Z1204', '', '11:00 L', '16:30 L', '', '', '[SD: CH]'],
+    ['6 Jun 20', 'C/I', 'AAA', '18:00 L', '', '', '', ''],
+    ['6 Jun 20', 'LD680', 'AAA', '19:00 L', '20:50 L', 'BBB', 'ABY', ''],
+    ['6 Jun 20', 'LD681', 'BBB', '22:15 L', '00:05 L +1', 'AAA', 'ABY', ''],
+    ['6 Jun 20', 'C/O', '', '', '00:20 L +1', 'AAA', '', ''],
+  ]);
+});
+
+test('logbook exports: Aircraft ID / Out / In with PIC and SIC; Start UTC / End UTC with "11h16"; FAR logbook with decimal hours and Paired With', async () => {
+  const a = await parseCsv([['Date', 'Aircraft ID', 'Aircraft Type', 'Out', 'In', 'PIC/P1 Crew', 'SIC/P2 Crew', 'Total Time', 'Remarks', 'Flight #', 'From', 'To', 'Total Pax'],
+    ['5/22/2026', 'N132AN', 'A321', '23:42', '07:30', 'Crews, Stephen', 'Reece, Timothy', '4.80', '', '3318', 'LAS', 'MIA', '188']]);
+  assert.equal(a.format, 'table-aircraft-id-logbook');
+  assert.deepEqual(a.published.map(x => [x.date, x.duty, x.registration, x.dep, x.begin, x.end, x.arr, x.ac, x.crew, x.info]), [
+    ['22 May 26', '3318', 'N132AN', 'LAS', '23:42 Z', '07:30 Z +1', 'MIA', 'A321', '[PIC - Crews, Stephen][SIC - Reece, Timothy]', '[Total Time: 4.80] [Pax: 188]'],
+  ]);
+  const u = await parseCsv([['Start UTC', 'From', 'End UTC', 'To', 'Flight time', 'SIMU ins', 'SIMU trg', 'Type', 'Function', 'Aircraft'],
+    ['16/08/2024 14:39', 'LFPO', '17/08/2024 01:54', 'FMEE', '11h15', '', '', 'Flight', 'CC', 'FHMIX A35K']]);
+  assert.equal(u.format, 'table-utc-legs');
+  assert.deepEqual(u.published.map(x => [x.date, x.registration, x.dep, x.begin, x.end, x.arr, x.ac, x.info]), [
+    ['16 Aug 24', 'FHMIX', 'LFPO', '14:39 Z', '01:54 Z +1', 'FMEE', 'A35K', '[Flight: 11:15] [Function: CC]'],
+  ]);
+  const f = await parseCsv([['Name', 'Date', 'Typename', 'Tail', 'From', 'To', 'Blk Hrs', 'FAR 91', 'FAR 91k', 'FAR 135', 'PIC', 'SIC', 'NFC', 'Day T/O', 'Day Ldg', 'Night T/O', 'Night Ldg', 'Night Hrs', 'IFR Hrs', 'IFR Appr', 'Paired With'],
+    ['Ann Doe', '2022-11-14 17:48:00.0 Z', 'CE-560XLS', 'CSDXV', 'LEIB', 'LPPT', '1.7', '0', '0', '0', '0', '1.7', '0', '0', '0', '1', '1', '1.6', '1.6', '1', 'Roe, Bob PIC']]);
+  assert.equal(f.format, 'table-far-logbook');
+  assert.deepEqual(f.published.map(x => [x.date, x.registration, x.dep, x.begin, x.arr, x.ac, x.crew, x.info]), [
+    ['14 Nov 22', 'CSDXV', 'LEIB', '17:48 Z', 'LPPT', 'CE-560XLS', '[PIC - Roe, Bob]', '[Block: 1.7] [SIC: 1.7] [Takeoff Night: 1] [Landing Night: 1] [Night: 1.6] [IFR: 1.6]'],
+  ]);
+});
+
+test('"Planning from ... till ...": C/I at a duty\'s first leg, flights with crew / aircraft / pax, C/O from Duty end, positioning VS, hotel; Saudia duty lines with Z / L times', async () => {
+  const p = await parseCsv([['Planning from 01/05/2025 till 31/05/2025'], ['', 'Check-in', 'Start', 'City', 'End', 'Debrief end', 'Duty end', 'City', 'Duty', 'Rest', 'Description', 'Extensions', 'Notes', 'Pax'],
+    ['Thu', '01/05/2025 12:15', '01/05/2025 13:13', 'AAA', '01/05/2025 15:37', '', '', 'BBB', 'AEA1173', '', 'TEC : PM:JULIO CO:ROE', '', 'Aircraft : ECNAB Aircraft type : B738-738', '182'],
+    ['Thu', '01/05/2025 15:55', '01/05/2025 16:49', 'BBB', '01/05/2025 19:11', '', '19:41', 'AAA', 'AEA1174', '', 'TEC : PM:JULIO CO:ROE', '', 'Aircraft : ECNAB Aircraft type : B738-738', '182'],
+    ['Sun', '04/05/2025 08:00', '04/05/2025 09:00', 'AAA', '04/05/2025 11:25', '', '11:25', 'CCC', 'VS', '', '', '', 'FR 2629 PWS13C Transport:Aircraft'],
+    ['Sun', '04/05/2025 15:30', '04/05/2025 15:30', 'CCC', '05/05/2025 09:59', '', '', 'CCC', 'HOTEL', '', 'HOTEL', '', 'HOTEL'],
+  ]);
+  assert.equal(p.format, 'table-planning-checkin');
+  assert.deepEqual(p.published.map(x => [x.date, x.dc, x.duty, x.registration, x.dep, x.begin, x.end, x.arr, x.ac, x.crew, x.info]), [
+    ['1 May 25', '', 'C/I', '', 'AAA', '12:15 Z', '', '', '', '', ''],
+    ['1 May 25', '', 'AEA1173', 'ECNAB', 'AAA', '13:13 Z', '15:37 Z', 'BBB', 'B738', '[PM - JULIO][CO - ROE]', '[Pax: 182]'],
+    ['1 May 25', '', 'AEA1174', 'ECNAB', 'BBB', '16:49 Z', '19:11 Z', 'AAA', 'B738', '[PM - JULIO][CO - ROE]', '[Pax: 182]'],
+    ['1 May 25', '', 'C/O', '', '', '', '19:41 Z', 'AAA', '', '', ''],
+    ['4 May 25', '', 'C/I', '', 'AAA', '08:00 Z', '', '', '', '', ''],
+    ['4 May 25', 'DH', 'VS', '', 'AAA', '09:00 Z', '11:25 Z', 'CCC', '', '', 'FR 2629 PWS13C Transport:Aircraft'],
+    ['4 May 25', '', 'C/O', '', '', '', '11:25 Z', 'CCC', '', '', ''],
+    ['4 May 25', '', 'HT', '', 'CCC', '15:30 Z', '09:59 Z +1', '', '', '', ''],
+  ]);
+  const s = await parseCsv([['STAFF_NUM', 'DUTY_STR_DATE', 'DUTY_CD', 'PRNG_NUM', 'FLT_NUM', 'DEPARURE_PORT', 'ARRIVAL_PORT', 'FLEET_CD', 'TAIL_NUM', 'ACTUAL_START_DATE_GMT', 'ACTUAL_START_TIME_GMT',
+    'ACTUAL_END_DATE_GMT', 'ACTUAL_END_TIME_GMT', 'ACTUAL_START_DATE_LOCAL', 'ACTUAL_START_TIME_LOCAL', 'ACTUAL_END_DATE_LOCAL', 'ACTUAL_END_TIME_LOCAL'],
+    ['1', '17-AUG-17', 'RST', '8770244', 'RST', 'JED', 'JED', '-', '', '17-AUG-17', '13:30', '18-AUG-17', '01:30', '17-AUG-17', '16:30', '18-AUG-17', '04:30'],
+    ['1', '18-AUG-17', 'FLY', '8770244', '1234', 'JED', 'RUH', '321', 'HZ-ASA', '18-AUG-17', '05:00', '18-AUG-17', '06:30', '18-AUG-17', '08:00', '18-AUG-17', '09:30']]);
+  assert.equal(s.format, 'table-saudia-duties');
+  assert.deepEqual(s.published.map(x => [x.date, x.duty, x.dep, x.begin, x.end, x.arr, x.ac, x.registration, x.info]), [
+    ['17 Aug 17', 'RST', 'JED', '13:30 Z / 16:30 L', '01:30 Z +1 / 04:30 L +1', '', '', '', '[Pairing: 8770244]'],
+    ['18 Aug 17', '1234', 'JED', '05:00 Z / 08:00 L', '06:30 Z / 09:30 L', 'RUH', '321', 'HZ-ASA', '[Pairing: 8770244]'],
+  ]);
+});
+
+test('German logbooks (Flugbuch / Vereinsflieger) and a flight-school brakes log: airfield codes, block and flight time, crew, take-off / landing', async () => {
+  const fb = await parseCsv([
+    ['Datum', 'LFZ Typ', 'Kennzeichen', 'von', 'nach', 'Start', 'Landung', 'BlockOff', 'BlockOn', 'Landungen', 'Flugstunden', 'Blockzeit', 'Preiskategorie', 'Schüler', 'Bemerkung'],
+    ['01.09.22', 'C172M', 'D-EXXX', 'EDHE', 'EDHE', '07:57', '08:37', '07:50', '08:40', '1', '00:40', '00:50', '', 'Doe, John', ''],
+  ]);
+  assert.equal(fb.format, 'table-german-logbook');
+  assert.deepEqual(fb.published.map(x => [x.date, x.registration, x.ac, x.dep, x.begin, x.takeoff, x.landing, x.end, x.arr, x.crew, x.info]), [
+    ['1 Sep 22', 'D-EXXX', 'C172M', 'EDHE', '07:50 Z', '07:57 Z', '08:37 Z', '08:40 Z', 'EDHE', '[Student - Doe, John]', '[Block: 00:50] [Flight: 00:40] [Landing Day/Night: 1]'],
+  ]);
+  const vf = await parseCsv([
+    ['Datum', 'Lfz.', 'Startort', 'Landeort', 'Off-Block', 'On-Block', 'Blockzeit in hh:mm', 'Landungen', 'Pilot', 'Begleiter/FI', 'Flugzeit', 'Lfz.-Muster'],
+    ['27/09/2025', 'D-6506', 'Goch-Asperden EDLG', 'Goch-Asperden EDLG', '10:50', '11:14', '00:24', '1', 'Doe, Tim', 'Roe, Alex', '24', 'SZD-54-2'],
+  ]);
+  assert.deepEqual(vf.published.map(x => [vf.format, x.date, x.registration, x.ac, x.dep, x.begin, x.end, x.arr, x.crew, x.info]), [
+    ['table-german-logbook', '27 Sep 25', 'D-6506', 'SZD-54-2', 'EDLG', '10:50 Z', '11:14 Z', 'EDLG', '[Pilot - Doe, Tim][FI - Roe, Alex]', '[Block: 00:24] [Flight: 00:24] [Landing Day/Night: 1]'],
+  ]);
+  const br = await parseCsv([
+    ['Date', 'Aircraft', 'Flight Log', 'From', 'To', 'Brakes Off', 'Take Off', 'Landing', 'Brakes On', 'PIC', 'Student', 'Defects'],
+    ['27/01/2024', 'G-BSCZ', '221849', 'eglk', 'eglk', '12:40:40', '12:48:00', '13:13:00', '13:16:10', 'John Doe', 'Sam Roe', 'NIL'],
+  ]);
+  assert.deepEqual(br.published.map(x => [br.format, x.date, x.registration, x.dep, x.begin, x.takeoff, x.landing, x.end, x.arr, x.crew, x.info]), [
+    ['table-brakes-logbook', '27 Jan 24', 'G-BSCZ', 'EGLK', '12:40 Z', '12:48 Z', '13:13 Z', '13:16 Z', 'EGLK', '[PIC - John Doe][Student - Sam Roe]', ''],
+  ]);
+});
+
+test('pilot exports: legs as pilot flying, UTC legs with the crew, a flight-school log, a logbook with stamps, Southwest flights below gauge values', async () => {
+  const pf = await parseCsv([
+    ['EmployeeID', 'Crew Name', 'Flight Date', 'Flight Number', 'Takeoff (as PF)', 'TO Location', 'Out Time', 'TO Daytime/Nightime', 'Landing (as PF)', 'Ldg Location', 'In Time',
+      'Ldg Daytime/Nightime', 'Flight Hours (Block)', 'Rank', 'Airline', 'Tail Number', 'Airline Registration', 'Aircraft Type', 'Paired Crew Member'],
+    ['1', 'DOE, JOHN', '21-Sep-25', '2931', 'True', 'MUVR', '00:03', 'False', 'True', 'CYUL', '03:46', 'True', '03:43', 'Captain - PIC', 'WS', '379', 'C-GFVE', 'B737 MAX-8', ''],
+  ]);
+  assert.deepEqual(pf.published.map(x => [pf.format, x.date, x.duty, x.registration, x.ac, x.dep, x.begin, x.end, x.arr, x.info]), [
+    ['table-pf-legs', '21 Sep 25', 'WS2931', 'C-GFVE', 'B737 MAX-8', 'MUVR', '00:03 Z', '03:46 Z', 'CYUL', '[Block: 03:43] [Takeoff Day: 1] [Landing Night: 1] [Rank: Captain - PIC]'],
+  ]);
+  const legs = await parseCsv([
+    ['departUTC', 'arriveUTC', 'fltNum', 'origin', 'destination', 'acRegistration', 'acType', 'crew', 'hours'],
+    ['2024-08-25T22:13', '2024-08-26T03:01', '2387', 'CYHM', 'CYVR', 'C-GAZF', '767-300', 'CA: John Doe / FO: Jim Roe', '4.8'],
+  ]);
+  assert.deepEqual(legs.published.map(x => [legs.format, x.date, x.duty, x.dep, x.begin, x.end, x.arr, x.crew, x.info]), [
+    ['table-utc-crew-legs', '25 Aug 24', '2387', 'CYHM', '22:13 Z', '03:01 Z +1', 'CYVR', '[CA - John Doe][FO - Jim Roe]', '[Block: 4.8]'],
+  ]);
+  const school = await parseCsv([
+    ['id', 'date', 'reg', 'type', 'flight_type', 'pic', 'customer', 'instructor', 'from', 'to', 'off_blocks_utc', 'takeoff_utc', 'landing_utc', 'on_blocks_utc', 'total_block', 'total_airborne', 'takeoffs_landings'],
+    ['1', '27/05/2026', 'G-CMKJ', 'PA28-161', 'PPL', 'J Doe', 'A Roe', 'J Doe', 'EGLK', 'EGLK', '16:06', '16:18', '16:57', '17:00', '0:54', '0:39', '1'],
+  ]);
+  assert.deepEqual(school.published.map(x => [school.format, x.date, x.registration, x.ac, x.begin, x.takeoff, x.landing, x.end, x.crew, x.info]), [
+    ['table-school-flights', '27 May 26', 'G-CMKJ', 'PA28-161', '16:06 Z', '16:18 Z', '16:57 Z', '17:00 Z', '[PIC - J Doe][Customer - A Roe][Instructor - J Doe]',
+      '[Block: 00:54] [Flight: 00:39] [Landing Day/Night: 1] [Flight type: PPL]'],
+  ]);
+  const stamps = await parseCsv([
+    ['date_of_flight', 'call_sign', 'departure_airport', 'off_block', 'take_off', 'destination_airport', 'landing', 'on_block', 'aircraft_model', 'aircraft_registration', 'airtime', 'block_time',
+      'capt_on_flight', 'role_on_flight'],
+    ['22/05/2015', 'LS185', 'EGNM', '22/05/2015 06:22', '22/05/2015 06:31', 'LEMG', '22/05/2015 09:07', '22/05/2015 09:10', '737-800', 'GGDFP', '2:36', '2:48', 'Paul DOE', 'FO'],
+  ]);
+  assert.deepEqual(stamps.published.map(x => [stamps.format, x.date, x.duty, x.dep, x.begin, x.takeoff, x.landing, x.end, x.arr, x.crew, x.info]), [
+    ['table-stamp-logbook', '22 May 15', 'LS185', 'EGNM', '06:22 Z', '06:31 Z', '09:07 Z', '09:10 Z', 'LEMG', '[CP - Paul DOE]', '[Block: 02:48] [Flight: 02:36] [Role: FO]'],
+  ]);
+  const wn = await parseCsv([
+    ['TotalBlockhrsmins'], ['80:05'], [],
+    ['DATE', 'Flight', 'dhd', 'From', 'Depart', 'To', 'Arrive', 'Block', 'Tail_Number', 'A_C_Type', 'CoPilot'],
+    ['2022-02-05', 'WN5695', 'DH', 'MCO', '1411', 'DAL', '1658', '0', 'N903WN', '737-73W', 'Deadheading'],
+    ['2022-03-15', 'WN2120', '', 'MCO', '2250', 'BWI', '103', '213', 'N8600F', '737-73H', 'FO DOE JOHN *INTL* [124921]'],
+  ]);
+  assert.deepEqual(wn.published.map(x => [wn.format, x.date, x.dc, x.duty, x.dep, x.begin, x.end, x.arr, x.crew, x.info]), [
+    ['table-dhd-flights', '5 Feb 22', 'DH', 'WN5695', 'MCO', '14:11 L', '16:58 L', 'DAL', '', ''],
+    ['table-dhd-flights', '15 Mar 22', '', 'WN2120', 'MCO', '22:50 L', '01:03 L +1', 'BWI', '[FO - 124921 - DOE JOHN]', '[Block: 02:13]'],
+  ]);
+});
+
+test('SAS activity lines: checkin -> C/I at the next flight\'s station, flights with duty and meal codes, NightStop -> hotel, checkout -> C/O', async () => {
+  const r = await parseCsv([
+    ['Day', 'Date', 'Duty', 'Meal', 'Activity', 'C/I', 'From', 'STD', 'STA', 'To', 'C/O', 'Stop time'],
+    ['Sun', '03AUG2025', '', '', 'checkin', '', '', '15:45', '15:45', '', '', '00:00'],
+    ['Sun', '03AUG2025', 'IL', 'V', 'SK2697', '', 'CPH', '17:00', '19:05', 'VCE', '', '00:50'],
+    ['Sun', '03AUG2025', 'IL', '', 'SK2698', '', 'VCE', '22:55', '00:59', 'CPH', '', '15:41'],
+    ['Mon', '04AUG2025', '', '', 'checkout', '', '', '01:20', '01:20', '', '', '00:00'],
+    ['Mon', '04AUG2025', '', '', 'NightStop', '', '', '01:30', '15:05', '', '', '00:00'],
+  ]);
+  assert.equal(r.format, 'table-activity-lines');
+  assert.deepEqual(r.published.map(x => [x.date, x.duty, x.dep, x.begin, x.end, x.arr, x.info]), [
+    ['3 Aug 25', 'C/I', 'CPH', '15:45 L', '', '', ''],
+    ['3 Aug 25', 'SK2697', 'CPH', '17:00 L', '19:05 L', 'VCE', '[Duty: IL] [Meal: V]'],
+    ['3 Aug 25', 'SK2698', 'VCE', '22:55 L', '00:59 L +1', 'CPH', '[Duty: IL]'],
+    ['4 Aug 25', 'C/O', '', '', '01:20 L', 'CPH', ''],
+    ['4 Aug 25', 'HT', 'CPH', '01:30 L', '15:05 L', '', ''],
+  ]);
+});

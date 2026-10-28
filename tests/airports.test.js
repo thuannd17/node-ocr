@@ -1,3 +1,4 @@
+import './helpers/site-data.js'; // first: airports from tests/fixtures in a temp store
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';

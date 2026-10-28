@@ -91,11 +91,23 @@ function load(file) {
   return { buf, content };
 }
 
+/**
+ * A CSV whose every line was quoted once more ("STAFF_NUM,""FIRST_NAME"",..." — written as one cell by a second CSV
+ * writer): its lines unwrapped. The first field, left unquoted by the export, gets its quotes back when other fields
+ * follow quoted ("Quentin Roland, Marcel CROZET ,""03.07.2024 05:00"",..."), so the comma in it does not split it.
+ */
+function unwrapQuotedLines(text) {
+  const lines = text.split(/\r\n|\r|\n/).filter(l => l.trim());
+  if (lines.length < 2 || !lines.every(l => /^".*"\s*,?\s*$/.test(l) && l.includes('""'))) return text;
+  return lines.map(l => l.trim().replace(/^"/, '').replace(/"\s*,?$/, '').replace(/""/g, '"')
+    .replace(/^([^",][^"]*?)\s*,(?=")/, (m, first) => `"${first.trim()}",`)).join('\n');
+}
+
 /** Sheets as [{ name, rows: [[text]] }]; CSV cells are kept as written (no date guessing). */
 function readSheets(file, { buf, content } = load(file)) {
   // an .xls may also be HTML/XML or tab-separated text from a web export: SheetJS reads those too
   const wb = content === 'text' && extName(file) !== 'xls'
-    ? XLSX.read(decode(buf), { type: 'string', raw: true, dense: true })
+    ? XLSX.read(unwrapQuotedLines(decode(buf)), { type: 'string', raw: true, dense: true })
     : XLSX.read(buf, { type: 'buffer', dense: true, cellNF: true }); // cellNF: keep number formats, to tell dates
   return wb.SheetNames.map((name) => {
     const ws = wb.Sheets[name];

@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pricing</title>
+  <script src="/assets/i18n/vi.js"></script>
+  <script src="/assets/i18n.js"></script>
+  <link rel="stylesheet" href="/assets/app.css">
+  <link rel="stylesheet" href="/assets/fontawesome/css/all.min.css">
+  <style>
+    .switch { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: #fff; margin: 0 auto 22px; }
+    .switch button { font: inherit; font-size: 14px; padding: 8px 16px; border: none; background: none; cursor: pointer; color: var(--muted); }
+    .switch button.on { background: var(--nav-bg); color: #fff; }
+    .switch .save { font-size: 11px; font-weight: 600; color: #2e7d32; margin-left: 6px; }
+    .switch button.on .save { color: #b9f6ca; }
+    .center { text-align: center; }
+    .plans { display: grid; grid-template-columns: repeat(2, minmax(0, 360px)); gap: 20px; justify-content: center; margin-bottom: 28px; }
+    .plan { display: flex; flex-direction: column; margin-bottom: 0; position: relative; }
+    .plan.featured { border: 2px solid var(--primary); }
+    .plan .ribbon { position: absolute; top: -11px; right: 16px; background: var(--primary); color: #fff; font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 10px; }
+    .plan h2 { margin: 0; font-size: 19px; color: var(--nav-bg); }
+    .plan .price { font-size: 34px; font-weight: 700; margin: 10px 0 2px; color: var(--text); }
+    .plan .price small { font-size: 14px; font-weight: 400; color: var(--muted); }
+    .plan .per { font-size: 13px; color: var(--muted); min-height: 18px; }
+    .plan ul { list-style: none; padding: 0; margin: 16px 0 18px; font-size: 14px; line-height: 1.5; flex: 1; }
+    .plan li { display: flex; gap: 8px; margin-bottom: 8px; }
+    .plan li i { color: #2e7d32; margin-top: 3px; }
+    .cta { display: flex; justify-content: center; align-items: center; gap: 8px; width: 100%; padding: 11px 14px; border-radius: 8px; font: inherit; font-size: 15px; font-weight: 600; text-decoration: none; border: 1px solid var(--primary); color: var(--primary); background: #fff; cursor: pointer; }
+    .cta.primary { background: var(--primary); color: #fff; }
+    .cta.current { border-color: #2e7d32; color: #2e7d32; cursor: default; }
+    #paypal { min-height: 46px; }
+    .secure { font-size: 12px; color: var(--muted); text-align: center; margin-top: 8px; display: flex; gap: 6px; justify-content: center; align-items: center; flex-wrap: wrap; }
+    .secure i { font-size: 20px; color: #555; }
+    .faq { max-width: 760px; margin: 0 auto; }
+    .faq details { border-bottom: 1px solid var(--border); padding: 12px 0; }
+    .faq summary { cursor: pointer; font-weight: 600; font-size: 15px; }
+    .faq p { margin: 8px 0 0; font-size: 14px; color: var(--muted); line-height: 1.55; }
+    .sandbox { display: inline-block; font-size: 12px; background: #fff3e0; color: #8a4b00; border-radius: 10px; padding: 2px 10px; margin-left: 6px; vertical-align: middle; }
+    [hidden] { display: none !important; }
+    @media (max-width: 760px) { .plans { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <script src="/assets/nav.js"></script>
+  <main class="page">
+    <div class="page-header center" style="display:block">
+      <h1 style="justify-content:center"><i class="fa-solid fa-tags" aria-hidden="true"></i> <span>Plans and pricing</span> <span class="sandbox" id="sandbox" hidden>PayPal sandbox: test payments only</span></h1>
+      <p class="subtitle">Use the RosterParser API in your own apps. Start free; move to Pro when you need more.</p>
+    </div>
+
+    <div class="center">
+      <div class="switch" role="group" aria-label="Billing period">
+        <button type="button" data-interval="month" class="on" aria-pressed="true">Monthly</button>
+        <button type="button" data-interval="year" aria-pressed="false">Yearly <span class="save" id="save"></span></button>
+      </div>
+    </div>
+
+    <div class="plans">
+      <section class="card plan">
+        <h2>Free</h2>
+        <div class="price">$0</div>
+        <div class="per">forever</div>
+        <ul id="freeList"></ul>
+        <a class="cta" id="freeCta" href="/signup">Sign up free</a>
+      </section>
+      <section class="card plan featured">
+        <span class="ribbon">For apps in production</span>
+        <h2 id="proName">Pro</h2>
+        <div class="price" id="proPrice"></div>
+        <div class="per" id="proPer"></div>
+        <ul id="proList"></ul>
+        <div id="proAction">
+          <a class="cta primary" id="proSignin" href="/login?next=%2Fpricing" hidden>Sign in to subscribe</a>
+          <a class="cta current" id="proCurrent" href="/account" hidden><i class="fa-solid fa-circle-check" aria-hidden="true"></i> <span>Your plan</span></a>
+          <div id="paypal" hidden></div>
+          <div class="secure" id="secure" hidden><i class="fa-brands fa-cc-paypal" aria-hidden="true"></i><i class="fa-brands fa-cc-visa" aria-hidden="true"></i><i class="fa-brands fa-cc-mastercard" aria-hidden="true"></i>
+            <span>Paid through PayPal, with a PayPal account or a card. Your card number never reaches this site.</span></div>
+          <div class="auth-msg info block" id="closed" hidden>Payments are not open yet. Ask an admin for Pro.</div>
+        </div>
+        <div class="auth-msg block" id="msg" role="status" hidden></div>
+      </section>
+    </div>
+
+    <section class="faq">
+      <h2 class="center">Questions</h2>
+      <details><summary>What counts as a request and a file read?</summary><p>Every call of the API is a request. Reading a file with the AI model (a roster, an ACARS picture) is also a file read. Both start again at 00:00 UTC every day.</p></details>
+      <details><summary>Can I pay with a card without a PayPal account?</summary><p>Yes, where PayPal offers it in your country: choose "Debit or Credit Card" under the PayPal button. PayPal handles the card; this site never sees its number.</p></details>
+      <details><summary>How do I cancel?</summary><p>On your account page, at any time. You keep Pro until the end of the period you paid for, then the account moves back to Free. Your API keys keep working.</p></details>
+      <details><summary>Where are my invoices?</summary><p>On your account page: one invoice for every payment, to print or save as PDF. PayPal also emails you a receipt.</p></details>
+      <details><summary>Do I need an account to try the API?</summary><p>The pages of this site work without one. Your own apps need an API key, from a free account.</p></details>
+    </section>
+  </main>
+
+  <script type="module">
+    import { api } from '/assets/firebase-auth.js';
+    const t = window.t;
+    const $ = (id) => document.getElementById(id);
+    const LOCALE = window.I18N?.lang === 'vi' ? 'vi-VN' : 'en-GB';
+    const num = (n) => Number(n).toLocaleString(LOCALE);
+    const price = (v, c) => new Intl.NumberFormat(LOCALE, { style: 'currency', currencyDisplay: 'narrowSymbol', currency: c, maximumFractionDigits: v % 1 ? 2 : 0 }).format(v);
+    const show = (text, kind = 'error') => { const m = $('msg'); m.textContent = text; m.className = `auth-msg block ${kind}`; m.hidden = !text; };
+    const item = (html) => `<li><i class="fa-solid fa-check" aria-hidden="true"></i><span>${html}</span></li>`;
+
+    const [cfg, me] = await Promise.all([api('/api/billing/config'), api('/api/auth/me')]);
+    const billing = me.user ? await api('/api/billing/me').catch(() => null) : null;
+    let interval = 'month';
+    const offer = () => cfg.offers.find(o => o.plan === 'pro' && o.interval === interval) || cfg.offers[0];
+    const month = cfg.offers.find(o => o.interval === 'month');
+    const year = cfg.offers.find(o => o.interval === 'year');
+    if (month && year) $('save').textContent = t('save {n}%', { n: Math.round((1 - year.price / (month.price * 12)) * 100) });
+    $('sandbox').hidden = cfg.mode !== 'sandbox' || !cfg.enabled;
+
+    $('freeList').innerHTML = [t('{n} requests a day', { n: num(cfg.free.requests) }), t('{n} files read a day', { n: num(cfg.free.reads) }), t('Up to 10 API keys'), t('Every endpoint of the API')].map(item).join('');
+    const isPro = billing?.plan === 'pro';
+    const active = billing?.subscriptions?.find(s => ['ACTIVE', 'SUSPENDED'].includes(s.status));
+    if (me.user && !isPro) { $('freeCta').className = 'cta current'; $('freeCta').innerHTML = `<i class="fa-solid fa-circle-check" aria-hidden="true"></i> ${t('Your plan')}`; $('freeCta').href = '/account'; }
+    else if (me.user) { $('freeCta').textContent = t('Included'); $('freeCta').removeAttribute('href'); $('freeCta').className = 'cta current'; }
+
+    let buttons = null;
+    function render() {
+      const o = offer();
+      $('proName').textContent = t(o.label);
+      $('proPrice').innerHTML = `${price(o.price, o.currency)} <small>/ ${t(o.interval === 'year' ? 'year' : 'month')}</small>`;
+      $('proPer').textContent = o.interval === 'year' ? t('{p} a month, billed once a year', { p: price(o.price / 12, o.currency) }) : t('billed every month');
+      $('proList').innerHTML = [t('{n} requests a day', { n: num(o.requests) }), t('{n} files read a day', { n: num(o.reads) }), t('Up to 10 API keys'), t('Invoices for every payment'), t('Cancel at any time')].map(item).join('');
+      document.querySelectorAll('.switch button').forEach(b => { b.classList.toggle('on', b.dataset.interval === interval); b.setAttribute('aria-pressed', String(b.dataset.interval === interval)); });
+      if (!me.user) { $('proSignin').hidden = !cfg.enabled; $('closed').hidden = cfg.enabled; return; }
+      if (isPro || active) { $('proCurrent').hidden = false; return; }
+      if (!cfg.enabled) { $('closed').hidden = false; return; }
+      renderPaypal();
+    }
+
+    // PayPal's buttons: PayPal, and "Debit or Credit Card" where PayPal offers it; the subscription is made by this
+    // server (it knows the account), approved in PayPal's window, then checked by this server again
+    let sdk = null;
+    async function renderPaypal() {
+      $('paypal').hidden = false; $('secure').hidden = false;
+      sdk ||= new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = `https://www.paypal.com/sdk/js?client-id=${encodeURIComponent(cfg.clientId)}&vault=true&intent=subscription&components=buttons&currency=${encodeURIComponent(offer().currency)}`;
+        s.onload = resolve;
+        s.onerror = () => reject(new Error(t('PayPal could not be loaded: check your connection or an ad blocker, then reload the page')));
+        document.head.appendChild(s);
+      });
+      try { await sdk; } catch (e) { return show(e.message); }
+      if (buttons) await buttons.close().catch(() => {});
+      $('paypal').innerHTML = '';
+      const chosen = offer();
+      buttons = window.paypal.Buttons({
+        style: { layout: 'vertical', shape: 'rect', label: 'subscribe', height: 44 },
+        createSubscription: async () => { show(''); return (await api('/api/billing/subscriptions', { plan: chosen.plan, interval: chosen.interval })).id; },
+        onApprove: async (data) => {
+          show(t('Payment approved: setting up your plan…'), 'info');
+          try {
+            await api(`/api/billing/subscriptions/${encodeURIComponent(data.subscriptionID)}/activate`, {});
+            location.assign('/account?subscribed=1');
+          } catch (e) { show(t('PayPal approved it, but this site could not check it yet: {error}. Open your account page in a minute.', { error: e.message })); }
+        },
+        onCancel: () => show(t('Nothing was paid: you closed the PayPal window.'), 'info'),
+        onError: (e) => show(e?.message || t('PayPal could not start the payment, please try again')),
+      });
+      buttons.render('#paypal');
+    }
+
+    document.querySelector('.switch').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-interval]');
+      if (!b || b.dataset.interval === interval) return;
+      interval = b.dataset.interval;
+      render();
+    });
+    render();
+  </script>
+</body>
+</html>

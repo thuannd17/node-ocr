@@ -3,7 +3,7 @@
   "info": {
     "title": "RosterParser public API",
     "version": "1.0.0",
-    "description": "Public endpoints of RosterParser: read a crew roster (image, PDF, CSV, Excel, text) into rows, turn rows into an iCalendar file, look up airports with their weather, and compute the night time of a flight.\n\n**Base URL**: the host serving this page (all paths start with `/api`).\n\n**Authentication**: none for now. These endpoints are meant to stay public; the administration endpoints (labels, benchmarks, models) are not part of this API and will require an account later.\n\n**Formats**: JSON in and out (UTF-8) unless stated; uploads are `multipart/form-data`. Times are ISO 8601; roster times keep the roster's notation (`HH:MM Z` = UTC, `L` / `LB` = local).\n\n**Errors**: a non-2xx status with `{ \"error\": \"message\" }`. Messages are English by default; send the cookie `lang=vi` for Vietnamese.\n\n**Limits**: uploads up to 10 MB. Roster reading uses one OCR server for everyone: requests queue, and `503` with `busy: true` means the queue is full, retry after a few seconds. Weather is cached for 30 minutes per airport.\n\n**Privacy**: `POST /api/roster/upload` only reads the file: it is deleted right after and nothing is kept. A roster is kept only when you send it with `POST /api/roster/suggestions` (a correction suggestion): the administrators then use it to improve the model, or delete it."
+    "description": "Public endpoints of RosterParser: read a crew roster (image, PDF, CSV, Excel, text) into rows, turn rows into an iCalendar file, look up airports with their weather, and compute the night time of a flight.\n\n**Base URL**: the host serving this page (all paths start with `/api`).\n\n**Authentication**: an API key. Sign up on `/signup`, make a key on `/account`, and send it as `Authorization: Bearer rp_...` (or `X-API-Key: rp_...`). Without a key the API answers `401`; the pages of this site use it without one. Click **Authorize** above to try the endpoints with your key. The administration endpoints (labels, benchmarks, models) are not part of this API.\n\n**Formats**: JSON in and out (UTF-8) unless stated; uploads are `multipart/form-data`. Times are ISO 8601; roster times keep the roster's notation (`HH:MM Z` = UTC, `L` / `LB` = local).\n\n**Errors**: a non-2xx status with `{ \"error\": \"message\" }`. Messages are English by default; send the header `X-UI-Lang: vi` (or the cookie `lang=vi`) for Vietnamese.\n\n**Limits**: each account has a plan (Free: 1,000 requests and 50 files read a day; Pro: 20,000 and 2,000), counted from 00:00 UTC; reading a roster or an ACARS picture counts as a file read. Every answer has `X-RateLimit-Remaining`, `X-RateLimit-Reads-Remaining` and `X-RateLimit-Reset` (Unix time); past a limit the API answers `429` with `Retry-After` (seconds). Any origin may call the API from a browser (CORS); cookies are not used then. uploads up to 10 MB. Roster reading uses one OCR server for everyone: requests queue, and `503` with `busy: true` means the queue is full, retry after a few seconds. Weather is cached for 30 minutes per airport.\n\n**Privacy**: `POST /api/roster/upload` only reads the file: it is deleted right after and nothing is kept. A roster is kept only when you send it with `POST /api/roster/suggestions` (a correction suggestion): the administrators then use it to improve the model, or delete it."
   },
   "servers": [
     {
@@ -80,6 +80,9 @@
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "413": {
             "description": "The file is larger than 10 MB",
             "content": {
@@ -92,6 +95,9 @@
                 }
               }
             }
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
           },
           "500": {
             "$ref": "#/components/responses/Error"
@@ -209,6 +215,9 @@
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "413": {
             "description": "The file is larger than 10 MB",
             "content": {
@@ -221,6 +230,9 @@
                 }
               }
             }
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
           },
           "500": {
             "$ref": "#/components/responses/Error"
@@ -290,6 +302,9 @@
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "413": {
             "description": "The file is larger than 10 MB",
             "content": {
@@ -302,6 +317,9 @@
                 }
               }
             }
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
           },
           "500": {
             "$ref": "#/components/responses/Error"
@@ -357,6 +375,9 @@
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "409": {
             "description": "The AI model in use was not trained on ACARS pictures yet",
             "content": {
@@ -382,6 +403,9 @@
                 }
               }
             }
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
           },
           "500": {
             "$ref": "#/components/responses/Error"
@@ -482,6 +506,9 @@
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "413": {
             "description": "The file is larger than 10 MB",
             "content": {
@@ -494,6 +521,9 @@
                 }
               }
             }
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
           },
           "500": {
             "$ref": "#/components/responses/Error"
@@ -559,6 +589,9 @@
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "413": {
             "description": "The file is larger than 10 MB",
             "content": {
@@ -571,6 +604,9 @@
                 }
               }
             }
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
           },
           "500": {
             "$ref": "#/components/responses/Error"
@@ -693,6 +729,12 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
           }
         },
         "x-codeSamples": [
@@ -824,6 +866,12 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
           }
         },
         "x-codeSamples": [
@@ -898,6 +946,12 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
           "503": {
             "description": "The airport list has not been built on this server (`npm run airports:update`)",
             "content": {
@@ -941,8 +995,14 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
           }
         },
         "x-codeSamples": [
@@ -977,8 +1037,14 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
           },
           "502": {
             "description": "The forecast service did not answer",
@@ -1096,8 +1162,14 @@
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
           }
         },
         "x-codeSamples": [
@@ -1169,6 +1241,56 @@
           "application/json": {
             "schema": {
               "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "No API key, or a key that is not valid (revoked, made up).",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "error": "An API key is needed: sign up on /signup, then make a key on /account"
+            }
+          }
+        }
+      },
+      "TooManyRequests": {
+        "description": "Past the plan's limit of the day (`kind`: `requests` or `reads`). Try again after `Retry-After` seconds.",
+        "headers": {
+          "Retry-After": {
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Seconds until the limit starts again"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "error": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "requests",
+                    "reads"
+                  ]
+                },
+                "limit": {
+                  "type": "integer"
+                },
+                "resetAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
             }
           }
         }
@@ -2278,6 +2400,28 @@
           }
         }
       }
+    },
+    "securitySchemes": {
+      "bearerKey": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "rp_...",
+        "description": "Your API key (make one on /account): `Authorization: Bearer rp_...`"
+      },
+      "apiKeyHeader": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-API-Key",
+        "description": "The same key in an `X-API-Key` header."
+      }
     }
-  }
+  },
+  "security": [
+    {
+      "bearerKey": []
+    },
+    {
+      "apiKeyHeader": []
+    }
+  ]
 }

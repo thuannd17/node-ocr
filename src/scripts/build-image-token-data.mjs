@@ -59,7 +59,8 @@ async function readLines(name, file, hash) {
   return { hash, ...(await ocrPdfAsImage(file)) };
 }
 
-for (const name of names) {
+for (const [k, name] of names.entries()) {
+  console.log(`  [pictures ${k + 1}/${names.length}] ${name}`); // (progress for the /models page)
   const file = dataFile(imgDir, name);
   const hash = crypto.createHash('md5').update(fs.readFileSync(file)).digest('hex');
   if (seen.has(hash)) { summary.skipped.push({ file: name, reason: 'copy of another image' }); continue; }
@@ -84,11 +85,10 @@ for (const name of names) {
   }
   fs.writeFileSync(path.join(outDir, `${name}.json`), JSON.stringify({ file: name, kind: 'image', source: 'label', format: 'image-roster', pages }));
   summary.files.push({ file: name, rows: st.rows, anchored: st.anchored, tokens: pages[0].tokens.length });
-  process.stdout.write('.');
 }
 fs.writeFileSync(path.join(outDir, 'summary.json'), JSON.stringify(summary, null, 2));
 const pct = (a, b) => (b ? (100 * a / b).toFixed(1) : '-');
-console.log(`\nImages used: ${summary.files.length} (skipped ${summary.skipped.length} copies)`);
+console.log(`Images used: ${summary.files.length} (skipped ${summary.skipped.length} copies)`);
 console.log(`Label rows found among the OCR words: ${summary.anchored}/${summary.rows} (${pct(summary.anchored, summary.rows)}%), values not found: ${JSON.stringify(summary.missing)}`);
 console.log(`Words: ${summary.tokens}, tagged ${summary.tagged} (${pct(summary.tagged, summary.tokens)}%), unsure (left out of training) ${summary.unsure}`);
 console.log(`Words per field: ${Object.entries(summary.byField).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${v}`).join(', ')}`);

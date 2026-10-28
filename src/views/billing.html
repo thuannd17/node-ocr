@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Billing</title>
+  <script src="/assets/i18n/vi.js"></script>
+  <script src="/assets/i18n.js"></script>
+  <link rel="stylesheet" href="/assets/app.css">
+  <link rel="stylesheet" href="/assets/fontawesome/css/all.min.css">
+  <style>
+    .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 20px; }
+    .stat { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 14px 16px; }
+    .stat .k { font-size: 12px; color: var(--muted); }
+    .stat .v { font-size: 24px; font-weight: 700; margin-top: 4px; color: var(--nav-bg); }
+    .stat .s { font-size: 12px; color: var(--muted); }
+    .tabs { display: flex; gap: 6px; padding: 12px 14px 0; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+    .tabs button { font: inherit; font-size: 14px; padding: 8px 14px; border: none; background: none; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px; }
+    .tabs button.on { color: var(--nav-bg); border-bottom-color: var(--primary); font-weight: 600; }
+    .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 12px 14px; }
+    .toolbar input, .toolbar select { font: inherit; font-size: 13px; padding: 6px 9px; border: 1px solid var(--border); border-radius: 6px; }
+    .toolbar input { min-width: 200px; }
+    .toolbar .right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+    .btn { background: #fff; color: var(--primary); border: 1px solid var(--primary); padding: 5px 9px; border-radius: 6px; cursor: pointer; font: inherit; font-size: 12px; white-space: nowrap; display: inline-flex; gap: 5px; align-items: center; text-decoration: none; }
+    .btn:hover:not(:disabled) { background: #eef4ff; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn.danger { color: var(--danger); border-color: var(--danger); }
+    .btn.danger:hover:not(:disabled), .btn.danger.sure { background: var(--danger); color: #fff; }
+    .table-wrap { overflow-x: auto; }
+    table.list { width: 100%; border-collapse: collapse; font-size: 13px; }
+    table.list th { text-align: left; font-size: 12px; color: var(--muted); font-weight: 600; padding: 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+    table.list td { padding: 8px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+    table.list td.r, table.list th.r { text-align: right; white-space: nowrap; }
+    .who b { display: block; overflow-wrap: anywhere; }
+    .who small { color: var(--muted); }
+    .st { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 10px; white-space: nowrap; background: #eee; color: #555; }
+    .st.ACTIVE, .st.paid { background: #e8f5e9; color: #1e6b25; }
+    .st.SUSPENDED, .st.APPROVAL_PENDING, .st.partially { background: #fff3e0; color: #8a4b00; }
+    .st.CANCELLED, .st.EXPIRED, .st.refunded { background: #fdecea; color: #a12622; }
+    .actions { display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; }
+    .status { font-size: 13px; padding: 0 14px 10px; min-height: 18px; }
+    .status.error { color: var(--danger); }
+    .status.ok { color: #2e7d32; }
+    .empty { padding: 20px; color: var(--muted); text-align: center; }
+    .mode { font-size: 12px; padding: 2px 10px; border-radius: 10px; background: #fff3e0; color: #8a4b00; margin-left: 8px; vertical-align: middle; }
+    .mode.live { background: #e8f5e9; color: #1e6b25; }
+    .setup { font-size: 14px; line-height: 1.6; }
+    .setup code { font-size: 12.5px; }
+    [hidden] { display: none !important; }
+    @media (max-width: 800px) { .stats { grid-template-columns: repeat(2, 1fr); } }
+  </style>
+</head>
+<body>
+  <script src="/assets/nav.js"></script>
+  <main class="page">
+    <div class="page-header">
+      <h1><i class="fa-solid fa-file-invoice-dollar" aria-hidden="true"></i> <span>Billing</span> <span class="mode" id="mode" hidden></span></h1>
+      <p class="subtitle">The paid plans: every PayPal subscription and invoice. A subscription is asked to PayPal again with Sync (PayPal also tells this site by webhook).</p>
+    </div>
+
+    <section class="card setup" id="setup" hidden>
+      <h2>Payments are not set up yet</h2>
+      <p data-i18n>Make a REST app on <a href="https://developer.paypal.com/dashboard/applications/sandbox" target="_blank" rel="noopener">developer.paypal.com</a> (Sandbox first), then put its keys in <code>.env</code>: <code>PAYPAL_CLIENT_ID</code>, <code>PAYPAL_CLIENT_SECRET</code>, <code>PAYPAL_ENV=sandbox</code>. For webhooks add one to that app pointing at <code>https://&lt;this site&gt;/api/billing/webhook</code> and put its id in <code>PAYPAL_WEBHOOK_ID</code>. Restart the app; the plans are made in PayPal on the first subscription.</p>
+    </section>
+
+    <div id="content" hidden>
+      <div class="stats">
+        <div class="stat"><div class="k">Active subscriptions</div><div class="v" id="sActive"></div></div>
+        <div class="stat"><div class="k">Monthly recurring revenue</div><div class="v" id="sMrr"></div><div class="s">yearly plans counted as a twelfth</div></div>
+        <div class="stat"><div class="k">Paid this month</div><div class="v" id="sMonth"></div><div class="s" id="sMonthNet"></div></div>
+        <div class="stat"><div class="k">Refunded this month</div><div class="v" id="sRefund"></div></div>
+      </div>
+
+      <section class="card" style="padding:0">
+        <div class="tabs" role="tablist">
+          <button type="button" class="on" data-tab="subs">Subscriptions</button>
+          <button type="button" data-tab="invoices">Invoices</button>
+          <button type="button" data-tab="months">By month</button>
+        </div>
+        <div class="toolbar">
+          <input type="search" id="q" placeholder="Search email, invoice or PayPal id" aria-label="Search email, invoice or PayPal id">
+          <select id="status" aria-label="Status"></select>
+          <select id="month" aria-label="Month"></select>
+          <div class="right">
+            <a class="btn" id="csv" href="/api/billing/admin/invoices.csv"><i class="fa-solid fa-file-csv" aria-hidden="true"></i> <span>Export CSV</span></a>
+            <button type="button" class="btn" id="reload"><i class="fa-solid fa-rotate" aria-hidden="true"></i> Reload</button>
+          </div>
+        </div>
+        <div class="status" id="statusMsg" role="status"></div>
+        <div class="table-wrap"><table class="list stack-sm" id="table"></table></div>
+        <div class="empty" id="empty" hidden>Nothing matches.</div>
+      </section>
+    </div>
+  </main>
+
+  <script type="module">
+    import { api } from '/assets/firebase-auth.js';
+    const t = window.t;
+    const $ = (id) => document.getElementById(id);
+    const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+    const LOCALE = window.I18N?.lang === 'vi' ? 'vi-VN' : 'en-GB';
+    const when = (s) => (s ? new Date(s).toLocaleDateString(LOCALE, { dateStyle: 'medium' }) : '—');
+    const money = (v, c = 'USD') => new Intl.NumberFormat(LOCALE, { style: 'currency', currencyDisplay: 'narrowSymbol', currency: c }).format(v || 0);
+    const status = (text, kind = 'ok') => { const s = $('statusMsg'); s.textContent = text; s.className = `status ${kind}`; };
+    const STATUS_TEXT = { ACTIVE: 'Active', SUSPENDED: 'Suspended', APPROVAL_PENDING: 'Waiting for approval', CANCELLED: 'Cancelled', EXPIRED: 'Expired', paid: 'Paid', refunded: 'Refunded', 'partially refunded': 'Partly refunded' };
+    const badge = (s) => `<span class="st ${esc(String(s).split(' ')[0])}">${esc(t(STATUS_TEXT[s] || s))}</span>`;
+
+    let data = null;
+    let tab = 'subs';
+
+    async function load(keep = false) {
+      if (!keep) status(t('loading…'), '');
+      const cfg = await api('/api/billing/config');
+      $('setup').hidden = cfg.enabled;
+      $('content').hidden = false; // what is kept stays readable without PayPal's keys
+      $('mode').hidden = !cfg.enabled;
+      $('mode').textContent = cfg.mode === 'live' ? t('PayPal live') : t('PayPal sandbox');
+      $('mode').className = `mode ${cfg.mode}`;
+      try {
+        data = await api('/api/billing/admin/overview');
+        summary();
+        filters();
+        render();
+        if (!keep) status('');
+      } catch (e) { status(e.message, 'error'); }
+    }
+
+    function summary() {
+      const s = data.summary;
+      const thisMonth = new Date().toISOString().slice(0, 7);
+      const m = s.months.find(x => x.month === thisMonth && x.currency === s.currency) || { paid: 0, refunded: 0, net: 0 };
+      $('sActive').textContent = s.active;
+      $('sMrr').textContent = money(s.mrr, s.currency);
+      $('sMonth').textContent = money(m.paid, s.currency);
+      $('sMonthNet').textContent = t('{net} after PayPal fees', { net: money(m.net, s.currency) });
+      $('sRefund').textContent = money(m.refunded, s.currency);
+    }
+
+    function filters() {
+      const statuses = tab === 'subs' ? ['ACTIVE', 'SUSPENDED', 'APPROVAL_PENDING', 'CANCELLED', 'EXPIRED'] : ['paid', 'refunded', 'partially refunded'];
+      const keepStatus = $('status').value;
+      $('status').innerHTML = `<option value="">${esc(t('Any status'))}</option>` + statuses.map(s => `<option value="${esc(s)}">${esc(t(STATUS_TEXT[s]))}</option>`).join('');
+      if (statuses.includes(keepStatus)) $('status').value = keepStatus;
+      const months = [...new Set(data.invoices.map(i => String(i.paidAt).slice(0, 7)))].sort().reverse();
+      const keepMonth = $('month').value;
+      $('month').innerHTML = `<option value="">${esc(t('Any month'))}</option>` + months.map(m => `<option>${m}</option>`).join('');
+      if (months.includes(keepMonth)) $('month').value = keepMonth;
+      $('status').hidden = tab === 'months';
+      $('q').hidden = tab === 'months';
+      $('month').hidden = tab === 'subs';
+      $('csv').href = `/api/billing/admin/invoices.csv${$('month').value ? `?month=${$('month').value}` : ''}`;
+    }
+
+    function render() {
+      const q = $('q').value.trim().toLowerCase();
+      const st = $('status').value;
+      const mo = $('month').value;
+      let rows = '';
+      let n = 0;
+      if (tab === 'subs') {
+        const list = data.subscriptions.filter(s => (!q || `${s.email} ${s.payer} ${s.id}`.toLowerCase().includes(q)) && (!st || s.status === st));
+        n = list.length;
+        rows = `<thead><tr><th>Account</th><th>Plan</th><th>Status</th><th>Started</th><th>Next billing</th><th class="r">Price</th><th></th></tr></thead><tbody>`
+          + list.map(s => `<tr data-id="${esc(s.id)}">
+            <td class="who" data-label="${esc(t('Account'))}"><b>${esc(s.email || s.uid)}</b><small>${esc(s.id)}${s.payer && s.payer !== s.email ? ` · ${esc(s.payer)}` : ''}</small></td>
+            <td data-label="${esc(t('Plan'))}">${esc(t(s.plan === 'pro' ? 'Pro' : s.plan))}, ${esc(t(s.interval === 'year' ? 'yearly' : 'monthly'))}</td>
+            <td data-label="${esc(t('Status'))}">${badge(s.status)}${s.failedPayments ? ` <small>${esc(t('{n} failed payments', { n: s.failedPayments }))}</small>` : ''}</td>
+            <td data-label="${esc(t('Started'))}">${esc(when(s.startedAt || s.createdAt))}</td>
+            <td data-label="${esc(t('Next billing'))}">${s.status === 'ACTIVE' ? esc(when(s.nextBillingAt)) : s.cancelledAt ? `${esc(t('cancelled'))} ${esc(when(s.cancelledAt))}` : '—'}</td>
+            <td class="r" data-label="${esc(t('Price'))}">${esc(money(s.price, s.currency))}</td>
+            <td><div class="actions"><button type="button" class="btn" data-act="sync"><i class="fa-solid fa-rotate" aria-hidden="true"></i> <span>${esc(t('Sync'))}</span></button>
+              <button type="button" class="btn danger" data-act="cancel" ${['CANCELLED', 'EXPIRED'].includes(s.status) ? 'disabled' : ''}><i class="fa-solid fa-ban" aria-hidden="true"></i> <span>${esc(t('Cancel'))}</span></button></div></td></tr>`).join('') + '</tbody>';
+      } else if (tab === 'invoices') {
+        const list = data.invoices.filter(i => (!q || `${i.email} ${i.number} ${i.transactionId} ${i.subscriptionId}`.toLowerCase().includes(q)) && (!st || i.status === st) && (!mo || String(i.paidAt).startsWith(mo)));
+        n = list.length;
+        rows = `<thead><tr><th>Invoice</th><th>Date</th><th>Account</th><th>Plan</th><th class="r">Amount</th><th class="r">Fee</th><th class="r">Net</th><th>Status</th><th></th></tr></thead><tbody>`
+          + list.map(i => `<tr data-id="${esc(i.id)}">
+            <td data-label="${esc(t('Invoice'))}"><a href="/invoice?id=${encodeURIComponent(i.number)}">${esc(i.number)}</a></td>
+            <td data-label="${esc(t('Date'))}">${esc(when(i.paidAt))}</td>
+            <td class="who" data-label="${esc(t('Account'))}"><b>${esc(i.email || i.uid)}</b><small>${esc(i.transactionId)}</small></td>
+            <td data-label="${esc(t('Plan'))}">${esc(t(i.label))}, ${esc(t(i.interval === 'year' ? 'yearly' : 'monthly'))}</td>
+            <td class="r" data-label="${esc(t('Amount'))}">${esc(money(i.amount, i.currency))}</td>
+            <td class="r" data-label="${esc(t('Fee'))}">${esc(money(i.fee, i.currency))}</td>
+            <td class="r" data-label="${esc(t('Net'))}">${esc(money(i.net, i.currency))}</td>
+            <td data-label="${esc(t('Status'))}">${badge(i.status)}</td>
+            <td><div class="actions"><button type="button" class="btn danger" data-act="refund" ${i.status === 'refunded' ? 'disabled' : ''}><i class="fa-solid fa-rotate-left" aria-hidden="true"></i> <span>${esc(t('Refund'))}</span></button></div></td></tr>`).join('') + '</tbody>';
+      } else {
+        const list = data.summary.months;
+        n = list.length;
+        rows = `<thead><tr><th>Month</th><th class="r">Payments</th><th class="r">Paid</th><th class="r">Net</th><th class="r">Refunded</th></tr></thead><tbody>`
+          + list.map(m => `<tr><td data-label="${esc(t('Month'))}">${esc(m.month)}</td><td class="r" data-label="${esc(t('Payments'))}">${m.count}</td><td class="r" data-label="${esc(t('Paid'))}">${esc(money(m.paid, m.currency))}</td>
+            <td class="r" data-label="${esc(t('Net'))}">${esc(money(m.net, m.currency))}</td><td class="r" data-label="${esc(t('Refunded'))}">${esc(money(m.refunded, m.currency))}</td></tr>`).join('') + '</tbody>';
+      }
+      $('table').innerHTML = rows;
+      $('table').hidden = !n;
+      $('empty').hidden = !!n;
+    }
+
+    // "Sure?" on a second click for cancel / refund (no browser dialog)
+    $('table').addEventListener('click', async (e) => {
+      const btn = e.target.closest('[data-act]');
+      if (!btn || btn.disabled) return;
+      const id = btn.closest('tr').dataset.id;
+      const act = btn.dataset.act;
+      if (act !== 'sync' && !btn.classList.contains('sure')) {
+        btn.classList.add('sure');
+        const label = btn.querySelector('span');
+        const plain = label.textContent;
+        label.textContent = t(act === 'refund' ? 'Sure? Refund it all' : 'Sure? Cancel it');
+        setTimeout(() => { if (btn.isConnected) { btn.classList.remove('sure'); label.textContent = plain; } }, 4000);
+        return;
+      }
+      btn.disabled = true;
+      try {
+        if (act === 'sync') { await api(`/api/billing/admin/subscriptions/${encodeURIComponent(id)}/sync`, {}); status(t('Synced with PayPal: {id}', { id })); }
+        if (act === 'cancel') { await api(`/api/billing/admin/subscriptions/${encodeURIComponent(id)}/cancel`, { reason: 'Cancelled by an admin' }); status(t('Cancelled: {id}. The account keeps its plan until the paid period ends.', { id })); }
+        if (act === 'refund') { const r = await api(`/api/billing/admin/invoices/${encodeURIComponent(id)}/refund`, {}); status(t('Refunded: {number}. Cancel its subscription too if it should not renew.', { number: r.number })); }
+      } catch (err) { status(err.message, 'error'); }
+      await load(true);
+    });
+
+    document.querySelector('.tabs').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-tab]');
+      if (!b) return;
+      tab = b.dataset.tab;
+      document.querySelectorAll('.tabs button').forEach(x => x.classList.toggle('on', x === b));
+      filters();
+      render();
+    });
+    for (const id of ['q', 'status', 'month']) $(id).addEventListener(id === 'q' ? 'input' : 'change', () => { filters(); render(); });
+    $('reload').addEventListener('click', () => load());
+    load();
+  </script>
+</body>
+</html>

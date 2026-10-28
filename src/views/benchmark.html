@@ -87,6 +87,47 @@
     .bench-heading small { font-weight: normal; color: #888; font-size: 13px; }
     ul.diff { margin: 6px 0 0 0; padding-left: 18px; font-size: 12px; max-height: 300px; overflow-y: auto; }
     ul.diff code { background: #f3f3f3; padding: 0 3px; border-radius: 3px; }
+    /* History of the finished runs: view one again, compare two */
+    details.history { background: white; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); padding: 12px 16px; margin-bottom: 24px; }
+    details.history > summary { font-weight: 600; color: #2b3a55; }
+    details.history > summary small { font-weight: normal; color: #888; }
+    .history-body { margin-top: 12px; }
+    .history-body .runs { max-height: 380px; overflow: auto; margin-bottom: 12px; }
+    .history-body table { margin-bottom: 0; box-shadow: none; }
+    .history-body th { position: sticky; top: 0; z-index: 1; }
+    .history-body td.num { white-space: nowrap; }
+    .history-body input.note { width: 100%; min-width: 160px; padding: 4px 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 12px; }
+    .history-body .bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 13px; color: #666; }
+    .history-body button { background: var(--primary); color: #fff; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+    .history-body button:disabled { background: #ccc; cursor: not-allowed; }
+    .history-body button.link { background: none; color: #4a90e2; padding: 0 4px; }
+    .history-body button.link.danger { color: #c62828; }
+    .delta { font-size: 11px; font-weight: 600; white-space: nowrap; }
+    .delta.up { color: #2e7d32; } .delta.down { color: #c62828; } .delta.same { color: #999; font-weight: normal; }
+    .compare { border-top: 1px solid #eee; margin-top: 12px; padding-top: 4px; }
+    .compare h4 { color: #2b3a55; margin: 14px 0 8px; }
+    .controls .run { margin-left: auto; } /* the Run button on the right edge */
+    /* Server status at the top: is the OCR server running, on the GPU or the CPU */
+    .server-status { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; background: white; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); padding: 14px 16px; margin-bottom: 24px; font-size: 14px; border-left: 4px solid #bbb; }
+    .server-status.gpu { border-left-color: #2e7d32; }
+    .server-status.cpu { border-left-color: #f9a825; }
+    .server-status.off { border-left-color: #c62828; }
+    .server-status .state { font-weight: 600; }
+    .server-status.gpu .state { color: #2e7d32; } .server-status.cpu .state { color: #8d6e00; } .server-status.off .state { color: #c62828; }
+    .server-status .chip { font-size: 12px; padding: 2px 8px; border-radius: 10px; background: #f0f2f5; color: #444; white-space: nowrap; }
+    .server-status .chip.gpu { background: #e8f5e9; color: #2e7d32; } .server-status .chip.cpu { background: #fff8e1; color: #8d6e00; }
+    .server-status .hint { font-size: 12px; color: #666; }
+    .server-status button { margin-left: auto; background: none; border: 1px solid #ddd; color: #4a90e2; padding: 5px 10px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+    /* Info, warnings and the run's progress under a section's controls */
+    .bench-info { background: white; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); padding: 10px 16px; margin: -12px 0 24px; font-size: 13px; color: #555; display: flex; flex-direction: column; gap: 6px; }
+    .bench-info > div { display: flex; gap: 8px; align-items: baseline; }
+    .bench-info > div[hidden] { display: none; }
+    .bench-info > div > i { width: 14px; text-align: center; }
+    .bench-info .info > i { color: #4a90e2; }
+    .bench-info .warn { color: #8d6e00; } .bench-info .warn > i { color: #f9a825; }
+    .bench-info .progress > i { color: #2b3a55; }
+    .bench-info .progress:has(> span:empty) { display: none; }
+    .shown-run { background: #fff8e1; color: #6d5200; padding: 10px 14px; border-radius: 6px; margin-bottom: 12px; font-size: 13px; }
   </style>
 </head>
 <body>
@@ -97,16 +138,26 @@
     <p class="subtitle" data-i18n>Scores on the labeled files (<code>labels/&lt;ext&gt;/</code>): (1) OCR text recognition from images, (2) the AI model reading roster data, per file type, (3) the AI model reading ACARS pictures</p>
   </div>
 
+  <div class="server-status" id="serverStatus">
+    <b><i class="fa-solid fa-server" aria-hidden="true"></i> OCR server</b>
+    <span class="state" id="ocrState">checking…</span>
+    <span id="ocrDetails" style="display:contents"></span>
+    <button id="ocrRecheck" type="button"><i class="fa-solid fa-rotate" aria-hidden="true"></i> Check again</button>
+  </div>
+
   <section class="ocr-section">
     <h2 class="bench-heading"><i class="fa-solid fa-font" aria-hidden="true"></i> <span data-i18n>1. Text recognition from images (OCR) <small>PaddleOCR only, before the parser / model: is every cell of an image label read out with the right text</small></span></h2>
     <div class="controls">
       <b>OCR</b>
-      <span id="ocrCount" style="font-size:12px;color:#666"></span>
-      <span style="font-size:12px;color:#666">Needs the OCR server running</span>
-      <button id="ocrRunBtn"><i class="fa-solid fa-play" aria-hidden="true"></i> Run OCR benchmark</button>
-      <span id="ocrStatus" style="color:#888;font-size:13px"></span>
+      <button id="ocrRunBtn" class="run"><i class="fa-solid fa-play" aria-hidden="true"></i> Run OCR benchmark</button>
+    </div>
+    <div class="bench-info">
+      <div class="info"><i class="fa-solid fa-circle-info" aria-hidden="true"></i> <span id="ocrCount">loading…</span></div>
+      <div class="warn" data-needs-ocr hidden><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> <span>The OCR server is not running: start it first (status at the top of the page).</span></div>
+      <div class="progress"><i class="fa-solid fa-clock" aria-hidden="true"></i> <span id="ocrStatus"></span></div>
     </div>
     <div id="ocrError" class="error"></div>
+    <details class="history" id="ocrHistory" hidden><summary>History</summary><div class="history-body"></div></details>
     <div id="ocrResult">
       <div class="empty" data-i18n>Click <b>Run OCR benchmark</b> to measure what % of cells (date, day, duty, dep, begin, end, arr) and what % of characters OCR reads right.</div>
     </div>
@@ -114,14 +165,18 @@
 
   <section class="model-section" style="margin-top:32px">
     <h2 class="bench-heading"><i class="fa-solid fa-brain" aria-hidden="true"></i> <span data-i18n>2. Reading roster data per file type <small>the AI model reads like on /roster, compared with the labels</small></span></h2>
-    <div class="controls" style="flex-wrap:wrap">
+    <div class="controls">
       <b>File types</b>
       <span id="typeChoices" style="display:flex;gap:12px;flex-wrap:wrap;font-size:13px">loading…</span>
-      <span style="font-size:12px;color:#666">Images need the OCR server · about 10–15 minutes for all</span>
-      <button id="modelRunBtn"><i class="fa-solid fa-play" aria-hidden="true"></i> Run roster benchmark</button>
-      <span id="modelStatus" style="color:#888;font-size:13px"></span>
+      <button id="modelRunBtn" class="run"><i class="fa-solid fa-play" aria-hidden="true"></i> Run roster benchmark</button>
+    </div>
+    <div class="bench-info">
+      <div class="info"><i class="fa-solid fa-circle-info" aria-hidden="true"></i> <span data-i18n>About 10 minutes for all file types. Images are read by the OCR server first, the other files from their text.</span></div>
+      <div class="warn" data-needs-ocr hidden><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> <span>The OCR server is not running: image files would fail (status at the top of the page).</span></div>
+      <div class="progress"><i class="fa-solid fa-clock" aria-hidden="true"></i> <span id="modelStatus"></span></div>
     </div>
     <div id="modelError" class="error"></div>
+    <details class="history" id="modelHistory" hidden><summary>History</summary><div class="history-body"></div></details>
     <div id="modelResult">
       <div class="empty" data-i18n>Pick the file types, then click <b>Run roster benchmark</b> to measure what % of rows the AI model reads right against the labels, per file type.</div>
     </div>
@@ -131,12 +186,15 @@
     <h2 class="bench-heading"><i class="fa-solid fa-satellite-dish" aria-hidden="true"></i> <span data-i18n>3. Reading ACARS pictures <small>the AI model reads like on /acars, compared with the labels field by field</small></span></h2>
     <div class="controls">
       <b>ACARS</b>
-      <span id="acarsCount" style="font-size:12px;color:#666"></span>
-      <span style="font-size:12px;color:#666">Needs the OCR server running</span>
-      <button id="acarsRunBtn"><i class="fa-solid fa-play" aria-hidden="true"></i> Run ACARS benchmark</button>
-      <span id="acarsStatus" style="color:#888;font-size:13px"></span>
+      <button id="acarsRunBtn" class="run"><i class="fa-solid fa-play" aria-hidden="true"></i> Run ACARS benchmark</button>
+    </div>
+    <div class="bench-info">
+      <div class="info"><i class="fa-solid fa-circle-info" aria-hidden="true"></i> <span id="acarsCount">loading…</span></div>
+      <div class="warn" data-needs-ocr hidden><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> <span>The OCR server is not running: start it first (status at the top of the page).</span></div>
+      <div class="progress"><i class="fa-solid fa-clock" aria-hidden="true"></i> <span id="acarsStatus"></span></div>
     </div>
     <div id="acarsError" class="error"></div>
+    <details class="history" id="acarsHistory" hidden><summary>History</summary><div class="history-body"></div></details>
     <div id="acarsResult">
       <div class="empty" data-i18n>Click <b>Run ACARS benchmark</b> to measure what % of the fields (Flt No, Date, Dept, Dest, Out, Off, On, In, Info) the AI model reads right on the labeled ACARS pictures.</div>
     </div>
@@ -192,6 +250,35 @@
       }
     });
 
+    // What the OCR server reads on: { device: 'gpu' | 'cpu', name } | null
+    const deviceText = (d) => (!d ? '–' : d.device === 'gpu' ? 'GPU' : 'CPU');
+    const deviceTitle = (d) => (!d ? '' : d.name || deviceText(d));
+    // Server status at the top (/api/benchmark/ocr-server): running or not, GPU or CPU; a section that needs it warns when it is down
+    async function refreshServer() {
+      const box = $('serverStatus');
+      const o = await fetch('/api/benchmark/ocr-server').then(r => r.json()).catch(() => null);
+      const d = o?.running ? o.device : null;
+      box.className = `server-status ${o?.running ? d?.device || '' : 'off'}`;
+      const chip = (html, cls = '') => `<span class="chip ${cls}">${html}</span>`;
+      if (o?.running) {
+        $('ocrState').textContent = __('Running');
+        $('ocrDetails').innerHTML = [
+          d && chip(`<i class="fa-solid fa-microchip" aria-hidden="true"></i> ${d.name ? `${deviceText(d)} · ${escapeHtml(d.name)}` : deviceText(d)}`, d.device),
+          o.rec && chip(`${__('recognition model')} <code>${escapeHtml(o.rec)}</code>`),
+          o.inflight ? chip(__('{n} images in progress', { n: o.inflight })) : '',
+          d?.device === 'cpu' ? `<span class="hint">${__('On the CPU: much slower than on a GPU.')}</span>` : '',
+          `<span class="hint">${escapeHtml(o.url)}</span>`,
+        ].filter(Boolean).join('');
+      } else {
+        $('ocrState').textContent = __('Not running');
+        $('ocrDetails').innerHTML = `<span class="hint">${__('Start it with {cmd} (expected at {url}). The OCR and ACARS benchmarks and the roster images need it.', { cmd: '<code>npm run ocr:server</code>', url: escapeHtml(o?.url || '') })}</span>`;
+      }
+      for (const el of document.querySelectorAll('[data-needs-ocr]')) el.hidden = !!o?.running;
+    }
+    $('ocrRecheck').onclick = refreshServer;
+    refreshServer();
+    setInterval(() => { if (!document.hidden) refreshServer(); }, 30000);
+
     const card = (v, label) => `<div class="stat-card"><div class="stat-value">${v}</div><div class="stat-label">${label}</div></div>`;
     const reviewLink = (file, review) => `<a href="/label?name=${encodeURIComponent(file)}" data-label-popup="${escapeHtml(file)}"${review ? ' data-review="1"' : ''} title="${review ? __('Open the file and its label, with the cells the AI model read differently marked') : __('Open the file and its label')}"><i class="fa-solid fa-pen-to-square" aria-hidden="true"></i> ${__('Review &amp; fix')}</a>`;
 
@@ -199,7 +286,7 @@
      * Runs a benchmark stream (/api/benchmark/<what>/stream): the button starts it and,
      * while it runs, stops it. progress(files seen) -> status text; render(result) on done.
      */
-    function streamRunner({ btn, status, error, label, url, progress, render }) {
+    function streamRunner({ kind, btn, status, error, label, url, progress, render }) {
       let run = null;
       const idle = `<i class="fa-solid fa-play" aria-hidden="true"></i> ${label}`;
       btn.onclick = () => {
@@ -212,6 +299,7 @@
         if (!target) return;
         const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
         error.classList.remove('visible');
+        refreshServer();
         const started = Date.now();
         const es = new EventSource(`${target}${target.includes('?') ? '&' : '?'}runId=${encodeURIComponent(runId)}`);
         run = { es, runId };
@@ -225,8 +313,12 @@
           status.textContent = `${__('{done}/{total} files', { done: d.progress.current, total: d.progress.total })} · ${progress(seen)}`;
         });
         es.addEventListener('done', (e) => {
-          render(JSON.parse(e.data).result);
-          done(__('Done ({n} min).', { n: ((Date.now() - started) / 60000).toFixed(1) }));
+          const result = JSON.parse(e.data).result;
+          render(result);
+          const min = ((Date.now() - started) / 60000).toFixed(1);
+          done(result.ocrDevice ? __('Done ({n} min, OCR on {device}).', { n: min, device: deviceText(result.ocrDevice) }) : __('Done ({n} min).', { n: min }));
+          refreshServer();
+          if (result.historyId) loadHistory(kind); // kept in the history (a stopped run is not)
         });
         es.addEventListener('error', (e) => {
           let msg = __('Lost the connection to the server');
@@ -269,7 +361,7 @@
     }
 
     streamRunner({
-      btn: $('ocrRunBtn'), status: $('ocrStatus'), error: $('ocrError'), label: __('Run OCR benchmark'),
+      kind: 'ocr', btn: $('ocrRunBtn'), status: $('ocrStatus'), error: $('ocrError'), label: __('Run OCR benchmark'),
       url: () => '/api/benchmark/ocr/stream',
       progress: (seen) => {
         const e = seen.reduce((a, f) => a + (f.exact || 0), 0), c = seen.reduce((a, f) => a + (f.cells || 0), 0);
@@ -296,9 +388,11 @@
     function renderModel(r) {
       const types = Object.keys(r.byType || {});
       const pctOf = (s) => (s && s.rowTotal ? `${s.rowExact}%` : '–');
+      // rows right on the 7 core columns only (date, day, duty, dep, begin, end, arr)
+      const coreOf = (s) => (s && s.rowTotal && s.coreRowExact != null ? `<br/><small>${__('core columns: {p}%', { p: s.coreRowExact })}</small>` : '');
       const cards = `<div class="summary">
-        ${card(pctOf(r.overall), `<b>${__('Overall')}</b>: ${__('{ok}/{total} rows right · {n} files', { ok: r.overall.rowMatches, total: r.overall.rowTotal, n: r.overall.files })}`)}
-        ${types.map(t => card(pctOf(r.byType[t]), `<i class="fa-solid ${TYPE_ICONS[t]}" aria-hidden="true"></i> ${TYPE_NAMES[t] || t}: ${__('{ok}/{total} rows · {n} files', { ok: r.byType[t].rowMatches, total: r.byType[t].rowTotal, n: r.byType[t].files })}`)).join('')}
+        ${card(pctOf(r.overall), `<b>${__('Overall')}</b>: ${__('{ok}/{total} rows right · {n} files', { ok: r.overall.rowMatches, total: r.overall.rowTotal, n: r.overall.files })}${coreOf(r.overall)}`)}
+        ${types.map(t => card(pctOf(r.byType[t]), `<i class="fa-solid ${TYPE_ICONS[t]}" aria-hidden="true"></i> ${TYPE_NAMES[t] || t}: ${__('{ok}/{total} rows · {n} files', { ok: r.byType[t].rowMatches, total: r.byType[t].rowTotal, n: r.byType[t].files })}${coreOf(r.byType[t])}`)).join('')}
         ${card(r.errors, __('files that failed'))}
       </div>`;
       const trained = r.model?.trainedAt ? new Date(r.model.trainedAt).toLocaleString() : '?';
@@ -313,6 +407,12 @@
           ${types.map(t => row(TYPE_NAMES[t] || t, r.byType[t].perField)).join('')}
         </table></div>
         <p style="font-size:12px;color:#888">${__('Images have only 7 columns ({cols}; matched allowing for OCR errors); text files (PDF, CSV, XLS, XLSX, TXT) have {n} columns, matched exactly. "Overall" only counts the 7 columns every type has.', { cols: IMAGE_ONLY.join(', '), n: ALL_FIELDS.length })}</p>`;
+      const layouts = Object.entries(r.byLayout || {});
+      const layoutTable = layouts.length ? `<h3 class="section-title">${__('By layout')} <small style="font-weight:normal;color:#888">${__('(most rows lost first)')}</small></h3>
+        <div style="overflow-x:auto"><table><tr><th style="text-align:left">${__('Layout')}</th><th>${__('Files')}</th><th>${__('Rows right')}</th><th>${__('Core columns right')}</th><th>${__('Rows lost')}</th></tr>
+        ${layouts.map(([l, s]) => `<tr><th style="text-align:left">${escapeHtml(l)}</th><td>${s.files}</td><td>${s.rowExact ?? '–'}%<br/><small>${s.rowMatches}/${s.rowTotal}</small></td><td>${s.coreRowExact ?? '–'}%</td><td>${s.rowTotal - s.rowMatches}</td></tr>`).join('')}
+        </table></div>
+        <p style="font-size:12px;color:#888">${__('Layout = the format the parser recognizes in the file ("unknown": not recognized). "Core columns right" ignores the extra columns (info, crew, registration...).')}</p>` : '';
       const sorted = (r.files || []).slice().sort((a, b) => (a.error ? -1 : b.error ? 1 : (a.rowExact ?? 0) - (b.rowExact ?? 0)));
       const rows = sorted.map((f) => {
         const t = typeOfFile(f.file);
@@ -325,12 +425,12 @@
           : '';
         return `<tr><td style="white-space:nowrap"><i class="fa-solid ${TYPE_ICONS[t]}" aria-hidden="true"></i> ${TYPE_NAMES[t]}</td><td>${escapeHtml(f.file)}</td><td>${score}</td><td>${f.predCount ?? ''}</td><td style="font-size:12px;color:#888">${tags}</td><td>${reviewLink(f.file, f.kind === 'image' && !f.error)}${diff}</td></tr>`;
       }).join('');
-      $('modelResult').innerHTML = cards + note + fields + `<h3 class="section-title">${__('Per file')} <small style="font-weight:normal;color:#888">${__('(worst first)')}</small></h3>
+      $('modelResult').innerHTML = cards + note + fields + layoutTable + `<h3 class="section-title">${__('Per file')} <small style="font-weight:normal;color:#888">${__('(worst first)')}</small></h3>
         <table><tr><th>${__('Type')}</th><th>File</th><th>${__('Rows right / label')}</th><th>${__('Rows from the model')}</th><th></th><th></th></tr>${rows}</table>`;
     }
 
     streamRunner({
-      btn: $('modelRunBtn'), status: $('modelStatus'), error: $('modelError'), label: __('Run roster benchmark'),
+      kind: 'model', btn: $('modelRunBtn'), status: $('modelStatus'), error: $('modelError'), label: __('Run roster benchmark'),
       url: () => {
         const types = [...document.querySelectorAll('#typeChoices input:checked')].map(i => i.value);
         if (!types.length) { $('modelStatus').textContent = __('Pick at least one file type.'); return null; }
@@ -373,7 +473,7 @@
     }
 
     streamRunner({
-      btn: $('acarsRunBtn'), status: $('acarsStatus'), error: $('acarsError'), label: __('Run ACARS benchmark'),
+      kind: 'acars', btn: $('acarsRunBtn'), status: $('acarsStatus'), error: $('acarsError'), label: __('Run ACARS benchmark'),
       url: () => '/api/benchmark/acars/stream',
       progress: (seen) => {
         const m = seen.reduce((a, f) => a + (f.fieldsRight || 0), 0), t = seen.reduce((a, f) => a + (f.fieldTotal || 0), 0);
@@ -381,6 +481,183 @@
       },
       render: renderAcars,
     });
+
+    // ---- History of the finished runs (/api/benchmark/history/<kind>): view one again, compare two ----
+    // Per kind: its headline scores, the per-column scores (rows of { name, values }) and the result's renderer.
+    const pctOk = (ok, total) => (total ? Math.round(1000 * ok / total) / 10 : null);
+    const HISTORY = {
+      ocr: {
+        result: 'ocrResult', render: renderOcr, cols: OCR_FIELDS.map(f => [f, f]), unit: __('cells'),
+        metrics: (s) => [
+          ['cells', __('Cells read exactly'), s.overall?.wordAcc, `${s.overall?.exact}/${s.overall?.cells}`],
+          ['chars', __('Characters right'), s.overall?.charAcc, ''],
+          ['conf', __('mean OCR confidence'), s.meanConfidence, ''],
+        ],
+        fields: (s) => [{ name: 'OCR', values: Object.fromEntries(OCR_FIELDS.map(f => [f, s.perField?.[f]?.wordAcc])) }],
+      },
+      model: {
+        result: 'modelResult', render: renderModel, cols: ALL_FIELDS.map(f => [f, f]), unit: __('rows'),
+        metrics: (s) => [
+          ['overall', __('Overall'), s.overall?.rowExact, `${s.overall?.rowMatches}/${s.overall?.rowTotal}`],
+          ['core', __('Overall, core columns'), s.overall?.coreRowExact, s.overall?.coreRowMatches != null ? `${s.overall.coreRowMatches}/${s.overall.rowTotal}` : ''],
+          ...Object.keys(TYPE_NAMES).map(t => [t, TYPE_NAMES[t], s.byType?.[t]?.rowExact, s.byType?.[t] ? `${s.byType[t].rowMatches}/${s.byType[t].rowTotal}` : '']),
+        ],
+        fields: (s) => [
+          ...(s.types?.length > 1 ? [{ name: __('Overall'), values: Object.fromEntries(Object.entries(s.overall?.perField || {}).map(([k, v]) => [k, v.pct])) }] : []),
+          ...Object.entries(s.byType || {}).map(([t, b]) => ({ name: TYPE_NAMES[t] || t, values: Object.fromEntries(Object.entries(b.perField || {}).map(([k, v]) => [k, v.pct])) })),
+        ],
+      },
+      acars: {
+        result: 'acarsResult', render: renderAcars, cols: ACARS_COLS.map(([k, t]) => [k, __(t)]), unit: __('fields'),
+        metrics: (s) => [
+          ['fields', __('Fields right'), s.fieldPct, `${s.fieldMatches}/${s.fieldTotal}`],
+          ['all', __('Pictures fully right'), s.allRightPct, `${s.allRight}/${s.pictures}`],
+        ],
+        fields: (s) => [{ name: 'ACARS', values: Object.fromEntries(ACARS_COLS.map(([k]) => [k, s.perField?.[k]?.pct])) }],
+      },
+    };
+    const runs = {}; // kind -> summaries, newest first
+
+    const fmtPct = (v) => (v == null ? '–' : `${v}%`);
+    /** "+1.2" green / "−0.8" red: percentage points from a to b. */
+    function delta(a, b) {
+      if (a == null || b == null) return '';
+      const d = Math.round(10 * (b - a)) / 10;
+      if (!d) return `<span class="delta same">±0</span>`;
+      return `<span class="delta ${d > 0 ? 'up' : 'down'}">${d > 0 ? '+' : '−'}${Math.abs(d)}</span>`;
+    }
+    const modelName = (s) => (typeof s.model === 'string' ? s.model : s.model?.id || '?');
+    const runTime = (s) => new Date(s.at).toLocaleString();
+
+    async function loadHistory(kind) {
+      const box = $(`${kind}History`);
+      try {
+        const res = await fetch(`/api/benchmark/history/${kind}`);
+        const d = await res.json();
+        if (!res.ok) throw new Error(d.error || res.statusText);
+        runs[kind] = d.runs;
+        renderHistory(kind);
+      } catch (e) {
+        box.hidden = false;
+        box.querySelector('summary').textContent = __('History');
+        box.querySelector('.history-body').innerHTML = `<div class="error visible">${escapeHtml(__('Could not load the history: {error}', { error: e.message }))}</div>`;
+      }
+    }
+
+    function renderHistory(kind) {
+      const box = $(`${kind}History`), h = HISTORY[kind], list = runs[kind] || [];
+      box.hidden = !list.length; // shown once a run is kept
+      if (!list.length) return;
+      const last = list[0];
+      box.querySelector('summary').innerHTML = `${__('History')} <small>${
+        __('{n} runs · last {time}: {score}', { n: list.length, time: escapeHtml(runTime(last)), score: fmtPct(h.metrics(last)[0][2]) })}</small>`;
+      // the columns: only the scores some run has (the model runs differ by the file types picked)
+      const keys = h.metrics(last).map(([k]) => k).filter(k => list.some(s => h.metrics(s).find(m => m[0] === k)[2] != null));
+      const heads = h.metrics(last).filter(([k]) => keys.includes(k));
+      const rows = list.map((s, i) => {
+        const prev = list[i + 1];
+        const m = Object.fromEntries(h.metrics(s).map(x => [x[0], x]));
+        const p = prev && Object.fromEntries(h.metrics(prev).map(x => [x[0], x]));
+        return `<tr>
+          <td><input type="checkbox" data-pick="${escapeHtml(s.id)}" title="${__('Pick two runs to compare them')}"></td>
+          <td class="num">${escapeHtml(runTime(s))}</td>
+          <td title="${escapeHtml(deviceTitle(s.device))}">${deviceText(s.device)}</td>
+          <td><code>${escapeHtml(modelName(s))}</code>${kind === 'model' ? `<br><small style="color:#888">${escapeHtml((s.types || []).map(t => TYPE_NAMES[t] || t).join(', '))}</small>` : ''}</td>
+          ${heads.map(([k]) => `<td class="num" title="${escapeHtml(m[k][3] || '')}">${fmtPct(m[k][2])} ${p ? delta(p[k][2], m[k][2]) : ''}</td>`).join('')}
+          <td><input class="note" data-note="${escapeHtml(s.id)}" value="${escapeHtml(s.note || '')}" placeholder="${__('what changed…')}"></td>
+          <td class="num"><button class="link" data-view="${escapeHtml(s.id)}" title="${__('Show this run\'s whole result below')}"><i class="fa-solid fa-eye" aria-hidden="true"></i></button>
+            <button class="link danger" data-del="${escapeHtml(s.id)}" title="${__('Delete this run')}"><i class="fa-solid fa-trash" aria-hidden="true"></i></button></td>
+        </tr>`;
+      }).join('');
+      box.querySelector('.history-body').innerHTML = `
+        <div class="runs"><table>
+          <tr><th></th><th>${__('Time')}</th><th title="${__('What the OCR server read on: GPU or CPU')}">${__('OCR on')}</th><th>${__('Model')}</th>${heads.map(([, label]) => `<th>${label}</th>`).join('')}<th>${__('Note')}</th><th></th></tr>
+          ${rows}
+        </table></div>
+        <div class="bar"><button data-compare disabled><i class="fa-solid fa-code-compare" aria-hidden="true"></i> ${__('Compare the 2 picked runs')}</button>
+          <span>${__('The small number is the change from the run before it, in percentage points.')}</span></div>
+        <div class="compare-out"></div>`;
+    }
+
+    /** Two runs side by side: the scores, each column and the files that changed. a = the older one. */
+    function renderCompare(kind, a, b) {
+      const h = HISTORY[kind];
+      const ma = Object.fromEntries(h.metrics(a).map(x => [x[0], x]));
+      const metrics = h.metrics(b).filter(([k, , v]) => v != null || ma[k][2] != null).map(([k, label, v, detail]) =>
+        `<tr><th style="text-align:left">${label}</th><td>${fmtPct(ma[k][2])} <small>${escapeHtml(ma[k][3] || '')}</small></td><td>${fmtPct(v)} <small>${escapeHtml(detail || '')}</small></td><td>${delta(ma[k][2], v)}</td></tr>`).join('');
+      const fa = Object.fromEntries(h.fields(a).map(r => [r.name, r.values]));
+      const cols = h.cols.filter(([k]) => h.fields(b).some(r => r.values[k] != null) || h.fields(a).some(r => r.values[k] != null));
+      const fieldRows = h.fields(b).map(r => `<tr><th style="text-align:left">${escapeHtml(r.name)}</th>${cols.map(([k]) =>
+        `<td>${fmtPct(r.values[k])}<br>${delta(fa[r.name]?.[k], r.values[k])}</td>`).join('')}</tr>`).join('');
+
+      // files: worse first, then better, then the ones only one run has
+      const names = [...new Set([...Object.keys(a.files || {}), ...Object.keys(b.files || {})])];
+      const changed = names.map((name) => {
+        const x = a.files?.[name], y = b.files?.[name];
+        const px = x && pctOk(x[0], x[1]), py = y && pctOk(y[0], y[1]);
+        const d = px != null && py != null ? py - px : null;
+        const what = !(name in (a.files || {})) ? 'new' : !(name in (b.files || {})) ? 'gone' : !x || !y ? 'error' : d < 0 ? 'worse' : d > 0 ? 'better' : (x[1] !== y[1] ? 'label' : null);
+        return what && { name, x, y, d, what };
+      }).filter(Boolean);
+      const order = { worse: 0, error: 1, better: 2, label: 3, new: 4, gone: 5 };
+      changed.sort((p, q) => order[p.what] - order[q.what] || (p.what === 'better' ? q.d - p.d : (p.d ?? 0) - (q.d ?? 0))); // biggest change first
+      const WHAT = { worse: __('worse'), better: __('better'), error: __('failed in one run'), label: __('label changed (same score)'), new: __('only in the newer run'), gone: __('only in the older run') };
+      const cell = (v) => (v === undefined ? '–' : v === null ? `<span style="color:#d32f2f">${__('error')}</span>` : `${v[0]}/${v[1]} (${pctOk(v[0], v[1]) ?? 0}%)`);
+      const count = (w) => changed.filter(c => c.what === w).length;
+      const files = changed.length
+        ? `<table><tr><th>File</th><th>${__('Older run')}</th><th>${__('Newer run')}</th><th></th><th></th></tr>${changed.map(c => `<tr>
+            <td>${escapeHtml(c.name)}</td><td>${cell(c.x)}</td><td>${cell(c.y)}</td><td>${c.d != null && c.d ? delta(0, c.d) : ''} <small style="color:#888">${WHAT[c.what]}</small></td><td>${reviewLink(c.name, false)}</td></tr>`).join('')}</table>`
+        : `<div class="empty">${__('Every file has the same score in both runs.')}</div>`;
+
+      return `<div class="compare">
+        <h4>${__('Older run')}: ${escapeHtml(runTime(a))} · <code>${escapeHtml(modelName(a))}</code>${a.device ? ` · ${__('OCR on {device}', { device: deviceText(a.device) })}` : ''}${a.note ? ` · ${escapeHtml(a.note)}` : ''}<br>
+          ${__('Newer run')}: ${escapeHtml(runTime(b))} · <code>${escapeHtml(modelName(b))}</code>${b.device ? ` · ${__('OCR on {device}', { device: deviceText(b.device) })}` : ''}${b.note ? ` · ${escapeHtml(b.note)}` : ''}</h4>
+        <table><tr><th></th><th>${__('Older run')}</th><th>${__('Newer run')}</th><th>${__('Change')}</th></tr>${metrics}</table>
+        <h4>${__('By column')} <small style="font-weight:normal;color:#888">${__('(newer run, and its change)')}</small></h4>
+        <div style="overflow-x:auto"><table><tr><th></th>${cols.map(([, t]) => `<th>${escapeHtml(t)}</th>`).join('')}</tr>${fieldRows}</table></div>
+        <h4>${__('Files that changed')} <small style="font-weight:normal;color:#888">${__('{worse} worse · {better} better · {other} other', { worse: count('worse'), better: count('better'), other: changed.length - count('worse') - count('better') })} · ${__('scores in {unit} right', { unit: h.unit })}</small></h4>
+        ${files}
+      </div>`;
+    }
+
+    for (const kind of Object.keys(HISTORY)) {
+      const box = $(`${kind}History`);
+      const find = (id) => runs[kind].find(s => s.id === id);
+      box.addEventListener('change', async (e) => {
+        if (e.target.matches('[data-pick]')) {
+          const picked = [...box.querySelectorAll('[data-pick]:checked')];
+          if (picked.length > 2) picked.find(x => x !== e.target).checked = false; // keep the last two
+          box.querySelector('[data-compare]').disabled = box.querySelectorAll('[data-pick]:checked').length !== 2;
+        } else if (e.target.matches('[data-note]')) {
+          const id = e.target.dataset.note;
+          const res = await fetch(`/api/benchmark/history/${kind}/${encodeURIComponent(id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ note: e.target.value }) });
+          if (res.ok) Object.assign(find(id), (await res.json()).summary);
+          e.target.style.borderColor = res.ok ? '#2e7d32' : '#c62828';
+        }
+      });
+      box.addEventListener('click', async (e) => {
+        const view = e.target.closest('[data-view]'), del = e.target.closest('[data-del]'), cmp = e.target.closest('[data-compare]');
+        if (view) {
+          const id = view.dataset.view;
+          const out = $(HISTORY[kind].result);
+          out.innerHTML = `<div class="empty">${__('Loading…')}</div>`;
+          const d = await fetch(`/api/benchmark/history/${kind}/${encodeURIComponent(id)}`).then(r => r.json()).catch(() => null);
+          if (!d?.result) { out.innerHTML = `<div class="error visible">${__('Could not load this run.')}</div>`; return; }
+          HISTORY[kind].render(d.result);
+          out.insertAdjacentHTML('afterbegin', `<div class="shown-run"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i> ${__('This is the run of {time}, kept in the history.', { time: escapeHtml(runTime(d.summary)) })}${d.summary.device ? ` ${__('OCR on {device}', { device: deviceText(d.summary.device) })}.` : ''}${d.summary.note ? ` <b>${escapeHtml(d.summary.note)}</b>` : ''}</div>`);
+          out.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        } else if (del) {
+          const s = find(del.dataset.del);
+          if (!confirm(__('Delete the run of {time} from the history?', { time: runTime(s) }))) return;
+          const res = await fetch(`/api/benchmark/history/${kind}/${encodeURIComponent(s.id)}`, { method: 'DELETE' });
+          if (res.ok) loadHistory(kind);
+        } else if (cmp && !cmp.disabled) {
+          const [x, y] = [...box.querySelectorAll('[data-pick]:checked')].map(c => find(c.dataset.pick)).sort((p, q) => p.id.localeCompare(q.id));
+          box.querySelector('.compare-out').innerHTML = renderCompare(kind, x, y);
+        }
+      });
+      loadHistory(kind);
+    }
 
   </script>
 </body>

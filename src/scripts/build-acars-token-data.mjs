@@ -33,7 +33,8 @@ const seen = new Set();
 const summary = { files: [], skipped: [], tokens: 0, tagged: 0, unsure: 0, byField: {}, values: 0, found: 0, missing: {} };
 const names = listReviewedLabels(ACARS_LABELS_ROOT, 'image').filter(n => fs.existsSync(dataFile(ACARS_DATA_ROOT, n)));
 
-for (const name of names) {
+for (const [k, name] of names.entries()) {
+  console.log(`  [ACARS ${k + 1}/${names.length}] ${name}`); // (progress for the /models page)
   const file = dataFile(ACARS_DATA_ROOT, name);
   const hash = crypto.createHash('md5').update(fs.readFileSync(file)).digest('hex');
   if (seen.has(hash)) { summary.skipped.push({ file: name, reason: 'copy of another picture' }); continue; }
@@ -58,10 +59,9 @@ for (const name of names) {
   }
   fs.writeFileSync(path.join(outDir, `${name}.json`), JSON.stringify({ file: name, kind: 'acars', source: 'label', format: 'acars', pages }));
   summary.files.push({ file: name, found: st.found, missing: st.missing, tokens: pages[0].tokens.length });
-  process.stdout.write('.');
 }
 fs.writeFileSync(path.join(outDir, 'summary.json'), JSON.stringify(summary, null, 2));
 const pct = (a, b) => (b ? (100 * a / b).toFixed(1) : '-');
-console.log(`\nACARS pictures used: ${summary.files.length} (skipped ${summary.skipped.length} copies)`);
+console.log(`ACARS pictures used: ${summary.files.length} (skipped ${summary.skipped.length} copies)`);
 console.log(`Label values found among the OCR words: ${summary.found}/${summary.values} (${pct(summary.found, summary.values)}%), not found: ${JSON.stringify(summary.missing)}`);
 console.log(`Words: ${summary.tokens}, tagged ${summary.tagged}, unsure (left out of training) ${summary.unsure}`);

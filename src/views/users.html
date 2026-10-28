@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Users</title>
+  <script src="/assets/i18n/vi.js"></script>
+  <script src="/assets/i18n.js"></script>
+  <link rel="stylesheet" href="/assets/app.css">
+  <link rel="stylesheet" href="/assets/fontawesome/css/all.min.css">
+  <style>
+    .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 12px 14px; }
+    .toolbar input { font: inherit; font-size: 14px; padding: 7px 10px; border: 1px solid var(--border); border-radius: 6px; min-width: 220px; flex: 1; max-width: 360px; }
+    .toolbar select { font: inherit; font-size: 13px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; }
+    .toolbar .count { margin-left: auto; color: var(--muted); font-size: 13px; }
+    .btn { background: #fff; color: var(--primary); border: 1px solid var(--primary); padding: 5px 9px; border-radius: 6px; cursor: pointer; font: inherit; font-size: 12px; white-space: nowrap; display: inline-flex; gap: 5px; align-items: center; }
+    .btn:hover:not(:disabled) { background: #eef4ff; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn.danger { color: var(--danger); border-color: var(--danger); }
+    .btn.danger:hover:not(:disabled), .btn.danger.sure { background: var(--danger); color: #fff; }
+    .table-wrap { overflow-x: auto; }
+    table.users { width: 100%; border-collapse: collapse; font-size: 13px; }
+    table.users th { text-align: left; font-size: 12px; color: var(--muted); font-weight: 600; padding: 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+    table.users td { padding: 8px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+    table.users tr.disabled td { background: #fafafa; color: #999; }
+    .who b { display: block; font-size: 14px; color: var(--text); overflow-wrap: anywhere; }
+    .who small { color: var(--muted); }
+    .prov i { margin-right: 4px; color: var(--muted); }
+    td select { font: inherit; font-size: 13px; padding: 4px 6px; border: 1px solid var(--border); border-radius: 6px; background: #fff; }
+    td input.lim { width: 76px; font: inherit; font-size: 13px; padding: 4px 6px; border: 1px solid var(--border); border-radius: 6px; }
+    .lims { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+    .src { display: block; font-size: 11px; color: var(--muted); margin-top: 3px; }
+    .use { white-space: nowrap; }
+    .use small { color: var(--muted); }
+    .use .over { color: var(--danger); font-weight: 600; }
+    .actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+    .tag { font-size: 11px; padding: 1px 6px; border-radius: 8px; background: #f0f0f0; color: #666; white-space: nowrap; }
+    .tag.warn { background: #fff3e0; color: #8a4b00; }
+    .status { font-size: 13px; padding: 0 14px 12px; min-height: 18px; }
+    .status.error { color: var(--danger); }
+    .status.ok { color: #2e7d32; }
+    .empty { padding: 20px; color: var(--muted); text-align: center; }
+    .plans-note { font-size: 13px; color: var(--muted); padding: 0 14px 12px; margin: 0; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <script src="/assets/nav.js"></script>
+  <main class="page">
+    <div class="page-header">
+      <h1><i class="fa-solid fa-users" aria-hidden="true"></i> Users</h1>
+      <p class="subtitle">Every account: role, plan and limits of the API, today's calls and API keys. A change is saved at once.</p>
+    </div>
+
+    <section class="card" style="padding:0">
+      <div class="toolbar">
+        <input type="search" id="q" placeholder="Search email or name" aria-label="Search email or name">
+        <select id="filter" aria-label="Show">
+          <option value="all">All accounts</option>
+          <option value="admin">Admins</option>
+          <option value="user">Users</option>
+          <option value="disabled">Disabled</option>
+          <option value="unverified">Email not verified</option>
+        </select>
+        <button type="button" class="btn" id="reload"><i class="fa-solid fa-rotate" aria-hidden="true"></i> Reload</button>
+        <span class="count" id="count"></span>
+      </div>
+      <p class="plans-note" id="plansNote"></p>
+      <div class="status" id="status" role="status"></div>
+      <div class="table-wrap">
+        <table class="users stack-sm">
+          <thead><tr><th>Account</th><th>Signed in with</th><th>Role</th><th>Plan</th><th>Own limits a day (requests / files)</th><th>Today</th><th>Keys</th><th>Created</th><th>Last sign-in</th><th></th></tr></thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+      <div class="empty" id="empty" hidden>No account matches.</div>
+    </section>
+  </main>
+
+  <script type="module">
+    import { api } from '/assets/firebase-auth.js';
+    const t = window.t;
+    const $ = (id) => document.getElementById(id);
+    const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+    // dates and numbers in the page's language, not the browser's
+    const LOCALE = window.I18N?.lang === 'vi' ? 'vi-VN' : 'en-GB';
+    const when = (s) => (s ? new Date(s).toLocaleDateString(LOCALE, { dateStyle: 'medium' }) : '—');
+    const PROV = { 'google.com': ['fa-brands fa-google', 'Google'], 'github.com': ['fa-brands fa-github', 'GitHub'], password: ['fa-solid fa-envelope', 'Email and password'] };
+    const num = (n) => Number(n).toLocaleString(LOCALE);
+    const status = (text, kind = 'ok') => { const s = $('status'); s.textContent = text; s.className = `status ${kind}`; };
+
+    let data = { users: [], plans: [] };
+    let me = null;
+
+    // keep: the message of the change just saved stays
+    async function load(keep = false) {
+      if (!keep) status(t('loading…'), '');
+      try {
+        [data, me] = await Promise.all([api('/api/users'), api('/api/auth/me')]);
+        $('plansNote').textContent = data.plans.map(p => `${t(p.label)}: ${num(p.requests)} ${t('requests')} / ${num(p.reads)} ${t('files a day')}`).join(' · ');
+        render();
+        if (!keep) status('');
+      } catch (e) { status(e.message, 'error'); }
+    }
+
+    function render() {
+      const q = $('q').value.trim().toLowerCase();
+      const f = $('filter').value;
+      const list = data.users.filter(u => (!q || `${u.email} ${u.name}`.toLowerCase().includes(q))
+        && (f === 'all' || (f === 'admin' && u.role === 'admin') || (f === 'user' && u.role === 'user') || (f === 'disabled' && u.disabled) || (f === 'unverified' && !u.emailVerified)));
+      $('count').textContent = t('{n} of {total} accounts', { n: list.length, total: data.users.length });
+      $('empty').hidden = !!list.length;
+      $('rows').innerHTML = list.map(row).join('');
+    }
+
+    function row(u) {
+      const self = me?.user?.uid === u.uid;
+      const plan = data.plans.find(p => p.id === u.plan) || data.plans[0];
+      const lim = u.effective;
+      const over = (used, max) => (u.role !== 'admin' && used >= max ? ' class="over"' : '');
+      const roleLocked = u.roleFixed || self;
+      return `<tr data-uid="${esc(u.uid)}" class="${u.disabled ? 'disabled' : ''}">
+        <td class="who" data-label="${esc(t('Account'))}"><b>${esc(u.email || u.uid)}</b><small>${esc(u.name)}</small>
+          ${u.emailVerified ? '' : ` <span class="tag warn">${esc(t('email not verified'))}</span>`}${u.disabled ? ` <span class="tag">${esc(t('disabled'))}</span>` : ''}${self ? ` <span class="tag">${esc(t('you'))}</span>` : ''}</td>
+        <td class="prov" data-label="${esc(t('Signed in with'))}">${u.providers.map(p => `<i class="${(PROV[p] || ['fa-solid fa-circle-question'])[0]}" title="${esc(t((PROV[p] || [, p])[1]))}" aria-label="${esc(t((PROV[p] || [, p])[1]))}"></i>`).join('')}</td>
+        <td data-label="${esc(t('Role'))}"><select data-f="role" ${roleLocked ? 'disabled' : ''} title="${esc(u.roleFixed ? t('Admin by ADMIN_EMAILS (.env)') : self ? t('Your own role') : '')}">
+          <option value="user"${u.role === 'user' ? ' selected' : ''}>${esc(t('User'))}</option><option value="admin"${u.role === 'admin' ? ' selected' : ''}>${esc(t('Admin'))}</option></select></td>
+        <td data-label="${esc(t('Plan'))}"><select data-f="plan">${data.plans.map(p => `<option value="${esc(p.id)}"${p.id === u.plan ? ' selected' : ''}>${esc(t(p.label))}</option>`).join('')}${u.planSource === 'admin' ? `<option value="auto">${esc(t('From payments'))}</option>` : ''}</select>
+          <small class="src">${u.planSource === 'admin' ? esc(t('set by an admin')) : u.planSource === 'billing' && u.planUntil ? esc(t('paid until {date}', { date: when(u.planUntil) })) : ''}</small></td>
+        <td data-label="${esc(t('Own limits'))}"><div class="lims">
+          <input class="lim" data-f="requests" type="number" min="0" step="1" value="${u.limits?.requests ?? ''}" placeholder="${num(plan.requests)}" aria-label="${esc(t('Requests a day'))}">
+          <input class="lim" data-f="reads" type="number" min="0" step="1" value="${u.limits?.reads ?? ''}" placeholder="${num(plan.reads)}" aria-label="${esc(t('Files read a day'))}"></div></td>
+        <td class="use" data-label="${esc(t('Today'))}">${u.role === 'admin' ? `${num(u.usage.requests)} <small>(${esc(t('no limit'))})</small>`
+          : `<span${over(u.usage.requests, lim.requests)}>${num(u.usage.requests)}</span><small> / ${num(lim.requests)}</small> · <span${over(u.usage.reads, lim.reads)}>${num(u.usage.reads)}</span><small> / ${num(lim.reads)}</small>`}</td>
+        <td data-label="${esc(t('Keys'))}">${u.keys}</td>
+        <td data-label="${esc(t('Created'))}">${esc(when(u.created))}</td>
+        <td data-label="${esc(t('Last sign-in'))}">${esc(when(u.lastSignIn))}</td>
+        <td><div class="actions">
+          <button type="button" class="btn" data-act="disable" ${self ? 'disabled' : ''}>${u.disabled ? `<i class="fa-solid fa-unlock" aria-hidden="true"></i> <span>${esc(t('Enable'))}</span>` : `<i class="fa-solid fa-lock" aria-hidden="true"></i> <span>${esc(t('Disable'))}</span>`}</button>
+          <button type="button" class="btn danger" data-act="keys" ${u.keys ? '' : 'disabled'}><i class="fa-solid fa-ban" aria-hidden="true"></i> <span>${esc(t('Revoke keys'))}</span></button>
+          <button type="button" class="btn danger" data-act="delete" ${self ? 'disabled' : ''}><i class="fa-solid fa-trash" aria-hidden="true"></i> <span>${esc(t('Delete'))}</span></button>
+        </div></td></tr>`;
+    }
+
+    const userOf = (el) => data.users.find(u => u.uid === el.closest('tr').dataset.uid);
+    async function patch(u, body, ok = t('Saved: {email}', { email: u.email || u.uid })) {
+      try {
+        await api(`/api/users/${encodeURIComponent(u.uid)}`, body, 'PATCH');
+        status(ok);
+      } catch (e) { status(e.message, 'error'); }
+      await load(true);
+    }
+
+    $('rows').addEventListener('change', (e) => {
+      const el = e.target.closest('[data-f]');
+      if (!el) return;
+      const u = userOf(el);
+      const f = el.dataset.f;
+      if (f === 'role') {
+        patch(u, { role: el.value }, t('Saved. {email} signs in again to get the new role.', { email: u.email || u.uid }));
+      } else if (f === 'plan') patch(u, { plan: el.value });
+      else {
+        const tr = el.closest('tr');
+        const requests = tr.querySelector('[data-f="requests"]').value;
+        const reads = tr.querySelector('[data-f="reads"]').value;
+        patch(u, { limits: requests === '' && reads === '' ? null : { requests, reads } });
+      }
+    });
+
+    // "Sure?" on a second click (no browser dialog)
+    $('rows').addEventListener('click', async (e) => {
+      const btn = e.target.closest('[data-act]');
+      if (!btn || btn.disabled) return;
+      const u = userOf(btn);
+      const act = btn.dataset.act;
+      if (act === 'disable') return patch(u, { disabled: !u.disabled });
+      if (!btn.classList.contains('sure')) {
+        btn.classList.add('sure');
+        btn.querySelector('span').textContent = t('Sure?');
+        setTimeout(() => { if (btn.isConnected) { btn.classList.remove('sure'); btn.querySelector('span').textContent = t(act === 'keys' ? 'Revoke keys' : 'Delete'); } }, 4000);
+        return;
+      }
+      btn.disabled = true;
+      try {
+        if (act === 'keys') {
+          const r = await api(`/api/users/${encodeURIComponent(u.uid)}/keys`, null, 'DELETE');
+          status(t('{n} keys revoked: {email}', { n: r.revoked, email: u.email }));
+        } else {
+          await api(`/api/users/${encodeURIComponent(u.uid)}`, null, 'DELETE');
+          status(t('Deleted: {email}', { email: u.email || u.uid }));
+        }
+      } catch (err) { status(err.message, 'error'); }
+      await load(true);
+    });
+
+    $('q').addEventListener('input', render);
+    $('filter').addEventListener('change', render);
+    $('reload').addEventListener('click', load);
+    load();
+  </script>
+</body>
+</html>

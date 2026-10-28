@@ -1,14 +1,17 @@
 /**
- * Build data/airports.json (used by /airport and /api/airports) from public-domain lists:
+ * Build airports.json (used by /airport, /api/airports, night time, route map) from public-domain lists
+ * and publish it to the site data bucket in MinIO (SITE_BUCKET, services/site-data.js):
  *   - OurAirports airports.csv + regions.csv  (names, ICAO / IATA / GPS / local (FAA) codes, coordinates, city, country)
  *   - NOAA ISD station history                (WMO station number of the weather station at an airport, by ICAO)
  *
  * Usage:
  *   npm run airports:update                  # download the lists, then build
  *   npm run airports:update -- --from=<dir>  # use airports.csv, regions.csv, isd-history.csv already in <dir>
+ *   npm run airports:update -- --publish=<airports.json>  # publish a file built before, without building
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { publishSiteFile } from '../services/site-data.js';
 
 const SOURCES = {
   'airports.csv': 'https://davidmegginson.github.io/ourairports-data/airports.csv',
@@ -17,9 +20,22 @@ const SOURCES = {
 };
 // Airports only: no heliports, balloon ports or closed fields.
 const TYPES = ['large_airport', 'medium_airport', 'small_airport', 'seaplane_base'];
-const OUT = path.resolve(process.cwd(), 'data', 'airports.json');
+const arg = (name) => process.argv.slice(2).find(a => a.startsWith(`--${name}=`))?.slice(name.length + 3);
+const from = arg('from');
 
-const from = process.argv.slice(2).find(a => a.startsWith('--from='))?.split('=')[1];
+async function publish(buf) {
+  const { size, where } = await publishSiteFile('airports.json', buf);
+  console.log(`Published airports.json (${(size / 1e6).toFixed(1)} MB) to ${where.backend === 'minio' ? `${where.endpoint} bucket ${where.bucket}` : where.dir}`);
+}
+
+const given = arg('publish');
+if (given) {
+  const buf = fs.readFileSync(given);
+  const { fields, rows } = JSON.parse(buf.toString('utf8'));
+  if (!Array.isArray(fields) || !Array.isArray(rows) || !rows.length) throw new Error(`${given} is not an airports.json built by this script`);
+  await publish(buf);
+  process.exit(0);
+}
 
 /** RFC 4180 CSV -> array of objects keyed by the header row. */
 function parseCsv(text) {
@@ -97,13 +113,12 @@ for (const a of parseCsv(airportsCsv)) {
 
 // Compact: one header + rows of values, ~half the size of an array of objects.
 const fields = Object.keys(airports[0]);
-fs.mkdirSync(path.dirname(OUT), { recursive: true });
-fs.writeFileSync(OUT, JSON.stringify({
+const out = Buffer.from(JSON.stringify({
   source: 'OurAirports (public domain), NOAA ISD station history (WMO numbers)',
   built: new Date().toISOString().slice(0, 10),
   fields,
   rows: airports.map(a => fields.map(f => a[f])),
 }));
 const count = (f) => airports.filter(a => a[f]).length;
-console.log(`${airports.length} airports -> ${path.relative(process.cwd(), OUT)} (${(fs.statSync(OUT).size / 1e6).toFixed(1)} MB): ` +
-  `ICAO ${count('icao')}, IATA ${count('iata')}, FAA ${count('faa')}, WMO ${count('wmo')}`);
+console.log(`${airports.length} airports: ICAO ${count('icao')}, IATA ${count('iata')}, FAA ${count('faa')}, WMO ${count('wmo')}`);
+await publish(out);

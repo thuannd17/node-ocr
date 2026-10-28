@@ -42,3 +42,10 @@ models/rec/*/split.json
 models/rec/v5
 models/rec/v6
 models/rec/v7
+
+# Firebase / Cloud Run deploy files
+firebase
+firebase.json
+.firebaserc
+.firebase
+.gcloudignore

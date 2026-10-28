@@ -31,3 +31,12 @@ test('no Vietnamese left in the page code outside the dictionary', () => {
     assert.deepEqual(bad, [], f);
   }
 });
+
+test('the language: the lang cookie, else the X-UI-Lang header (behind Firebase Hosting only "__session" arrives)', async () => {
+  const { langOf } = await import('../src/utils/i18n.js');
+  assert.equal(langOf({ headers: { cookie: 'lang=vi' } }), 'vi');
+  assert.equal(langOf({ headers: { 'x-ui-lang': 'vi' } }), 'vi');
+  assert.equal(langOf({ headers: { cookie: 'lang=en', 'x-ui-lang': 'vi' } }), 'en');
+  assert.equal(langOf({ headers: { 'x-ui-lang': 'xx' } }), 'en');
+  assert.equal(langOf({ headers: {} }), 'en');
+});

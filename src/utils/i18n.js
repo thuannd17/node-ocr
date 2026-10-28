@@ -9,9 +9,12 @@ import '../views/assets/i18n.js';
 const { LANGS, makeT } = globalThis.I18N_CORE;
 const T = { en: makeT(null), vi: makeT(globalThis.I18N_VI) };
 
+// the 'lang' cookie, or the X-UI-Lang header the pages' fetch() calls carry (behind Firebase Hosting no other cookie arrives)
 export const langOf = (req) => {
   const m = /(?:^|;\s*)lang=(\w+)/.exec(req.headers.cookie || '');
-  return m && LANGS[m[1]] ? m[1] : 'en';
+  if (m && LANGS[m[1]]) return m[1];
+  const h = String(req.headers['x-ui-lang'] || '').toLowerCase();
+  return LANGS[h] ? h : 'en';
 };
 
 /** Translate the user-facing fields of a JSON reply. */

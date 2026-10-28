@@ -585,6 +585,34 @@ test('compact plan "date duty dep arr AC": period after the name, LB times, crew
   ]);
 });
 
+test('compact plan in 3 columns: a header "date" 1.5 pt above the others still starts a column; C/I 24 pt right of "date" is the duty', () => {
+  // coordinates of 451bf660… (Dec 2024): the third "date" at y 72.87, the rest of the header at 74.3
+  const w = (text, x, y) => ({ text, x, y, w: text.length * 3.5, h: 7 });
+  const head = (dateY, ...xs) => ['date', 'duty', 'dep', 'arr', 'AC'].map((t, k) => w(t, xs[k], k ? 74.32 : dateY));
+  const pages = [{ page: 1, width: 842, height: 595, items: [
+    w('Individual duty plan for', 18, 13), w('Period:', 434, 13), w('01Dec24', 471, 13), w('--', 514, 13), w('31Dec24', 526, 13),
+    ...head(74.38, 22.8, 76.9, 126.4, 204.2, 235.9), ...head(74.38, 278.6, 333.4, 382.9, 460.7, 489.6), ...head(72.87, 529.9, 585, 628.9, 701.2, 730.1),
+    w('Sun01', 22, 90), w('C/I', 47, 90.6), w('KHH', 128, 90.6), w('1340', 155, 90.6),
+    w('NX667', 78, 100), w('KHH', 128, 100), w('1440', 155, 100), w('1615', 182, 100), w('MFM', 209, 100), w('A3XX', 236, 100),
+    w('C/O', 47, 109), w('1645', 182, 109), w('MFM', 209, 109),
+    w('Thu12', 277, 90), w('DDO', 335, 90),
+    w('Tue24', 529, 90), w('C/I', 555.5, 90.6), w('MFM', 629, 90.6), w('1530', 653.5, 90.6),
+    w('NX936', 583.5, 100), w('MFM', 629, 100), w('1650', 653.5, 100), w('!1850', 678, 100), w('DMK', 702.5, 100), w('A3XX', 727, 100),
+    w('C/O', 555.5, 109), w('!1920', 678, 109), w('DMK', 702.5, 109),
+    w('Local time at homebase or (!) outside homebase', 18, 545),
+  ] }];
+  const { published: rows } = parseNetlinePdf(pages);
+  assert.deepEqual(rows.map(r => [r.date, r.duty, r.dep, r.begin, r.end, r.arr, r.ac]), [
+    ['1 Dec 24', 'C/I', 'KHH', '13:40 LB', '', '', ''],
+    ['1 Dec 24', 'NX667', 'KHH', '14:40 LB', '16:15 LB', 'MFM', 'A3XX'],
+    ['1 Dec 24', 'C/O', '', '', '16:45 LB', 'MFM', ''],
+    ['12 Dec 24', 'DDO', '', '', '', '', ''],
+    ['24 Dec 24', 'C/I', 'MFM', '15:30 LB', '', '', ''],
+    ['24 Dec 24', 'NX936', 'MFM', '16:50 LB', '18:50 L', 'DMK', 'A3XX'],
+    ['24 Dec 24', 'C/O', '', '', '19:20 L', 'DMK', ''],
+  ]);
+});
+
 // ---- 2026-10-20 layouts (synthetic pages with the samples' coordinates; names and numbers made up) ----
 const iw = (text, x, y, w) => ({ text, x, y, w, h: 5 });
 
@@ -1158,6 +1186,43 @@ test('Current Roster Report (Jeppesen): "JUL 24WED" dates, a flight over midnigh
     ['26 Jul 24', 'XX702', 'BBB', '20:01 L', '01:05 L +1', 'CCC', '', '[Block: 04:04]'],
     ['26 Jul 24', 'C/O', '', '', '01:35 L +1', 'CCC', '', ''],
     ['27 Jul 24', 'HTL', 'CCC', '01:35 L', '01:25 L +1', 'CCC', '', 'Grand Hotel'],
+  ]);
+});
+
+test('Sabre Individual Roster: "Crew onboard" (ISO dates, a flight twice a day), "Day notes", "Hotel information" and "Information" go to crew and info; the hotel printed again the next day is one night', () => {
+  const row = (y, cells) => cells.map(([text, x]) => iw(text, x, y, text.length * 4));
+  const head = (y) => row(y, [['Date', 37], ['DD', 69], ['Activity', 101], ['C/I', 147], ['Orig', 170], ['STD', 196], ['Dest', 223], ['STA', 249], ['C/O', 281], ['AC', 307], ['FDP', 458]]);
+  const p1 = [
+    ...row(28, [['Individual Roster', 260]]), ...row(59, [['AAA-OPL', 37], ['01FEB2021 - 28FEB2021', 261], ['UTC', 553]]), ...head(112),
+    ...row(131, [['01MON', 37], ['JL', 101], ['AAA', 170], ['00:00', 196], ['AAA', 222], ['24:00', 249]]),
+    ...row(146, [['02TUE', 37], ['XX776', 101], ['14:15', 147], ['AAA', 170], ['15:08', 196], ['BBB', 222], ['16:50', 249], ['32N', 307]]),
+    ...row(157, [['XX776', 101], ['BBB', 170], ['17:59', 196], ['CCC', 222], ['19:29', 249], ['32N', 307]]),
+    ...row(169, [['HOT', 101], ['CCC', 170], ['20:15', 196], ['CCC', 222], ['10:50', 249], ['5:14', 458]]),
+    ...row(184, [['03WED', 37], ['HOT', 101], ['CCC', 170], ['20:15', 196], ['CCC', 222], ['10:50', 249]]),
+    ...row(196, [['C', 69], ['XX777', 101], ['10:50', 147], ['CCC', 170], ['11:42', 196], ['AAA', 222], ['13:22', 249], ['13:42', 281], ['32N', 307], ['2:52', 458]]),
+  ];
+  const p2 = [
+    ...row(28, [['Individual Roster', 260]]), ...row(59, [['AAA-OPL', 37], ['01FEB2021 - 28FEB2021', 261], ['UTC', 553]]), ...head(112),
+    ...row(144, [['Crew onboard', 43]]),
+    ...row(155, [['2021-02-02 XX776 CDB:AAB CC:AAC HST:AAD', 43]]),
+    ...row(164, [['2021-02-02 XX776 CDB:AAB CC:AAC HST:AAE CDB:AAF(S)', 43]]),
+    ...row(174, [['2021-02-03 XX777 CDB:AAB CC:AAC', 43]]),
+    ...row(190, [['Day notes', 43]]), ...row(201, [['2021-02-03 cel', 43]]),
+    ...row(217, [['Hotel information', 43]]), ...row(228, [['02FEB21 - 03FEB21 HOTEL ONE CCC', 43]]),
+    ...row(254, [['Document expire', 43]]), ...row(265, [['CEL: CONTROLE EN LIGNE 30JUN21', 43]]),
+    ...row(653, [['Information', 43]]), ...row(664, [['JL = JOUR LIBRE', 43]]), ...row(673, [['HOT = Hôtel', 43]]), ...row(683, [['C = élève instruction vol', 43]]),
+  ];
+  const r = parseNetlinePdf([{ page: 1, width: 595, height: 842, items: p1 }, { page: 2, width: 595, height: 842, items: p2 }]);
+  assert.equal(r.format, 'aims-individual');
+  assert.deepEqual(r.published.map(x => [x.date, x.dc, x.duty, x.dep, x.begin, x.end, x.arr, x.crew, x.info]), [
+    ['1 Feb 21', '', 'JL', 'AAA', '00:00 Z', '24:00 Z', 'AAA', '', '[JL: JOUR LIBRE]'],
+    ['2 Feb 21', '', 'C/I', 'AAA', '14:15 Z', '', '', '', ''],
+    ['2 Feb 21', '', 'XX776', 'AAA', '15:08 Z', '16:50 Z', 'BBB', '[CDB - AAB][CC - AAC][HST - AAD]', ''],
+    ['2 Feb 21', '', 'XX776', 'BBB', '17:59 Z', '19:29 Z', 'CCC', '[CDB - AAB][CC - AAC][HST - AAE][CDB - AAF(S)]', ''],
+    ['2 Feb 21', '', 'HOT', 'CCC', '20:15 Z', '10:50 Z +1', 'CCC', '', 'HOTEL ONE CCC [HOT: Hôtel]'],
+    ['3 Feb 21', '', 'C/I', 'CCC', '10:50 Z', '', '', '', ''],
+    ['3 Feb 21', 'C', 'XX777', 'CCC', '11:42 Z', '13:22 Z', 'AAA', '[CDB - AAB][CC - AAC]', '[C: élève instruction vol] [Memo: cel]'],
+    ['3 Feb 21', '', 'C/O', '', '', '13:42 Z', 'AAA', '', '[FDP: 2:52]'],
   ]);
 });
 
@@ -1741,5 +1806,985 @@ test('Qantas pattern list: rows by weekday (no dates), report -> C/I, Duty Perio
     ['', 'Tue', 'PAX', 'QFA0521', 'BNE', '11:15 L', '12:50 L', 'SYD', 'A330', ''],
     ['', 'Tue', '', 'QFA0451', 'SYD', '14:30 L', '16:05 L', 'MEL', 'A330', '[Block: 01:35]'],
     ['', 'Tue', '', 'C/O', '', '', '16:35 L', 'MEL', '', '[Duty: 06:05]'],
+  ]);
+});
+
+test('Qatar "Crew Schedule Report": a column per day, RPT as C/I (time on its own line too), flights with aircraft and indicators, DH, day codes, hotel stays', () => {
+  const at = (text, cx, y) => iw(text, cx - text.length * 2, y, text.length * 4);
+  const days = ['01Feb', '02Feb', '03Feb', '04Feb', '05Feb', '06Feb', '07Feb'];
+  const cx = (n) => 40 + n * 45;
+  const col = (n, texts) => texts.map((t, k) => at(t, cx(n), 186 + k * 10));
+  const items = [
+    at('Crew Schedule Report', 700, 71), at('Period: 01-Feb-2025 - 28-Feb-2025 | Published', 700, 100),
+    ...days.map((d, n) => at(d, cx(n), 165)), ...['Sat', 'Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri'].map((d, n) => at(d, cx(n), 174)),
+    ...col(0, ['OFF', 'DOH']),
+    ...col(1, ['RPT:03:40', '729', 'DOH', '04:55', 'DFW', '21:10', '(351)', 'PA,PIC']),
+    ...col(2, ['RPT:', '22:40', '730', 'DFW', '23:40', 'DOH', '14:05(+1)', 'DH', '(351)']),
+    ...col(3, ['DOFF', '(LGW)']),
+    iw('DH:00:00', 22, 384, 30),
+    iw('STAY DATE', 32, 424, 40), iw('LOCATION', 92, 424, 40), iw('HOTEL NAME', 198, 424, 40), iw('HOTEL ADDRESS', 362, 424, 50),
+    iw('CONTACT NAME', 497, 424, 50), iw('TELEPHONE', 604, 424, 40), iw('ACTIVITY CODE/INDICATOR', 694, 424, 90), iw('DESCRIPTION', 1020, 424, 40),
+    iw('02-FEB-2025', 30, 437, 40), iw('DFW', 104, 437, 12), iw('Hotel X', 170, 437, 30), iw('1 Road,,', 325, 437, 30), iw('Ops', 509, 437, 12), iw('+1 2', 598, 437, 16),
+    iw('OFF', 692, 437, 12), iw('Day Off', 1020, 437, 30),
+    iw('PIC', 692, 451, 12), iw('Pilot in Command', 1020, 451, 60),
+    iw('DOFF', 692, 465, 16), iw('Day Off Downroute', 1020, 465, 60),
+  ];
+  const r = parseNetlinePdf([{ page: 1, width: 1400, height: 800, items }]);
+  assert.equal(r.format, 'qatar-schedule-report');
+  assert.equal(r.period, '01Feb25 - 28Feb25');
+  assert.deepEqual(r.published.map(x => [x.date, x.day, x.dc, x.duty, x.dep, x.begin, x.end, x.arr, x.ac, x.info]), [
+    ['1 Feb 25', 'Sat', '', 'OFF', 'DOH', '', '', '', '', '[OFF: Day Off]'],
+    ['2 Feb 25', 'Sun', '', 'C/I', 'DOH', '03:40 Z', '', '', '', ''],
+    ['2 Feb 25', 'Sun', '', '729', 'DOH', '04:55 Z', '21:10 Z', 'DFW', '351', '[PA] [PIC: Pilot in Command]'],
+    ['2 Feb 25', 'Sun', '', 'HT', 'DFW', '', '', '', '', 'Hotel X, 1 Road, Tel +1 2'],
+    ['3 Feb 25', 'Mon', '', 'C/I', 'DFW', '22:40 Z', '', '', '', ''],
+    ['3 Feb 25', 'Mon', 'DH', '730', 'DFW', '23:40 Z', '14:05 Z +1', 'DOH', '351', ''],
+    ['4 Feb 25', 'Tue', '', 'DOFF', 'LGW', '', '', '', '', '[DOFF: Day Off Downroute]'],
+  ]);
+});
+
+test('Swiss "Published roster": report as C/I, legs of a day, a flight landing the next day, layover line, day codes, Rest / local nights; Widerøe Check In / Check Out', () => {
+  const row = (y, cells) => cells.map(([text, x]) => iw(text, x, y, text.length * 4));
+  const swiss = [
+    ...row(34, [['Published roster', 44]]), ...row(53, [['Period:', 44], ['December 2025', 85]]), ...row(91, [['All times local', 483]]),
+    ...row(103, [['Date', 45], ['Report', 77], ['Tags', 116], ['Pos', 155], ['IFF', 184], ['Activity', 208], ['From', 255], ['To', 279], ['Dep', 303], ['Arr', 332],
+      ['A/C', 371], ['Layover /', 400], ['LN*', 444], ['Flt hrs', 461], ['DP', 503]]),
+    ...row(112, [['Rest at', 400], ['28d/12m', 461], ['hrs', 503]]), ...row(121, [['HB', 400], ['7d/28d', 503]]),
+    ...row(133, [['01 Mon', 45], ['LTFD', 210]]),
+    ...row(145, [['02 Tue', 45], ['SBY', 212], ['ZRH', 255], ['03:45', 303], ['15:45', 332]]),
+    ...row(157, [['03 Wed', 45], ['16:35', 77], ['RP', 155], ['V', 184], ['LX180', 208], ['ZRH', 255], ['18:00', 303], ['77W', 371]]),
+    ...row(168, [['04 Thu', 45], ['RP', 155], ['BKK', 279], ['10:45', 332], ['49:00', 400], ['71:30/684:34', 461]]),
+    ...row(179, [['05 Fri', 45], ['Layover: BKK', 283]]),
+    ...row(191, [['06 Sat', 45], ['12:15', 77], ['DH', 155], ['LX181', 208], ['BKK', 255], ['ZRH', 279], ['13:15', 303], ['19:25', 332], ['121:20', 400], ['3', 444]]),
+    ...row(260, [['(*): Local nights', 45]]),
+  ];
+  const r = parseNetlinePdf([{ page: 1, width: 595, height: 842, items: swiss }]);
+  assert.equal(r.format, 'swiss-roster');
+  assert.equal(r.period, '01Dec25 - 31Dec25');
+  assert.deepEqual(r.published.map(x => [x.date, x.dc, x.duty, x.dep, x.begin, x.end, x.arr, x.ac, x.info]), [
+    ['1 Dec 25', '', 'LTFD', '', '', '', '', '', ''],
+    ['2 Dec 25', '', 'SBY', 'ZRH', '03:45 L', '15:45 L', '', '', ''],
+    ['3 Dec 25', '', 'C/I', 'ZRH', '16:35 L', '', '', '', ''],
+    ['3 Dec 25', '', 'LX180', 'ZRH', '18:00 L', '10:45 L +1', 'BKK', '77W', '[IFF: V] [Rest: 49:00]'],
+    ['5 Dec 25', '', 'HT', 'BKK', '', '', '', '', ''],
+    ['6 Dec 25', '', 'C/I', 'BKK', '12:15 L', '', '', '', ''],
+    ['6 Dec 25', 'DH', 'LX181', 'BKK', '13:15 L', '19:25 L', 'ZRH', '', '[Rest: 121:20] [Local nights: 3]'],
+  ]);
+
+  const wf = [
+    ...row(34, [['Published roster', 44]]), ...row(54, [['Planning period:', 44], ['November 2025', 114], ['All times in Local Time', 178]]),
+    ...row(126, [['Date', 46], ['Check In', 88], ['Training', 136], ['Pos', 183], ['Activity', 211], ['From', 256], ['To', 290], ['Start', 322], ['End', 356],
+      ['Check Out', 390], ['A/C', 445], ['Layover', 476], ['Trip ID', 521]]),
+    ...row(139, [['01 Sat', 46], ['11:20', 88], ['FO', 183], ['WF983', 211], ['LKL', 256], ['TOS', 290], ['12:04', 322], ['12:50', 356], ['DH1', 445]]),
+    ...row(151, [['FO', 183], ['WF984', 211], ['TOS', 256], ['LKL', 290], ['14:56', 322], ['15:37', 356], ['16:43', 390], ['DH3', 445], ['16:50', 476]]),
+    ...row(163, [['02 Sun', 46], ['F', 230]]),
+    ...row(655, [['01Nov-30Nov2025', 211]]), ...row(667, [['Work Days', 44], ['14', 211]]),
+  ];
+  const w = parseNetlinePdf([{ page: 1, width: 595, height: 842, items: wf }]);
+  assert.deepEqual(w.published.map(x => [x.date, x.duty, x.dep, x.begin, x.end, x.arr, x.ac, x.info]), [
+    ['1 Nov 25', 'C/I', 'LKL', '11:20 L', '', '', '', ''],
+    ['1 Nov 25', 'WF983', 'LKL', '12:04 L', '12:50 L', 'TOS', 'DH1', ''],
+    ['1 Nov 25', 'WF984', 'TOS', '14:56 L', '15:37 L', 'LKL', 'DH3', '[Layover: 16:50]'],
+    ['1 Nov 25', 'C/O', '', '', '16:43 L', 'LKL', '', ''],
+    ['2 Nov 25', 'F', '', '', '', '', '', ''],
+  ]);
+});
+
+test('"Planning navigant" (Air Corsica, GMT): day centred on its lines, C/I / flights / C/O with TSV and Rep. après, wrapped text, hotel, codes from the list; LOC print with UTC under local and a flight over midnight', () => {
+  const row = (y, cells) => cells.map(([text, x]) => iw(text, x, y, text.length * 4));
+  const head = (y) => row(y, [['Date', 32], ['Acti', 66], ['Depa', 149], ['Arri', 179], ['CheckIn', 208], ['Hdep', 255], ['Harr', 299], ['CheckOut', 333], ['BLH', 379], ['TSV', 414],
+    ['TS', 451], ['TSV Max', 488], ['TpsEqF', 543], ['StdBy', 586], ['Rep. avant', 623], ['Rep. après', 674], ['Flags', 732], ['Fonc', 772], ['Part.*', 800]]);
+  const gmt = [
+    ...row(20, [['Planning navigant', 20]]), ...row(48, [['NOV. 2021', 20]]), ...row(82, [['Horaires en GMT', 20]]), ...head(124),
+    ...row(142, [['lun.', 35]]),
+    ...row(147, [['FLT - XK154 - 320', 65], ['AAA', 152], ['BBB', 179], ['14:00', 214], ['14:59', 257], ['15:47', 299], ['00:48', 380], ['01:00', 549], ['OPL', 774]]),
+    ...row(153, [['01 nov.', 29]]), ...row(196, [['12:00', 683]]),
+    ...row(200, [['FLT - XK155 - 320', 65], ['BBB', 151], ['AAA', 180], ['16:41', 257], ['17:30', 299], ['17:50', 342], ['00:49', 380], ['03:50', 414], ['04:10', 448], ['11:00', 496], ['OPL', 774]]),
+    ...row(204, [['02/11 05:50', 674]]), ...row(221, [['04:00', 549], ['00:00', 588]]),
+    ...row(236, [['mar.', 34]]),
+    ...row(241, [['TXI - AAA GARE DU', 65]]), ...row(245, [['AAA', 151], ['CCC', 179], ['07:45', 257], ['09:45', 299]]), ...row(249, [['NOR', 65]]),
+    ...row(247, [['02 nov.', 29]]),
+    ...row(262, [['HOT - Grand', 65]]), ...row(266, [['CCC', 150], ['>', 185], ['09:45', 257]]), ...row(270, [['Hotel - HOTEL', 65]]),
+    ...row(290, [['mer.', 34]]), ...row(295, [['JL', 65], ['AAA', 152], ['AAA', 180]]), ...row(300, [['03 nov.', 29]]),
+    ...row(529, [['Part.*: C=Contrôle en ligne ,R=Desiderata', 20]]),
+  ];
+  const legend = [...row(20, [['Planning navigant', 20]]), ...row(124, [['Liste des codes activités', 21]]), ...row(147, [['Groupe', 31], ['Acti', 145], ['Description', 230]]),
+    ...row(170, [['Ground', 31], ['JL', 145], ['JOUR LIBRE', 230]])];
+  const r = parseNetlinePdf([{ page: 1, width: 842, height: 595, items: gmt }, { page: 2, width: 842, height: 595, items: legend }]);
+  assert.equal(r.format, 'planning-navigant');
+  assert.equal(r.period, '01Nov21 - 30Nov21');
+  assert.deepEqual(r.published.map(x => [x.date, x.day, x.duty, x.dep, x.begin, x.end, x.arr, x.ac, x.info]), [
+    ['1 Nov 21', 'Mon', 'C/I', 'AAA', '14:00 Z', '', '', '', ''],
+    ['1 Nov 21', 'Mon', 'XK154', 'AAA', '14:59 Z', '15:47 Z', 'BBB', '320', '[Block: 00:48]'],
+    ['1 Nov 21', 'Mon', 'XK155', 'BBB', '16:41 Z', '17:30 Z', 'AAA', '320', '[Block: 00:49]'],
+    ['1 Nov 21', 'Mon', 'C/O', '', '', '17:50 Z', 'AAA', '', '[Duty: 03:50] [TS: 04:10] [TSV Max: 11:00] [Rest: 12:00]'],
+    ['2 Nov 21', 'Tue', 'TXI', 'AAA', '07:45 Z', '09:45 Z', 'CCC', '', '[TXI: AAA GARE DU NOR]'],
+    ['2 Nov 21', 'Tue', 'HT', 'CCC', '09:45 Z', '', '', '', 'Grand Hotel'],
+    ['3 Nov 21', 'Wed', 'JL', 'AAA', '', '', 'AAA', '', '[JL: JOUR LIBRE]'],
+  ]);
+
+  const loc = [
+    ...row(20, [['Planning navigant', 20]]), ...row(48, [['JUIL. 2024', 20]]), ...row(82, [['Horaires en LOC Escale', 20]]),
+    ...row(124, [['Date', 32], ['Acti', 66], ['Depa', 160], ['Arri', 190], ['CheckIn', 224], ['Hdep', 283], ['Harr', 338], ['HDV', 382], ['TSV', 420], ['TS', 460], ['TSV Max', 486], ['Fonc', 527], ['Part.*', 554]]),
+    ...row(164, [['mar. 02', 28], ['11:30', 229], ['13:30', 283]]), ...row(168, [['TN008', 66], ['LAX', 161], ['>', 195], ['OPL', 528]]),
+    ...row(173, [['18:30 Z', 226], ['20:30 Z', 280]]),
+    ...row(186, [['09:05', 337]]), ...row(189, [['mer. 03', 28], ['TN008', 66], ['<', 167], ['CDG', 189], ['10:35', 382], ['OPL', 528]]), ...row(195, [['07:05 Z', 333]]),
+    ...row(529, [['Part.*: C=Contrôle en ligne ,R=Desiderata', 20]]),
+  ];
+  const l = parseNetlinePdf([{ page: 1, width: 842, height: 595, items: loc }]);
+  assert.deepEqual(l.published.map(x => [x.date, x.duty, x.dep, x.begin, x.end, x.arr, x.info]), [
+    ['2 Jul 24', 'C/I', 'LAX', '18:30 Z / 11:30 L', '', '', ''],
+    ['2 Jul 24', 'TN008', 'LAX', '20:30 Z / 13:30 L', '07:05 Z +1 / 09:05 L +1', 'CDG', '[Block: 10:35]'],
+  ]);
+});
+
+test('Iberia monthly roster letter: calendar (pairing, firma, end station, despedida; marks; code with times) joined with the UTC legs of "Etapas", DH, legs as one "||...||" item', () => {
+  const row = (y, cells) => cells.map(([text, x]) => iw(text, x, y, text.length * 4));
+  const xs = [48, 70, 92, 114, 136, 158, 180];
+  const items = [
+    ...row(255, [['Septiembre 2025', 111], ['(Hora local de firma y despedida)', 213]]),
+    ...row(269, ['Lun', 'Mar', 'Mie', 'Jue', 'Vie', 'Sab', 'Dom'].map((d, k) => [d, xs[k] - 2])),
+    ...row(278, ['01', '02', '03', '04', '05', '06', '07'].map((d, k) => [d, xs[k]])),
+    ...row(297, [['3311', 66]]),
+    ...row(302, [['D', 50], ['*', 138]]),
+    ...row(306, [['X', 94], ['0615', 66], ['1330', 110], ['2020', 154]]),
+    ...row(311, [['IM', 114]]),
+    ...row(315, [['AAA', 68], ['AAA', 156]]),
+    ...row(319, [['2359', 110]]),
+    ...row(324, [['1120', 66], ['1100', 154]]),
+    ...row(442, [['Etapas (Hora UTC)', 44]]),
+    ...row(453, [['2', 112], ['Mar', 121], ['529', 169], ['AAA', 186], ['0515', 203], ['BBB', 224], ['0645', 241], ['DH', 284], ['530', 288], ['BBB', 305], ['0725', 322], ['AAA', 343], ['0850', 360]]),
+    ...row(462, [['7', 112], ['Dom', 121], ['||346 BBB 0120 AAA 0830||', 165]]),
+    ...row(506, [['Descripcion de codigos', 44]]), ...row(517, [['3 Jue', 48], ['IM - IMAGINARIA', 78]]),
+    ...row(530, [['Mensajes', 44]]),
+  ];
+  const r = parseNetlinePdf([{ page: 1, width: 595, height: 842, items }]);
+  assert.equal(r.format, 'iberia-monthly');
+  assert.equal(r.period, '01Sep25 - 30Sep25');
+  assert.deepEqual(r.published.map(x => [x.date, x.dc, x.duty, x.dep, x.begin, x.end, x.arr, x.info]), [
+    ['1 Sep 25', '', 'D', '', '', '', '', ''],
+    ['2 Sep 25', '', 'C/I', 'AAA', '06:15 L', '', '', '[Pairing: 3311]'],
+    ['2 Sep 25', '', '529', 'AAA', '05:15 Z', '06:45 Z', 'BBB', ''],
+    ['2 Sep 25', 'DH', '530', 'BBB', '07:25 Z', '08:50 Z', 'AAA', ''],
+    ['2 Sep 25', '', 'C/O', '', '', '11:20 L', 'AAA', ''],
+    ['3 Sep 25', '', 'X', '', '', '', '', ''],
+    ['4 Sep 25', '', 'IM', '', '13:30 L', '23:59 L', '', '[IM: IMAGINARIA]'],
+    ['5 Sep 25', '', '*', '', '', '', '', ''],
+    ['6 Sep 25', '', 'C/I', 'BBB', '20:20 L', '', '', ''],
+    ['7 Sep 25', '', '346', 'BBB', '01:20 Z', '08:30 Z', 'AAA', ''],
+    ['6 Sep 25', '', 'C/O', '', '', '11:00 L +1', 'AAA', ''],
+  ]);
+});
+
+test('OFP flight log (block times, take-off / landing, Crew Onboard) and flight plan headers (STD / STA, a values line under a notes line)', () => {
+  const row = (y, cells) => cells.map(([text, x]) => iw(text, x, y, text.length * 4));
+  const log = [
+    ...row(54, [['FLIGHT', 46], ['DATE', 101], ['FROM', 163], ['TO', 199], ['REG', 236], ['TYPE', 285], ['COMMANDER', 359]]),
+    ...row(65, [['TB7351', 46], ['20240307', 101], ['GMMN', 163], ['LFJL', 199], ['OOJAS', 236], ['B737-700W', 285], ['RHE', 359], ['HEYLEN', 383]]),
+    ...row(87, [['OFF', 46], ['BLOCK', 71], ['15:11', 107], ['TAKE', 163], ['OFF', 193], ['15:24', 218]]),
+    ...row(98, [['ON', 46], ['BLOCK', 64], ['18:17', 107], ['LANDING', 163], ['18:11', 218]]),
+    ...row(109, [['BLOCK', 46], ['03:06', 107], ['FLIGHT', 163], ['02:47', 218]]),
+  ];
+  const crew = [...row(151, [['Crew Onboard', 51]]), ...row(174, [['CP Ann Doe [ADO], FO Bob Roe [BRO],', 51]]), ...row(219, [['Flight Times', 46]])];
+  const r = parseNetlinePdf([{ page: 1, width: 595, height: 842, items: log }, { page: 2, width: 595, height: 842, items: crew }]);
+  assert.equal(r.format, 'ofp');
+  assert.deepEqual(r.published.map(x => [x.date, x.duty, x.registration, x.dep, x.begin, x.takeoff, x.landing, x.end, x.arr, x.ac, x.crew, x.info]), [
+    ['7 Mar 24', 'TB7351', 'OOJAS', 'GMMN', '15:11 Z', '15:24 Z', '18:11 Z', '18:17 Z', 'LFJL', 'B737-700W', '[CP - ADO - Ann Doe][FO - BRO - Bob Roe]', '[Block: 03:06] [Flight: 02:47]'],
+  ]);
+  const plan = [
+    ...row(223, [['TOM2313', 21], ['DATE', 70], ['DEP', 104], ['STD', 123], ['DES', 145], ['STA', 169], ['REG', 194], ['TYPE', 224], ['OFP REV', 264]]),
+    ...row(232, [['DESTINATION ALTERNATE', 300]]),
+    ...row(239, [['TOM9HM', 21], ['20240508', 70], ['LIPX', 104], ['2320', 123], ['EGCC', 145], ['0140', 169], ['G-TAWZ', 194], ['B737-800W', 224], ['3', 264]]),
+  ];
+  const p = parseNetlinePdf([{ page: 1, width: 595, height: 842, items: plan }]);
+  assert.deepEqual(p.published.map(x => [x.date, x.duty, x.registration, x.dep, x.begin, x.end, x.arr, x.ac]), [
+    ['8 May 24', 'TOM2313', 'G-TAWZ', 'LIPX', '23:20 Z', '01:40 Z +1', 'EGCC', 'B737-800W'],
+  ]);
+});
+
+test('"Schedule Summary" (Crew Access): day headers, Report / Release as C/I / C/O, flights with position and flight time, deadheading, "Off (RDO)" codes, hotel', () => {
+  const row = (y, cells) => cells.map(([text, x]) => iw(text, x, y, text.length * 4));
+  const items = [
+    ...row(9, [['Ann Doe Schedule Summary, 31 Jan - 29 Feb 2024', 14]]),
+    ...row(39, [['Thu, 1', 21], ['st', 56], ['February 2024 (Local time)', 69]]),
+    ...row(67, [['Off (RDO)', 17], ['00:00 - 00:00 +1', 104], ['AAA', 195]]),
+    ...row(85, [['Fri, 2', 21], ['nd', 50], ['February 2024 (Local time)', 65]]),
+    ...row(113, [['Report', 17], ['14:00 - 15:00', 104], ['AAA', 195]]),
+    ...row(128, [['AB589', 17], ['15:00 - 17:20', 104], ['AAA - BBB', 195], ['CPT', 252], ['Trainee', 309], ['Flight Time: 2:20', 457]]),
+    ...row(143, [['SV12 (Deadheading)', 17], ['18:00 - 19:00', 104], ['BBB - CCC', 195], ['FO', 252], ['Flight Time: 01:00', 457]]),
+    ...row(158, [['Release', 17], ['19:00 - 19:15', 104], ['CCC', 195]]),
+    ...row(173, [['Hotel', 17], ['19:45 - 08:00 +1', 104], ['CCC', 195]]),
+  ];
+  const r = parseNetlinePdf([{ page: 1, width: 595, height: 842, items }]);
+  assert.equal(r.format, 'schedule-summary');
+  assert.equal(r.period, '31Jan24 - 29Feb24');
+  assert.deepEqual(r.published.map(x => [x.date, x.dc, x.duty, x.dep, x.begin, x.end, x.arr, x.info]), [
+    ['1 Feb 24', '', 'RDO', 'AAA', '00:00 L', '00:00 L +1', '', '[RDO: Off]'],
+    ['2 Feb 24', '', 'C/I', 'AAA', '14:00 L', '', '', ''],
+    ['2 Feb 24', '', 'AB589', 'AAA', '15:00 L', '17:20 L', 'BBB', '[CPT] [Trainee] [Flight: 02:20]'],
+    ['2 Feb 24', 'DH', 'SV12', 'BBB', '18:00 L', '19:00 L', 'CCC', '[FO] [Flight: 01:00]'],
+    ['2 Feb 24', '', 'C/O', '', '', '19:15 L', 'CCC', ''],
+    ['2 Feb 24', '', 'HT', 'CCC', '19:45 L', '08:00 L +1', '', ''],
+  ]);
+});
+
+test('Crew Roster Report in port local times (SQ): Rpt as C/I, a flight reported one day and flown the next, layover lines, arrival on the next day, wrapped training codes, duty code list', () => {
+  const row = (y, cells) => cells.map(([text, x]) => iw(text, x, y, text.length * 4));
+  const items = [
+    ...row(20, [['Crew Roster Report', 301]]), ...row(50, [['Personal Details', 60], ['From', 314], ['04Jul26', 356], ['--', 413], ['31Aug26', 433]]),
+    ...row(66, [['(Times shown are in Port Local times)', 321]]),
+    ...row(141, [['Start', 28], ['Day', 67], ['Flight', 99], ['Sector', 145], ['A/C', 189], ['Duty', 217], ['Pairing', 247], ['Crew', 290], ['Rpt', 328], ['STD', 356], ['STA', 387],
+      ['Flight', 418], ['Duty', 458], ['Hotel', 507], ['INSTR/', 559], ['Training', 605], ['Remarks', 695]]),
+    ...row(152, [['Date', 29], ['Number', 94], ['Duty', 252], ['Rank', 290], ['Time', 420], ['Time', 458], ['PUPIL', 561]]),
+    ...row(171, [['07Jul26', 25], ['Tue', 67], ['SQ810', 97], ['AAA-BBB', 141], ['787', 190], ['FLY', 218], ['FO', 295], ['2330', 325], ['06:05', 419], ['7:35', 459]]),
+    ...row(195, [['08Jul26', 25], ['Wed', 66], ['SQ810', 97], ['AAA-BBB', 141], ['787', 190], ['FLY', 218], ['FO', 295], ['0030', 355], ['0635', 385]]),
+    ...row(219, [['BBB', 150], ['LO', 221], ['BBBHOTEL', 496]]),
+    ...row(243, [['09Jul26', 25], ['Thu', 67], ['SQ811', 97], ['BBB-AAA', 141], ['787', 190], ['FLY', 218], ['FO', 295], ['2155', 325], ['2255', 355]]),
+    ...row(267, [['10Jul26', 25], ['Fri', 66], ['BBB-AAA', 141], ['787', 190], ['FLY', 218], ['FO', 295], ['0525', 385]]),
+    ...row(291, [['12Jul26', 25], ['Sun', 67], ['AAA', 152], ['BFTD', 212], ['FO', 295], ['0515', 325], ['0645', 355], ['1045', 385], ['6:00', 459], ['PUPIL', 561], ['737CONFP', 600]]),
+    ...row(302, [['1', 230], ['T01', 615]]),
+    ...row(445, [['Duty Codes', 39]]), ...row(465, [['Duty', 79], ['Duty Desc', 197]]), ...row(491, [['BFTD1', 81], ['737-FTD1', 203]]),
+  ];
+  const r = parseNetlinePdf([{ page: 1, width: 842, height: 595, items }]);
+  assert.equal(r.format, 'port-crew-roster-report');
+  assert.equal(r.period, '04Jul26 - 31Aug26');
+  assert.deepEqual(r.published.map(x => [x.date, x.duty, x.dep, x.begin, x.end, x.arr, x.ac, x.info]), [
+    ['7 Jul 26', 'C/I', 'AAA', '23:30 L', '', '', '', ''],
+    ['8 Jul 26', 'SQ810', 'AAA', '00:30 L', '06:35 L', 'BBB', '787', '[Flight: 06:05] [Duty: 07:35]'],
+    ['8 Jul 26', 'HT', 'BBB', '', '', '', '', 'BBBHOTEL'],
+    ['9 Jul 26', 'C/I', 'BBB', '21:55 L', '', '', '', ''],
+    ['9 Jul 26', 'SQ811', 'BBB', '22:55 L', '05:25 L +1', 'AAA', '787', ''],
+    ['12 Jul 26', 'BFTD1', 'AAA', '06:45 L', '10:45 L', '', '', '[BFTD1: 737-FTD1] [Duty: 06:00] [PUPIL] [Training: 737CONFPT01]'],
+  ]);
+});
+
+test('"FLIGHT LOG SUMMARY REPORT" (Jet Linx): a leg per line, aircraft from above the table, Out/Off/On/In, PIC/SIC, decimal hours and counts in info', () => {
+  const row = (y, cells) => cells.map(([text, x]) => iw(text, x, y, text.length * 4));
+  const items = [
+    ...row(40, [['FLIGHT LOG SUMMARY REPORT', 156]]), ...row(61, [['9/15/2019 - 9/16/2019', 156]]), ...row(89, [['St. Louis', 18]]), ...row(109, [['N1JP', 18]]),
+    ...row(128, [['Leg Date', 20], ['Trip #', 56], ['Reg', 88], ['PIC', 106], ['SIC', 131], ['DEP', 156], ['ARR', 179], ['Out', 210], ['Of', 233], ['On', 254], ['In', 279],
+      ['Hobbs', 297], ['Flight', 322], ['Block', 345], ['Night', 367], ['IMC', 388], ['D', 407], ['N', 420], ['D', 434], ['N', 448], ['P', 463], ['N', 476], ['Pax', 522]]),
+    ...row(141, [['9-15-19', 20], ['604344', 56], ['91', 88], ['JHAL', 106], ['CHUB', 131], ['KDAL', 156], ['KASE', 179], ['1422', 208], ['1428', 230], ['1616', 252], ['1622', 275],
+      ['1.8', 302], ['1.8', 326], ['2.0', 349], ['0.1', 390], ['1', 408], ['1', 435], ['0', 525]]),
+  ];
+  const r = parseNetlinePdf([{ page: 1, width: 792, height: 612, items }]);
+  assert.equal(r.format, 'flight-log-summary');
+  assert.equal(r.period, '15Sep19 - 16Sep19');
+  assert.deepEqual(r.published.map(x => [x.date, x.registration, x.dep, x.begin, x.takeoff, x.landing, x.end, x.arr, x.crew, x.info]), [
+    ['15 Sep 19', 'N1JP', 'KDAL', '14:22 Z', '14:28 Z', '16:16 Z', '16:22 Z', 'KASE', '[PIC - JHAL][SIC - CHUB]',
+      '[Trip: 604344] [FAR: 91] [Flight: 1.8] [Block: 2.0] [IMC: 0.1] [Takeoff Day: 1] [Landing Day: 1]'],
+  ]);
+});
+
+test('"QATAR AIRWAYS LOGBOOK": records with wrapped PIC names (two names), "(+1)" arrival, counts and function times, an FSTD session, page totals left out', () => {
+  const row = (y, cells) => cells.map(([text, x]) => iw(text, x, y, text.length * 4));
+  const items = [
+    ...row(35, [['QATAR AIRWAYS LOGBOOK', 633]]), ...row(69, [['01-Aug-2024 To 09-Sep-2024', 691]]),
+    ...row(145, [['DATE', 41], ['DEPARTURE', 116], ['ARRIVAL', 241], ['AIRCRAFT', 347], ['MULTI', 521], ['TOTAL', 593], ['NAME(S) PIC', 656], ['TAKE OFF', 743], ['LANDINGS', 816],
+      ['PILOT FUNCTION TIME', 1062], ['FSTD SESSION', 1317], ['REMARKS AND', 1475]]),
+    ...row(157, [['(dd/mm/yy)', 33], ['TIME', 542]]),
+    ...row(171, [['PLACE', 102], ['TIME', 165], ['PLACE', 219], ['TIME', 281], ['TYPE', 333], ['REG', 387], ['SE', 439], ['ME', 474], ['FLIGHT', 589], ['DAY', 741], ['NIGHT', 771],
+      ['DAY', 814], ['NIGHT', 846], ['NIGHT', 892], ['IFR', 960], ['PIC', 1018], ['CO-PILOT', 1062], ['DUAL', 1136], ['INSTRUCTOR', 1182], ['DATE', 1275], ['TYPE', 1348], ['TOTAL', 1411]]),
+    ...row(184, [['(dd/mm/yy)', 1268], ['TIME', 1414]]),
+    ...row(199, [['20/08/24', 36], ['AAA', 108], ['23:04', 166], ['BBB', 225], ['13:37 (+1)', 272], ['77L', 338], ['A7-BBA', 370], ['14:33', 525], ['14:33', 598], ['DAL PONTE', 649],
+      ['1', 776], ['1', 824], ['09:56', 898], ['14:33', 956], ['08:00', 1015]]),
+    ...row(213, [['Nicola,DOE', 649]]), ...row(227, [['John', 649]]),
+    ...row(260, [['04:00', 1205], ['21/08/24', 1271], ['B777,EU-', 1340], ['04:00', 1416]]), ...row(273, [['A0206', 1348]]),
+    ...row(812, [['TOTAL', 370], ['14:33', 598], ['I certify that the', 1478]]),
+  ];
+  const r = parseNetlinePdf([{ page: 1, width: 1600, height: 950, items }]);
+  assert.equal(r.format, 'qatar-logbook');
+  assert.equal(r.period, '01Aug24 - 09Sep24');
+  assert.deepEqual(r.published.map(x => [x.date, x.duty, x.dep, x.begin, x.end, x.arr, x.ac, x.registration, x.crew, x.info]), [
+    ['20 Aug 24', '', 'AAA', '23:04 Z', '13:37 Z +1', 'BBB', '77L', 'A7-BBA', '[PIC - DAL PONTE Nicola][PIC - DOE John]',
+      '[Flight: 14:33] [Takeoff Night: 1] [Landing Day: 1] [Night: 09:56] [IFR: 14:33] [PIC: 08:00]'],
+    ['21 Aug 24', 'SIM', '', '', '', '', 'B777,EU-A0206', '', '', '[Sim: 04:00] [Instructor: 04:00]'],
+  ]);
+});
+
+test('Aeromexico "ROL INDIVIDUAL DE SERVICIOS": day lines under DAY | DUTY | BLOCK DH, reserve codes from the code list, flights with pairing, terminal, next-day arrival', () => {
+  const row = (y, cells) => cells.map(([text, x]) => iw(text, x, y, text.length * 4));
+  const items = [
+    ...row(50, [['ROL INDIVIDUAL DE SERVICIOS SEPTIEMBRE 2025', 44]]),
+    ...row(192, [['DAY', 44], ['DUTY', 77], ['BLOCK DH', 371]]),
+    ...row(202, [['01 Mon', 44], ['R4 AAA', 119], ['16:15', 175], ['23:59', 246]]),
+    ...row(264, [['09 Tue 25002', 44], ['001 AAA', 114], ['(T2) 17:45 BBB', 152], ['04:35', 246], ['10:50 0:00', 371]]),
+    ...row(274, [['12 Fri', 44], ['020 BBB', 114], ['01:00 AAA', 175], ['(T2) 12:45', 222], ['11:45 0:00', 371]]),
+    ...row(419, [['LA NUEVA FECHA PARA', 44]]),
+  ];
+  const legend = row(90, [['R4 : RESERVA', 44]]);
+  const r = parseNetlinePdf([{ page: 1, width: 842, height: 595, items }, { page: 2, width: 842, height: 595, items: legend }]);
+  assert.equal(r.format, 'rol-individual');
+  assert.deepEqual(r.published.map(x => [x.date, x.duty, x.dep, x.begin, x.end, x.arr, x.info]), [
+    ['1 Sep 25', 'R4', 'AAA', '16:15 B', '23:59 B', '', '[R4: RESERVA]'],
+    ['9 Sep 25', '001', 'AAA', '17:45 B', '04:35 B +1', 'BBB', '[Pairing: 25002] [Block: 10:50]'],
+    ['12 Sep 25', '020', 'BBB', '01:00 B', '12:45 B', 'AAA', '[Block: 11:45]'],
+  ]);
+});
+
+test('Ryanair flight sheet: "Key : value" records per flight, times split over items, pilot flying, captain remarks, flight deck crew on every flight', () => {
+  const row = (y, cells) => cells.map(([text, x]) => iw(text, x, y, text.length * 4));
+  const kv = (y, key, ...vals) => row(y, [[key, 67], [':', 140], ...vals.map((v, k) => [v, 160 + k * 6])]);
+  const items = [
+    ...row(136, [['2020/09/14', 67]]),
+    ...kv(177, 'FlightNumber', 'FR 9141'), ...kv(198, 'Registration', 'EIEFX'), ...kv(219, 'City Pair', 'AAA - BBB'),
+    ...kv(593, 'Airborne', '18', ':', '12'), ...kv(614, 'Landed', '20', ':', '20'), ...kv(635, 'Total flight', '02', ':', '08'),
+    ...kv(656, 'Off Block', '18', ':', '04'), ...kv(677, 'On Block', '20', ':', '25'), ...kv(697, 'Total Block', '02', ':', '21'),
+    ...kv(720, 'Take Off', 'DOEJ'), ...kv(740, 'Landing', 'DOEJ'), ...kv(760, 'Captain Remarks', 'GPU connected but no power.'),
+  ];
+  const crew = [...row(429, [['Flight Deck Crew', 67]]), ...row(449, [['ROEA', 67], [':', 132], ['CP', 150], [':', 182], ['ANN ROE', 200]]), ...row(533, [['E-MAIL DISCLAIMER', 67]])];
+  const r = parseNetlinePdf([{ page: 1, width: 595, height: 842, items }, { page: 2, width: 595, height: 842, items: crew }]);
+  assert.equal(r.format, 'flight-sheet');
+  assert.deepEqual(r.published.map(x => [x.date, x.duty, x.registration, x.dep, x.begin, x.takeoff, x.landing, x.end, x.arr, x.crew, x.info]), [
+    ['14 Sep 20', 'FR9141', 'EIEFX', 'AAA', '18:04 Z', '18:12 Z', '20:20 Z', '20:25 Z', 'BBB', '[CP - ROEA - ANN ROE]', '[Block: 02:21] [Flight: 02:08] [Pilot Flying: DOEJ] GPU connected but no power.'],
+  ]);
+});
+
+test('Air Corsica "Programme du": three lines per event (UTC times above, local under), C/I / C/O from Checkin / Checkout, flight with registration, aircraft and crew, codes', () => {
+  const at = (text, x, y) => iw(text, x, y, text.length * 4);
+  const items = [
+    at('Programme du 01/11/2024 au 31/01/2025', 202, 49), at('Friday 01 November 2024', 20, 79),
+    ...[['Activité', 46], ['Dépar Arrivé', 101], ['Checkin', 157], ['Début', 206], ['Fin', 257], ['Checkout', 289], ['Durée', 352], ['TdV', 405], ['TdS', 450], ['Vol', 479], ['Equipe', 527]].map(([t, x]) => at(t, x, 101)),
+    at('14:15', 164, 113.9), at('15:15', 208, 113.9), at('17:02', 254, 113.9), at('17:22', 299, 113.9), at('XK721', 477, 115.9), at('CDB:BRY - OPL:CAD -', 508, 114.6),
+    at('FLT - XK721 - FHXKE', 24, 118.4), at('AAA', 106, 119.4), at('BBB', 131, 119.4), at('01:47', 357, 119.4), at('05:11', 402, 119.4), at('05:31', 447, 119.4), at('C/C:LWS - HST:ATL', 508, 120.6),
+    at('(OPL)', 50, 125.4), at('(15:15 LOC)', 152, 123.9), at('(16:15 LOC)', 198, 123.9), at('(18:02 LOC)', 243, 123.9), at('(18:22 LOC)', 287, 123.9), at('(AT6)', 479, 122.9),
+    at('23:00', 208, 155.9), at('23:59', 254, 155.9), at('BL ()', 51, 163.9), at('BBB', 106, 161.4), at('BBB', 131, 161.4), at('(00:00 LOC)', 198, 165.9),
+  ];
+  const r = parseNetlinePdf([{ page: 1, width: 595, height: 842, items }]);
+  assert.equal(r.format, 'programme-du');
+  assert.equal(r.period, '01Nov24 - 31Jan25');
+  assert.deepEqual(r.published.map(x => [x.date, x.duty, x.registration, x.dep, x.begin, x.end, x.arr, x.ac, x.crew, x.info]), [
+    ['1 Nov 24', 'C/I', '', 'AAA', '14:15 Z / 15:15 L', '', '', '', '', ''],
+    ['1 Nov 24', 'XK721', 'FHXKE', 'AAA', '15:15 Z / 16:15 L', '17:02 Z / 18:02 L', 'BBB', 'AT6', '[CDB - BRY][OPL - CAD][C/C - LWS][HST - ATL]', '[Block: 01:47]'],
+    ['1 Nov 24', 'C/O', '', '', '', '17:22 Z / 18:22 L', 'BBB', '', '', '[TdV: 05:11] [Duty: 05:31]'],
+    ['1 Nov 24', 'BL', '', 'BBB', '23:00 Z / 00:00 L', '23:59 Z', '', '', '', ''],
+  ]);
+});
+
+test('Month calendar print (Crew Access): days before the first month name, Report / Release, events "NCL 06:04 ~ 09:17 AGP", an event ending the next day, a wrapped end, codes', () => {
+  const row = (y, cells) => cells.map(([text, x]) => iw(text, x, y, text.length * 4));
+  const xs = [16, 133, 251, 369, 486, 604, 722];
+  const items = [
+    ...row(6, [['May 2025', 8]]),
+    ...row(52, ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map((d, k) => [d, xs[k] + 4])),
+    ...row(86, ['28', '29', 'Apr. 30', '1', '2', '3', '4'].map((d, k) => [d, xs[k]])),
+    ...row(110, [['LV', 15], ['Report', 250], ['07:30', 274], ['AAA', 298], ['Report', 368], ['13:15', 392], ['AAA', 416]]),
+    ...row(120, [['CFL', 250], ['AAA 07:30', 266], ['~ 09:30 AAA', 303], ['XX553', 368], ['AAA 14:15', 391], ['XX554', 486], ['BBB ~ 00:44 AAA', 509]]),
+    ...row(128, [['~ 18:31 BBB', 368]]),
+    ...row(136, [['Release', 250], ['09:30', 279], ['AAA', 303], ['XX554', 368], ['BBB 20:01 ~ AAA', 391], ['Release', 486], ['00:44', 515], ['AAA', 539]]),
+  ];
+  const r = parseNetlinePdf([{ page: 1, width: 842, height: 595, items }]);
+  assert.equal(r.format, 'month-calendar');
+  assert.deepEqual(r.published.map(x => [x.date, x.duty, x.dep, x.begin, x.end, x.arr]), [
+    ['28 Apr 25', 'LV', '', '', '', ''],
+    ['30 Apr 25', 'C/I', 'AAA', '07:30 L', '', ''],
+    ['30 Apr 25', 'CFL', 'AAA', '07:30 L', '09:30 L', 'AAA'],
+    ['30 Apr 25', 'C/O', '', '', '09:30 L', 'AAA'],
+    ['1 May 25', 'C/I', 'AAA', '13:15 L', '', ''],
+    ['1 May 25', 'XX553', 'AAA', '14:15 L', '18:31 L', 'BBB'],
+    ['1 May 25', 'XX554', 'BBB', '20:01 L', '00:44 L +1', 'AAA'],
+    ['2 May 25', 'C/O', '', '', '00:44 L', 'AAA'],
+  ]);
+});
+
+test('a month as a line per day (Edelweiss): C/I, the day\'s flights as one row with route and block, C/O with duty time; CI: / CO: over midnight; day codes', () => {
+  const row = (y, cells) => cells.map(([text, x]) => iw(text, x, y, text.length * 4));
+  const items = [
+    ...row(12, [['Ann Doe | 102732 | May - 2024', 28]]),
+    ...row(31, [['DATE', 32], ['DUTY', 76], ['ROUTE', 136], ['DETAILS', 213], ['START/END (LT)', 313], ['STD / STA (UTC)', 363], ['POS', 413], ['POS TIME (LT)', 464], ['CHECK-IN /', 514],
+      ['BLOCK OFF / ON', 564], ['A/C', 614], ['BLOCK', 637], ['BH 28', 667], ['DUTY', 697], ['DH 7', 727]]),
+    ...row(55, [['01.05.2024', 32], ['OFF', 76], ['-', 363], ['-', 564], ['-', 637], ['37:38', 667], ['-', 697], ['22:30', 727]]),
+    ...row(66, [['02.05.2024', 32], ['130-131', 76], ['AAA-BBB-AAA', 136], ['05:50-17:30', 313], ['04:50-15:00', 363], ['03:50-15:30', 514], ['-', 564], ['320', 614], ['09:20', 637],
+      ['44:14', 667], ['11:40', 697], ['34:10', 727]]),
+    ...row(77, [['03.05.2024', 32], ['OFF', 76], ['GAV', 213]]),
+  ];
+  const r = parseNetlinePdf([{ page: 1, width: 842, height: 595, items }]);
+  assert.equal(r.format, 'day-line-roster');
+  assert.equal(r.period, '01May24 - 31May24');
+  assert.deepEqual(r.published.map(x => [x.date, x.duty, x.dep, x.begin, x.end, x.arr, x.ac, x.info]), [
+    ['1 May 24', 'OFF', '', '', '', '', '', ''],
+    ['2 May 24', 'C/I', 'AAA', '03:50 Z / 05:50 L', '', '', '', ''],
+    ['2 May 24', '130-131', 'AAA', '04:50 Z', '15:00 Z', 'AAA', '320', '[Route: AAA-BBB-AAA] [Block: 09:20]'],
+    ['2 May 24', 'C/O', '', '', '15:30 Z / 17:30 L', 'AAA', '', '[Duty: 11:40]'],
+    ['3 May 24', 'OFF', '', '', '', '', '', '[GAV]'],
+  ]);
+});
+
+test('"MONTH PLAN" detail duty plan: legs above the day with flight numbers under, a leg over midnight, standby and day-off texts', () => {
+  const row = (y, cells) => cells.map(([text, x]) => iw(text, x, y, text.length * 4));
+  const items = [
+    ...row(31, [['MONTH', 182], ['PLAN', 231], ['01/09', 272], ['-', 309], ['30/09/2025', 316]]),
+    ...row(206, [['Detail', 51], ['duty', 69], ['plan', 84]]),
+    ...row(217, [['1135', 96], ['AAA', 112], ['==>', 127], ['1235', 139], ['BBB', 155], ['1310', 217], ['BBB', 232], ['==>', 245], ['1405', 257], ['AAA', 273]]),
+    ...row(221, [['31.', 52]]), ...row(224, [['VN1806', 119], ['VN1807', 240]]),
+    ...row(273, [['---', 113], ['Dayoff', 121], ['---', 142]]), ...row(276, [['1.', 54]]), ...row(279, [['Day', 77], ['OFF', 90]]),
+    ...row(298, [['2305', 96], ['AAA', 112], ['==>', 127], ['BBB', 155], ['...', 170]]), ...row(302, [['2.', 54]]), ...row(305, [['VN0154', 119]]),
+    ...row(317, [['...', 96], ['AAA', 112], ['==>', 127], ['0030', 139], ['BBB', 155]]), ...row(321, [['3.', 54]]), ...row(324, [['VN0154', 119]]),
+    ...row(340, [['4.', 52], ['Standby', 94], ['C', 119], ['(0900', 124], ['--', 144], ['1700', 150], [')', 166]]),
+  ];
+  const r = parseNetlinePdf([{ page: 1, width: 595, height: 842, items }]);
+  assert.equal(r.format, 'month-plan-detail');
+  assert.deepEqual(r.published.map(x => [x.date, x.duty, x.dep, x.begin, x.end, x.arr, x.info]), [
+    ['31 Aug 25', 'VN1806', 'AAA', '11:35 L', '12:35 L', 'BBB', ''],
+    ['31 Aug 25', 'VN1807', 'BBB', '13:10 L', '14:05 L', 'AAA', ''],
+    ['1 Sep 25', 'Dayoff', '', '', '', '', '[Day OFF]'],
+    ['2 Sep 25', 'VN0154', 'AAA', '23:05 L', '00:30 L +1', 'BBB', ''],
+    ['4 Sep 25', 'Standby C', '', '09:00 L', '17:00 L', '', ''],
+  ]);
+});
+
+test('logbook prints: "Pilot Log Book Report" (wrapped co-pilot names), "Logbook" sequences ("Aug 6, 2024 09:34 AM"), a leg export with up to six crew', () => {
+  const row = (y, cells) => cells.map(([text, x]) => iw(text, x, y, text.length * 4));
+  const p = [
+    ...row(34, [['Pilot Log Book Report', 436]]), ...row(59, [['From: 23-Feb-2019 To 02-Apr-2021', 443]]),
+    ...row(163, [['#', 19], ['Date', 28], ['Flt No', 81], ['Dep Stn', 119], ['Dep Time', 157], ['Arr Stn', 202], ['Arr', 244], ['Time', 263], ['A/C', 289], ['Type', 308], ['A/C', 338], ['Reg', 357],
+      ['Name', 376], ['Of PIC', 400], ['Co-Pilot', 435], ['Name', 479], ['Block', 509], ['PIC', 547], ['Night', 808], ['Take Off', 879], ['Landings', 971]]),
+    ...row(172, [['Hrs', 509], ['Day', 846], ['Night', 898], ['Day', 951], ['Night', 989]]),
+    ...row(213, [['4', 19], ['12-07-2019', 28], ['QR', 81], ['193', 95], ['AAA', 119], ['22:10', 157], ['BBB', 202], ['02:51', 244], ['77W', 289], ['A7-BAK', 339], ['Self', 377],
+      ['DOE', 437], ['06:41', 511], ['06:41', 549], ['00:00', 810], ['1', 848], ['0', 900], ['1', 952], ['0', 990]]),
+    ...row(222, [['(+1)', 244], ['Ann', 437]]), ...row(233, [['(60018', 437], ['-', 470], ['FO)', 480]]),
+  ];
+  const r = parseNetlinePdf([{ page: 1, width: 1100, height: 800, items: p }]);
+  assert.equal(r.format, 'pilot-logbook-report');
+  assert.deepEqual(r.published.map(x => [x.date, x.duty, x.dep, x.begin, x.end, x.arr, x.ac, x.registration, x.crew, x.info]), [
+    ['12 Jul 19', 'QR193', 'AAA', '22:10 Z', '02:51 Z +1', 'BBB', '77W', 'A7-BAK', '[PIC - Self][FO - 60018 - DOE Ann]', '[Block: 06:41] [PIC: 06:41] [Takeoff Day: 1] [Landing Day: 1]'],
+  ]);
+  const s = [
+    ...row(30, [['Logbook', 34]]),
+    ...row(50, [['YEAR', 54], ['SeqDate', 97], ['Seq', 175], ['EmpSeat', 230], ['Eq', 297], ['EQCode', 340], ['Flt', 405], ['DepSta', 453], ['ArrSta', 513], ['Out Dt Time', 567], ['InDtTime', 701],
+      ['DH', 835], ['AcNum', 874], ['FLY', 934], ['PAX', 1072], ['Distance', 1138]]),
+    ...row(89, [['2024', 66], ['05Aug2024', 97], ['31082', 175], ['FO', 230], ['320', 297], ['92', 340], ['2205', 405], ['AAA', 453], ['BBB', 513], ['Aug 6, 2024 11:34 PM', 567],
+      ['Aug 7, 2024 01:00 AM', 701], ['N809', 874], ['1:26', 934], ['84', 1080], ['337', 1162]]),
+  ];
+  const q = parseNetlinePdf([{ page: 1, width: 1200, height: 800, items: s }]);
+  assert.equal(q.format, 'sequence-logbook');
+  assert.deepEqual(q.published.map(x => [x.date, x.duty, x.registration, x.dep, x.begin, x.end, x.arr, x.ac, x.info]), [
+    ['6 Aug 24', '2205', 'N809', 'AAA', '23:34 L', '01:00 L +1', 'BBB', '320', '[Seq: 31082] [Flight: 1:26] [Pax: 84] [Distance: 337]'],
+  ]);
+  const e = [
+    ...row(294, [['938829.logbook_20260320-20260601', 1079]]),
+    ...row(320, [['E', 292], ['ff', 299], ['ectivePeriod', 305], ['SequenceNumber', 374], ['OriginationDate', 469], ['Seat', 604], ['LegNumber', 634], ['FlightNumber', 699], ['CrewId1', 773],
+      ['CrewSeat1', 821], ['CrewName1', 882], ['CrewId2', 1014], ['CrewSeat2', 1062], ['CrewName2', 1123], ['DepartureStation', 1915], ['ArrivalStation', 2006]]),
+    ...row(340, [['202605', 332], ['9604', 439], ['26/05/2026 00:00:00 +00:00', 469], ['FO', 604], ['4', 685], ['2092', 743], ['772493', 779], ['CA', 821], ['Roe, Ann', 882],
+      ['938829', 1020], ['FO', 1062], ['Doe, Bob', 1123], ['AAA', 1915], ['BBB', 2006]]),
+  ];
+  const x = parseNetlinePdf([{ page: 1, width: 2100, height: 800, items: e }]);
+  assert.equal(x.format, 'crew-leg-export');
+  assert.deepEqual(x.published.map(y => [y.date, y.duty, y.dep, y.arr, y.crew, y.info]), [
+    ['26 May 26', '2092', 'AAA', 'BBB', '[CA - 772493 - Roe, Ann][FO - 938829 - Doe, Bob]', '[Seq: 9604] [Leg: 4]'],
+  ]);
+});
+
+test('"Carnet de vol" (actual times, type - registration, decimal hours) and a START / END DATE logbook (three lines per flight)', () => {
+  const row = (y, cells) => cells.map(([text, x]) => iw(text, x, y, text.length * 4));
+  const carnet = [
+    ...row(26, [['Carnet de vol', 20]]), ...row(48, [['Du 01 mai 22 Au 30 juin 25', 20]]), ...row(142, [['Programmé', 275], ['Réel', 550]]),
+    ...row(152, [['Avion', 31], ['Vol', 102], ['Départ', 145], ['Arrivée', 187], ['Fonc.', 230]]),
+    ...row(162, [['Début', 275], ['Fin', 359], ['Total', 445], ['Jour', 479], ['Nuit', 513], ['Début', 550], ['Fin', 634], ['Total', 720], ['Jour', 754], ['Nuit', 788]]),
+    ...row(205, [['223 - FOTER', 31], ['UU612', 102], ['AAA', 145], ['BBB', 187], ['OBS', 230], ['08/07/2022 14:05', 275], ['08/07/2022 15:25', 359], ['1,33', 445], ['0,6', 479], ['0,73', 513],
+      ['08/07/2022 23:04', 550], ['09/07/2022 00:33', 634], ['1,48', 720], ['0,61', 754], ['0,87', 788]]),
+  ];
+  const c = parseNetlinePdf([{ page: 1, width: 842, height: 595, items: carnet }]);
+  assert.equal(c.format, 'carnet-de-vol');
+  assert.equal(c.period, '01May22 - 30Jun25');
+  assert.deepEqual(c.published.map(x => [x.date, x.duty, x.registration, x.dep, x.begin, x.end, x.arr, x.ac, x.info]), [
+    ['8 Jul 22', 'UU612', 'FOTER', 'AAA', '23:04 Z', '00:33 Z +1', 'BBB', '223', '[Function: OBS] [Total: 1,48] [Night: 0,87]'],
+  ]);
+  const log = [
+    ...row(34, [['START', 18], ['END', 51], ['AIRCRAFT', 113], ['DAY', 321], ['NIGHT', 352]]),
+    ...row(37, [['MAKE AND', 76], ['FROM', 146], ['TO', 168], ['DURATION', 185], ['MULTI-', 266], ['JET', 297], ['OF FLIGHT', 386], ['FLIGHT ACTUAL', 427], ['FLIGHT CROSS', 480], ['CHECKIN', 526], ['CHECKOUT', 555]]),
+    ...row(40, [['DATE', 19], ['DATE', 49], ['IDENT', 119], ['LANDINGS', 313], ['PILOT IN', 599], ['SECOND IN', 643], ['TIME DUAL', 688], ['FLIGHT', 740], ['REMARKS AND', 784]]),
+    ...row(43, [['MODEL', 81], ['OF FLIGHT', 185], ['NIGHT', 391]]),
+    ...row(56, [['26/02/2018', 15], ['27/02/2018', 44]]),
+    ...row(59, [['E179', 85], ['PR-AZC', 118], ['AAA', 149], ['BBB', 167], ['02:06', 194], ['02:06', 270], ['02:06', 296], ['0', 325], ['1', 359], ['02:06', 394], ['02:06', 443], ['FO', 654], ['4455', 798]]),
+    ...row(62, [['22:07', 21], ['00:13', 50]]),
+  ];
+  const l = parseNetlinePdf([{ page: 1, width: 842, height: 595, items: log }]);
+  assert.equal(l.format, 'start-end-logbook');
+  assert.deepEqual(l.published.map(x => [x.date, x.duty, x.registration, x.dep, x.begin, x.end, x.arr, x.ac, x.info]), [
+    ['26 Feb 18', '4455', 'PR-AZC', 'AAA', '22:07 Z', '00:13 Z +1', 'BBB', 'E179', '[Total: 02:06] [Landing Night: 1] [Night: 02:06] [IFR: 02:06] [Function: FO]'],
+  ]);
+});
+
+test('Crew Access schedule summary with crew lists (local times): Check-In / Release, flights with scheduled times above and actual under, "/ +1", deadhead (TVL), hotel', () => {
+  const row = (y, cells) => cells.map(([text, x]) => iw(text, x, y, text.length * 4));
+  const items = [
+    ...row(17, [['Crew Access', 18]]), ...row(43, [['Crew Access', 18], ['All activities times are in their local time timezone', 343]]),
+    ...row(306, [['Tue, 6th Aug 2024', 18], ['(AAA)', 145]]),
+    ...row(334, [['Check-In', 27], ['23:00', 148], ['-', 180], ['00:23', 189], ['/', 215], ['+1', 220], ['AAA', 278]]),
+    ...row(360, [['00:30', 148], ['/', 175], ['+1', 179], ['-', 197], ['02:25', 205], ['/', 232], ['+1', 236]]),
+    ...row(367, [['SV', 27], ['323', 40], ['(', 67], ['TVL', 70], [')', 89], ['AAA > BBB', 278], ['Position:', 360], ['CA', 404], ['Flight Time:', 450], ['2h 27m', 509]]),
+    ...row(373, [['(', 148], ['00:23', 152], ['/', 178], ['+1', 183], ['-', 200], ['01:50', 209], ['/', 235], ['+1', 240], [')', 252]]),
+    ...row(520, [['Release', 27], ['01:50', 148], ['/', 175], ['+1', 179], ['-', 197], ['02:20', 205], ['/', 232], ['+1', 236], ['BBB', 278]]),
+    ...row(560, [['Fri, 9th Aug 2024', 18], ['(BBB)', 137]]),
+    ...row(588, [['Grand Hotel', 360]]),
+    ...row(600, [['Hotel', 27], ['15:15', 148], ['-', 180], ['14:20', 189], ['/', 215], ['+1', 220]]),
+  ];
+  const r = parseNetlinePdf([{ page: 1, width: 595, height: 842, items }]);
+  assert.equal(r.format, 'crew-access-detail');
+  assert.deepEqual(r.published.map(x => [x.date, x.dc, x.duty, x.dep, x.begin, x.end, x.arr, x.info]), [
+    ['6 Aug 24', '', 'C/I', 'AAA', '23:00 L', '', '', ''],
+    ['6 Aug 24', 'DH', 'SV323', 'AAA', '00:30 L +1', '02:25 L +1', 'BBB', '[Position: CA] [Flight: 02:27] [Actual: 00:23 +1 - 01:50 +1]'],
+    ['6 Aug 24', '', 'C/O', '', '', '02:20 L +1', 'BBB', ''],
+    ['9 Aug 24', '', 'HT', 'BBB', '15:15 L', '14:20 L +1', '', 'Grand Hotel'],
+  ]);
+});
+
+test('Flightworx table of days: Off Duty, a day of flights with the day and aircraft centred, crew over three lines, the duty line for C/I and C/O, standby', () => {
+  const row = (y, cells) => cells.map(([text, x]) => iw(text, x, y, text.length * 4));
+  const items = [
+    ...row(14, [['All times in station local time', 29]]), ...row(109, [['MONTH', 66], ['AUGUST', 226], ['YEAR', 389], ['2020', 502]]),
+    ...row(145, [['Check', 151], ['Check', 390]]),
+    ...row(149, [['Day', 47], ['Aircraft Type', 86], ['Description', 259], ['Function', 425], ['Crew', 487], ['Block', 535]]),
+    ...row(174, [['26 Aug Wed', 36], ['Off Duty', 238], ['MLA', 330]]),
+    ...row(653, [['AMS-CGA-', 479]]),
+    ...row(661, [['MMO030', 224], ['11:50', 265], ['MLA', 298], ['OTP', 330], ['15:20', 360], ['FO', 440], ['MRM / GMA-', 476], ['02:30', 538]]),
+    ...row(669, [['SCE', 490]]), ...row(677, [['A320 9H-AEO', 90]]), ...row(685, [['27 Aug Thu', 36]]),
+    ...row(693, [['MMO031', 224], ['16:20', 265], ['OTP', 298], ['MLA', 330], ['17:50', 360], ['18:20', 394], ['FO', 440], ['02:30', 538]]),
+    ...row(718, [['10:20', 155], ['MMO030/MMO031', 204], ['10:20', 297], ['MLA', 330], ['18:20', 360]]),
+    ...row(737, [['28 Aug Fri', 38], ['09:00', 155], ['Home STBY 1000-1600Z', 194], ['09:00', 297], ['MLA', 330], ['15:00', 360], ['15:00', 394]]),
+  ];
+  const r = parseNetlinePdf([{ page: 1, width: 595, height: 842, items }]);
+  assert.equal(r.format, 'day-table-roster');
+  assert.equal(r.period, '01Aug20 - 31Aug20');
+  assert.deepEqual(r.published.map(x => [x.date, x.duty, x.registration, x.dep, x.begin, x.end, x.arr, x.ac, x.crew, x.info]), [
+    ['26 Aug 20', 'Off Duty', '', 'MLA', '', '', '', '', '', ''],
+    ['27 Aug 20', 'C/I', '', 'MLA', '10:20 L', '', '', '', '', ''],
+    ['27 Aug 20', 'MMO030', '9H-AEO', 'MLA', '11:50 L', '15:20 L', 'OTP', 'A320', '[Crew - AMS-CGA-MRM / GMA-SCE]', '[Function: FO] [Block: 02:30]'],
+    ['27 Aug 20', 'MMO031', '9H-AEO', 'OTP', '16:20 L', '17:50 L', 'MLA', 'A320', '', '[Function: FO] [Block: 02:30]'],
+    ['27 Aug 20', 'C/O', '', '', '', '18:20 L', 'MLA', '', '', ''],
+    ['28 Aug 20', 'Home STBY 1000-1600Z', '', 'MLA', '09:00 L', '15:00 L', '', '', '', ''],
+  ]);
+});
+
+test('Crew Access print with a character an item ("/" printed as "7": "04:007+1"), OCR slips ("O1", "Wed1st", "SSALEC", "Oh 58m"), activities with their code', () => {
+  // a line as single characters touching each other
+  const chars = (y, x0, text) => [...text].map((c, k) => (c === ' ' ? null : iw(c, x0 + k * 4, y, 4))).filter(Boolean);
+  const row = (y, cells) => cells.map(([text, x]) => iw(text, x, y, text.length * 4));
+  const text = [
+    ...row(14, [['CrewAccess', 39], ['All activties times are in ther Jocal time timeZone', 366]]),
+    ...chars(60, 39, 'Sat, 11th Oct 2025 (CNF)'),
+    ...chars(84, 47, 'Leave'), ...chars(84, 154, '04:00 - 04:007+1'), ...chars(84, 268, 'CNF'), ...chars(84, 341, 'Position: CA'), ...chars(84, 421, 'Activity Code: P-FER'),
+  ];
+  const ocr = [
+    ...row(13, [['Wed1st', 39], ['Oct', 88], ['2025', 115], ['(CNF)', 150]]),
+    ...row(107, [['14:30', 153], ['-', 181], ['15:40', 190]]),
+    ...row(113, [['AD4950', 46], ['SSALEC', 269], ['Position:', 340], ['CA', 384], ['Flight', 421], ['Time:', 452], ['Oh', 478], ['58m', 491]]),
+    ...row(120, [['(14:25-15:37)', 154]]),
+  ];
+  const r = parseNetlinePdf([{ page: 1, width: 612, height: 792, items: text }, { page: 2, width: 612, height: 792, items: ocr, ocr: true }]);
+  assert.equal(r.format, 'crew-access-detail');
+  assert.deepEqual(r.published.map(x => [x.date, x.duty, x.dep, x.begin, x.end, x.arr, x.info]), [
+    ['11 Oct 25', 'P-FER', 'CNF', '04:00 L', '04:00 L +1', '', '[P-FER: Leave] [Position: CA]'],
+    ['1 Oct 25', 'AD4950', 'SSA', '14:30 L', '15:40 L', 'LEC', '[Position: CA] [Flight: 00:58] [Actual: 14:25 - 15:37]'],
+  ]);
+});
+
+test('Azul "Minha Escala" read by OCR: three-line date cells, C/I / flight / C/O, deadhead (DHD), crew names beside their function, layover', () => {
+  const row = (y, cells) => cells.map(([text, x]) => iw(text, x, y, text.length * 8));
+  const items = [
+    ...row(84, [['Minha', 493], ['Escala', 635]]),
+    ...row(171, [['Activty', 60], ['Checkin', 169], ['Start', 271], ['End', 364], ['Checkout', 433], ['Dep', 558], ['Arr', 646], ['AcVer', 713], ['DD/CAT', 791], ['CreWs', 1022]]),
+    ...row(205, [['CreW', 972], ['Function', 1120]]),
+    ...row(237, [['ROE', 936], ['CA', 1156]]), ...row(265, [['DOE', 963]]), ...row(269, [['FO', 1156]]),
+    ...row(335, [['28', 176], ['JUN', 213], ['28JUN', 262], ['28', 346], ['JUN', 383], ['28', 446], ['JUN', 484]]),
+    ...row(356, [['AD4505', 59], ['2024', 185], ['2024', 275], ['2024', 359], ['2024', 456], ['AAA', 561], ['BBB', 643], ['295', 728], ['DHD', 810]]),
+    ...row(382, [['05:30', 183], ['06:06', 272], ['07:06', 355], ['07:36', 454]]),
+    ...row(987, [['28', 264], ['JUN', 301], ['29', 347], ['JUN', 384]]),
+    ...row(1012, [['Layover', 62], ['2024', 275], ['2024', 359], ['BBB', 561], ['BBB', 644]]),
+    ...row(1033, [['07:36', 272], ['07:10', 353]]),
+  ];
+  const r = parseNetlinePdf([{ page: 1, width: 1275, height: 12314, items, ocr: true }]);
+  assert.equal(r.format, 'minha-escala');
+  assert.deepEqual(r.published.map(x => [x.date, x.dc, x.duty, x.dep, x.begin, x.end, x.arr, x.ac, x.crew]), [
+    ['28 Jun 24', '', 'C/I', 'AAA', '05:30 Z', '', '', '', ''],
+    ['28 Jun 24', 'DH', 'AD4505', 'AAA', '06:06 Z', '07:06 Z', 'BBB', '295', '[CA - ROE][FO - DOE]'],
+    ['28 Jun 24', '', 'C/O', '', '', '07:36 Z', 'BBB', '', ''],
+    ['28 Jun 24', '', 'HT', 'BBB', '07:36 Z', '07:10 Z +1', '', '', ''],
+  ]);
+});
+
+test('LATAM "Roster Report": header over three lines, an arrival wrapped round its line, a day off over midnight, C/I / flights / C/O of a duty', () => {
+  const row = (y, cells) => cells.map(([text, x]) => iw(text, x, y, text.length * 4));
+  const items = [
+    ...row(35, [['Roster Report', 35]]), ...row(38, [['01-Jul-2024 to 31-Jul-2024', 263]]),
+    ...row(64, [['Duty', 246], ['Overridde', 351], ['Work', 409], ['Dep Stn / Dep', 492], ['Arr. Stn /', 576], ['Duty', 692], ['Flying', 738], ['Duty', 775], ['A/C', 884]]),
+    ...row(69, [['Date', 40], ['Pairing/Activity', 140], ['Item', 306], ['ACY Rep', 440], ['ACY Deb', 630], ['SDC', 834], ['Hotel', 951]]),
+    ...row(75, [['Report', 239], ['n Rank', 355], ['Type', 407], ['Time', 509], ['Arr. Time', 572], ['Debrief', 684], ['Hrs', 741], ['Hrs', 770], ['Type', 879]]),
+    ...row(91, [['GIG', 566], ['11:44(+1)', 681]]),
+    ...row(96, [['30-Jun-2024', 38], ['DO', 123], ['11:45', 233], ['GIG 11:45', 491], ['0:00', 778]]),
+    ...row(102, [['11:44(+1)', 566]]),
+    ...row(115, [['LA3349/030724/JJFC', 123]]),
+    ...row(120, [['03-Jul-2024', 38], ['16:10', 233], ['LA3349', 291], ['OP', 406], ['GIG 16:55', 491], ['GRU 18:10', 566], ['01:15', 735], ['09:10', 778], ['319', 878]]),
+    ...row(126, [['320-P', 123]]),
+    ...row(202, [['LA4570', 291], ['OP', 406], ['GRU 20:35', 491], ['FLN 21:55', 566], ['01:20', 735], ['320', 878]]),
+    ...row(221, [['GRU', 566], ['01:20(+1)', 681]]),
+    ...row(226, [['LA4571', 291], ['OP', 406], ['FLN 23:30', 491], ['01:20', 735], ['320', 878]]),
+    ...row(232, [['00:50(+1)', 566]]),
+  ];
+  const r = parseNetlinePdf([{ page: 1, width: 1500, height: 750, items }]);
+  assert.equal(r.format, 'latam-roster-report');
+  assert.equal(r.period, '01Jul24 - 31Jul24');
+  assert.deepEqual(r.published.map(x => [x.date, x.duty, x.dep, x.begin, x.end, x.arr, x.ac, x.info]), [
+    ['30 Jun 24', 'DO', 'GIG', '11:45 L', '11:44 L +1', '', '', ''],
+    ['3 Jul 24', 'C/I', 'GIG', '16:10 L', '', '', '', '[Duty: 09:10]'],
+    ['3 Jul 24', 'LA3349', 'GIG', '16:55 L', '18:10 L', 'GRU', '319', '[Block: 01:15]'],
+    ['3 Jul 24', 'LA4570', 'GRU', '20:35 L', '21:55 L', 'FLN', '320', '[Block: 01:20]'],
+    ['3 Jul 24', 'LA4571', 'FLN', '23:30 L', '00:50 L +1', 'GRU', '320', '[Block: 01:20]'],
+    ['3 Jul 24', 'C/O', '', '', '01:20 L +1', 'GRU', '', ''],
+  ]);
+});
+
+test('JAL "CREW SCHEDULE LIST": a simulator duty (briefing "---", SIM with the other crew, debriefing), a day of flights, a day off', () => {
+  const row = (y, cells) => cells.map(([text, x]) => iw(text, x, y, text.length * 4));
+  const items = [
+    ...row(31, [['CREW SCHEDULE LIST（LATEST）', 339]]), ...row(59, [['PERIOD', 13], ['2025/04/01 - 2025/04/30', 102]]), ...row(85, [['STAFF NO.', 13], ['04241', 102]]),
+    ...row(146, [['TIME', 303], ['CREW', 508], ['DETAIL INFO', 708]]), ...row(157, [['LOCAL', 36], ['FLT NO.', 133]]), ...row(160, [['DUTY', 93], ['PORT', 183]]),
+    ...row(164, [['DATE', 38], ['FLEET', 136], ['REPORT', 225], ['DEP', 280], ['ARV', 330], ['DUTY END', 371], ['STAFF NO.', 422]]),
+    ...row(169, [['NAME', 536], ['PLACE', 634], ['EVENT', 741]]),
+    ...row(331, [['06APR', 33], ['NRT', 183], ['04:00', 224], ['04:00', 274], ['05:00', 324]]),
+    ...row(335, [['---', 93], ['KZT/ROM', 627], ['INSTR', 679], ['BRFG', 715]]), ...row(340, [['(Sun)', 33], ['(19:00-1)', 215]]),
+    ...row(354, [['NRT', 183], ['05:00', 274], ['07:00', 324], ['04241', 426]]),
+    ...row(358, [['SIM', 93], ['NOBUYUKI HASEGAWA', 470], ['KZT/SIM2', 625], ['INSTR', 679], ['CBTA AM2 SBT', 715]]), ...row(363, [['(20:00-1)', 265], ['LAC/CAT3', 420]]),
+    ...row(377, [['03694', 426]]), ...row(381, [['YUKITOSHI NAKAJIMA', 470], ['KZT/SIM2', 625], ['PUPIL', 679], ['CBTA AM2 SBT', 715]]),
+    ...row(423, [['NRT', 183], ['09:00', 274], ['10:00', 324], ['10:00', 374]]), ...row(427, [['---', 93], ['KZT/ROM', 627], ['INSTR', 679], ['DE-BRFG', 715]]), ...row(432, [['(00:00)', 269]]),
+    ...row(600, [['11APR', 33], ['KZ0225', 132], ['NRT', 183], ['08:50', 224], ['10:30', 274], ['12:50', 324], ['04241', 426]]),
+    ...row(604, [['CAP', 93], ['NOBUYUKI HASEGAWA', 470]]), ...row(609, [['(Fri)', 33], ['748', 138], ['PVG', 183], ['(23:50-1)', 215]]),
+    ...row(623, [['04080', 426]]), ...row(627, [['COP', 93], ['MISAKI ONISHI', 470]]),
+    ...row(646, [['KZ0226', 132], ['PVG', 183], ['15:20', 274], ['19:20', 324], ['20:20', 374], ['04241', 426]]),
+    ...row(650, [['CAP', 93], ['NOBUYUKI HASEGAWA', 470]]), ...row(655, [['748', 138], ['NRT', 183], ['(07:20)', 269]]),
+    ...row(669, [['04080', 426]]), ...row(673, [['COP', 93], ['MISAKI ONISHI', 470]]),
+    ...row(700, [['12APR', 33], ['NRT', 183]]), ...row(704, [['OFF', 93]]), ...row(709, [['(Sat)', 33]]),
+  ];
+  const r = parseNetlinePdf([{ page: 1, width: 842, height: 1190, items }]);
+  assert.equal(r.format, 'crew-schedule-list');
+  assert.equal(r.period, '01Apr25 - 30Apr25');
+  assert.deepEqual(r.published.map(x => [x.date, x.duty, x.dep, x.begin, x.end, x.arr, x.ac, x.crew, x.info]), [
+    ['6 Apr 25', 'C/I', 'NRT', '04:00 L', '', '', '', '', ''],
+    ['6 Apr 25', 'BRFG', 'NRT', '04:00 L', '05:00 L', '', '', '', '[Place: KZT/ROM] [Part: INSTR]'],
+    ['6 Apr 25', 'SIM', 'NRT', '05:00 L', '07:00 L', '', '', '[PUPIL - 03694 - YUKITOSHI NAKAJIMA]', '[Place: KZT/SIM2] [Part: INSTR] [Event: CBTA AM2 SBT]'],
+    ['6 Apr 25', 'DE-BRFG', 'NRT', '09:00 L', '10:00 L', '', '', '', '[Place: KZT/ROM] [Part: INSTR]'],
+    ['6 Apr 25', 'C/O', '', '', '10:00 L', 'NRT', '', '', ''],
+    ['11 Apr 25', 'C/I', 'NRT', '08:50 L', '', '', '', '', ''],
+    ['11 Apr 25', 'KZ0225', 'NRT', '10:30 L', '12:50 L', 'PVG', '748', '[COP - 04080 - MISAKI ONISHI]', '[Duty: CAP]'],
+    ['11 Apr 25', 'KZ0226', 'PVG', '15:20 L', '19:20 L', 'NRT', '748', '[COP - 04080 - MISAKI ONISHI]', '[Duty: CAP]'],
+    ['11 Apr 25', 'C/O', '', '', '20:20 L', 'NRT', '', '', ''],
+    ['12 Apr 25', 'OFF', 'NRT', '', '', '', '', '', ''],
+  ]);
+});
+
+test('Turkish "MONTHLY FLIGHT PROGRAM": the local-time details, flights put into the duty whose start and end take them in, the cockpit crew, a layover', () => {
+  const row = (y, cells) => cells.map(([text, x]) => iw(text, x, y, text.length * 4));
+  const p1 = [
+    ...row(33, [['MONTHLY FLIGHT PROGRAM', 237]]), ...row(48, [['Period:', 44], ['01Jul2024 - 01Aug2024', 102]]),
+    ...row(101, [['069210', 98]]), ...row(112, [['MIKO', 104]]), ...row(124, [['GYORGY', 98]]), ...row(136, [['C Typ/ Flt/Cls:', 47]]),
+  ];
+  const p3 = [
+    ...row(33, [['MONTHLY FLIGHT PROGRAM', 237]]), ...row(48, [['Period:', 44], ['01Jul2024 - 01Aug2024', 102]]), ...row(95, [['LOCAL TIME ROSTER DETAILS', 46]]),
+    ...row(128, [['Trip', 94], ['Duty', 273], ['Flight', 535], ['Dep/LT', 638], ['Arr/LT', 690], ['Cockpit', 742]]),
+    ...row(142, [['DS:', 185], ['03Jul2024 12:45', 213]]),
+    ...row(145, [['GYORGY MIKO (C1), LEVENT CANKAYA (C2), KUTAY', 719]]),
+    ...row(150, [['DE:', 185], ['04Jul2024 03:35', 213], ['TK6397', 535], ['IST/13:45 ALG/15:15', 603]]),
+    ...row(155, [['AYVALI (P6)', 719]]),
+    ...row(171, [['TK6397', 535], ['ALG/18:00 MXP/20:55 -', 603]]),
+    ...row(187, [['TK6397', 535], ['MXP/23:25 IST/3:05', 603], ['-', 719]]),
+    ...row(214, [['DS:', 185], ['05Jul2024 08:00', 213]]), ...row(217, [['CFR', 535], ['IST/8:00 IST/23:59', 585]]), ...row(224, [['DE:', 185], ['05Jul2024 23:59', 213]]),
+    ...row(342, [['DS:', 185], ['08Jul2024 00:20', 213]]),
+    ...row(345, [['TK090', 535], ['IST/1:50', 597], ['ICN/17:40 BILGEHAN AKALIN (C2)', 655]]),
+    ...row(352, [['DE:', 185], ['08Jul2024 18:10', 213]]),
+    ...row(362, [['TK091', 535], ['ICN/23:20 IST/4:55', 597], ['-', 713]]),
+    ...row(391, [['LS/LRT:', 283], ['ICN/52:10', 329]]),
+    ...row(401, [['DS:', 185], ['10Jul2024 22:20', 213]]), ...row(411, [['DE:', 185], ['11Jul2024 05:25', 213]]),
+  ];
+  const r = parseNetlinePdf([{ page: 1, width: 1190, height: 842, items: p1 }, { page: 2, width: 1190, height: 842, items: p3 }]);
+  assert.equal(r.format, 'monthly-flight-program');
+  assert.equal(r.period, '01Jul24 - 01Aug24');
+  assert.deepEqual(r.published.map(x => [x.date, x.duty, x.dep, x.begin, x.end, x.arr, x.crew, x.info]), [
+    ['3 Jul 24', 'C/I', 'IST', '12:45 L', '', '', '', ''],
+    ['3 Jul 24', 'TK6397', 'IST', '13:45 L', '15:15 L', 'ALG', '[C2 - LEVENT CANKAYA][P6 - KUTAY AYVALI]', ''],
+    ['3 Jul 24', 'TK6397', 'ALG', '18:00 L', '20:55 L', 'MXP', '', ''],
+    ['3 Jul 24', 'TK6397', 'MXP', '23:25 L', '03:05 L +1', 'IST', '', ''],
+    ['3 Jul 24', 'C/O', '', '', '03:35 L +1', 'IST', '', ''],
+    ['5 Jul 24', 'CFR', 'IST', '08:00 L', '23:59 L', '', '', ''],
+    ['8 Jul 24', 'C/I', 'IST', '00:20 L', '', '', '', ''],
+    ['8 Jul 24', 'TK090', 'IST', '01:50 L', '17:40 L', 'ICN', '[C2 - BILGEHAN AKALIN]', ''],
+    ['8 Jul 24', 'C/O', '', '', '18:10 L', 'ICN', '', ''],
+    ['8 Jul 24', 'HT', 'ICN', '', '', '', '', '[Layover: 52:10]'],
+    ['10 Jul 24', 'C/I', 'ICN', '22:20 L', '', '', '', ''],
+    ['10 Jul 24', 'TK091', 'ICN', '23:20 L', '04:55 L +1', 'IST', '', ''],
+    ['10 Jul 24', 'C/O', '', '', '05:25 L +1', 'IST', '', ''],
+  ]);
+});
+
+test('numbered pilot logbook (1 Date .. 14 Remarks): a simulator line, a flight with its type wrapped over two lines', () => {
+  const row = (y, cells) => cells.map(([text, x]) => iw(text, x, y, text.length * 4));
+  const items = [
+    ...row(46, [['072905 JOHN DOE 14/07/2024 15:20', 32]]),
+    ...row(67, [['1', 35], ['2', 81], ['13', 687], ['14', 795]]),
+    ...row(82, [['AIRCRAFT', 81], ['DEPARTURE', 137], ['ARRIVAL', 191], ['SINGLE', 245], ['LANDING', 407], ['SYNTHETIC DEVICES', 687]]),
+    ...row(97, [['Date', 35], ['Type', 81], ['Regist', 103], ['Dep.', 137], ['Dep.', 163], ['Arr.', 191], ['Arr.', 217], ['SE', 245], ['ME', 279], ['Multi', 310], ['Total', 341],
+      ['Name of', 373], ['Landing', 407], ['Landing', 441], ['Operation', 475], ['Operation', 511], ['Function', 548], ['Function', 582], ['Function', 619], ['Instr', 653],
+      ['STDS (Date)', 687], ['STDS', 733], ['STDS', 761], ['Remarks', 795]]),
+    ...row(132, [['1', 18], ['09/07/2024', 35], ['IST', 137], ['11:00', 163], ['IST', 191], ['15:00', 217], ['09/07/2024', 687], ['04:00', 761]]),
+    ...row(155, [['2', 18], ['10/07/2024', 35], ['O', 81], ['TCLOG', 103], ['IST', 137], ['15:56', 163], ['EWR', 191], ['03:00', 217], ['11:04', 310], ['11:04', 341], ['11:04', 511]]),
+    ...row(163, [['7M', 81]]),
+  ];
+  const r = parseNetlinePdf([{ page: 1, width: 842, height: 595, items }]);
+  assert.equal(r.format, 'numbered-logbook');
+  assert.deepEqual(r.published.map(x => [x.date, x.duty, x.registration, x.dep, x.begin, x.end, x.arr, x.ac, x.info]), [
+    ['9 Jul 24', 'SIM', '', 'IST', '11:00 Z', '15:00 Z', '', '', '[Sim: 04:00]'],
+    ['10 Jul 24', '', 'TCLOG', 'IST', '15:56 Z', '03:00 Z +1', 'EWR', 'O7M', '[Flight: 11:04] [IFR: 11:04]'],
+  ]);
+});
+
+test('day blocks in English ("Code Descr."): a day off, sign-in -> C/I, a flight with its captain, a positioning flight, a simulator with its report and release in brackets', () => {
+  const row = (y, cells) => cells.map(([text, x]) => iw(text, x, y, text.length * 4));
+  const items = [
+    ...row(49, [['From 2024-05-01 to 2024-05-31 - UTC time', 349]]),
+    ...row(102, [['Code Descr.', 12], ['Flight', 54], ['DEP-ARR', 83], ['STD - STA', 112], ['Crew', 144], ['Code Descr.', 216], ['Flight', 260], ['DEP-ARR', 287], ['STD - STA', 316], ['Crew', 349]]),
+    ...row(110, [['Date:', 12], ['Wed 01-May-2024', 23]]),
+    ...row(116, [['Day Off', 12], ['OFF', 54], ['0:00 -', 112], ['0:00', 126]]),
+    ...row(123, [['Totals : Blq', 12], ['0:00:00', 33]]),
+    ...row(133, [['Date:', 12], ['Thu 02-May-2024', 23], ['Signin:', 90], ['8:40', 104]]),
+    ...row(139, [['ATM', 33], ['IB8262', 54], ['AGP-MLN', 84], ['9:40 - 10:40', 112], ['(C) BAIAO(c)', 144]]),
+    ...row(146, [['UX5050', 54], ['AGP-MAD', 84], ['15:00 - 16:15', 110], ['Situación', 144]]),
+    ...row(169, [['Date:', 12], ['Fri 03-May-2024', 23]]),
+    ...row(176, [['ST Oper Conv Simulator', 12], ['SCOI', 54], ['[04:30]', 93], ['6:00 - 10:00', 112], ['[11:00]', 138]]),
+  ];
+  const r = parseNetlinePdf([{ page: 1, width: 841, height: 595, items }]);
+  assert.equal(r.format, 'day-blocks');
+  assert.equal(r.period, '01May24 - 31May24');
+  assert.deepEqual(r.published.map(x => [x.date, x.dc, x.duty, x.dep, x.begin, x.end, x.arr, x.ac, x.crew]), [
+    ['1 May 24', '', 'OFF', '', '', '', '', '', ''],
+    ['2 May 24', '', 'C/I', 'AGP', '08:40 Z', '', '', '', ''],
+    ['2 May 24', '', 'IB8262', 'AGP', '09:40 Z', '10:40 Z', 'MLN', 'ATM', '(C) BAIAO(c)'],
+    ['2 May 24', 'DHD', 'UX5050', 'AGP', '15:00 Z', '16:15 Z', 'MAD', '', ''],
+    ['3 May 24', '', 'C/I', '', '04:30 Z', '', '', '', ''],
+    ['3 May 24', '', 'SCOI', '', '06:00 Z', '10:00 Z', '', '', ''],
+    ['3 May 24', '', 'C/O', '', '', '11:00 Z', '', '', ''],
+  ]);
+});
+
+test('fixed-width logbook text with a ruler of dashes (Cathay "Merged Logbook Records"): block / take-off / landing times, counts, commander', () => {
+  const row = (y, cells) => cells.map(([text, x]) => iw(text, x, y, text.length * 6));
+  const items = [
+    ...row(20, [['Merged Logbook Records - from 2025-08-01 to 2025-09-01', 20]]),
+    ...row(80, [['Date(UTC)', 20], ['No.', 92], ['Sector', 134], ['Reg', 194], ['Time', 230], ['Off-Blk', 272], ['Airborne', 326], ['Landing', 386], ['On-Blk Off', 446], ['Land', 518], ['Commander', 608]]),
+    ...row(92, [['----------', 20], ['----', 92], ['--------', 128], ['-----', 188], ['-----', 230], ['-------', 272], ['--------', 326], ['--------', 386], ['-------', 446], ['---', 500], ['----', 530], ['----', 566], ['-------------------', 602]]),
+    ...row(128, [['2025/08/01', 20], ['885', 92], ['LAX HKG', 128], ['B-HNR', 188], ['14:47', 230], ['20:17', 272], ['20:41', 326], ['10:43+1', 386], ['11:04+1', 446], ['1', 506], ['1', 542], ['N', 572], ['DOE JM', 608]]),
+    ...row(140, [['2025/08/07', 20], ['882', 92], ['HKG LAX', 128], ['B-KQW', 188], ['13:03', 230], ['10:34', 272], ['10:54', 326], ['23:31', 386], ['23:37', 446], ['0', 506], ['0', 542], ['N', 572], ['ROE KJ', 608]]),
+  ];
+  const r = parseNetlinePdf([{ page: 1, width: 934, height: 208, items }]);
+  assert.equal(r.format, 'ruler-logbook');
+  assert.equal(r.period, '01Aug25 - 01Sep25');
+  assert.deepEqual(r.published.map(x => [x.date, x.duty, x.registration, x.dep, x.begin, x.takeoff, x.landing, x.end, x.arr, x.crew, x.info]), [
+    ['1 Aug 25', '885', 'B-HNR', 'LAX', '20:17 Z', '20:41 Z', '10:43 Z +1', '11:04 Z +1', 'HKG', '[Commander - DOE JM]', '[Block: 14:47] [Takeoff Day/Night: 1] [Landing Day/Night: 1]'],
+    ['7 Aug 25', '882', 'B-KQW', 'HKG', '10:34 Z', '10:54 Z', '23:31 Z', '23:37 Z', 'LAX', '[Commander - ROE KJ]', '[Block: 13:03]'],
+  ]);
+});
+
+test('Lufthansa "Acknowledged Roster": activities, a flight with report and layover, a flight over midnight printed on two days\' lines', () => {
+  const row = (y, cells) => cells.map(([text, x]) => iw(text, x, y, text.length * 4));
+  const items = [
+    ...row(34, [['Acknowledged Roster', 44]]), ...row(54, [['Month:', 44], ['March 2026', 114]]),
+    ...row(321, [['Date (LT)', 44], ['Trip ID', 77], ['Report (LT)', 105], ['Pos', 144], ['Activity', 161], ['From', 204], ['To', 226], ['Start (UTC)', 246], ['End (UTC)', 285],
+      ['A/C', 320], ['Layover', 337], ['Timezone', 368], ['LSW', 406], ['BZW', 428], ['Tags', 450], ['Blocktime', 502], ['FDP', 539]]),
+    ...row(372, [['01 Sun', 44], ['OFF', 168]]),
+    ...row(493, [['09 Mon', 44], ['SB_F/35_FM', 161], ['MUC', 204], ['06:00', 257], ['16:00', 296]]),
+    ...row(600, [['21 Sat', 44], ['103751', 77], ['14:20', 105], ['FO', 144], ['412', 168], ['MUC', 204], ['EWR', 226], ['15:10', 257], ['(22) 00:05', 285], ['35P', 320], ['24:15', 337],
+      ['-04:00', 368], ['08:55', 406], ['08:55', 428], ['08:55', 502]]),
+    ...row(611, [['22 Sun', 44], ['20:50', 105], ['FO', 144], ['413', 168], ['EWR', 204], ['(23) 01:50', 246], ['35P', 320]]),
+    ...row(623, [['23 Mon', 44], ['FO', 144], ['413', 168], ['MUC', 226], ['09:25', 296], ['35P', 320], ['+01:00', 368], ['07:35', 406], ['07:35', 428], ['07:35', 502]]),
+  ];
+  const r = parseNetlinePdf([{ page: 1, width: 842, height: 595, items }]);
+  assert.equal(r.format, 'acknowledged-roster');
+  assert.equal(r.period, '01Mar26 - 31Mar26');
+  assert.deepEqual(r.published.map(x => [x.date, x.duty, x.dep, x.begin, x.end, x.arr, x.ac, x.info]), [
+    ['1 Mar 26', 'OFF', '', '', '', '', '', ''],
+    ['9 Mar 26', 'SB_F/35_FM', 'MUC', '06:00 Z', '16:00 Z', '', '', ''],
+    ['21 Mar 26', 'C/I', 'MUC', '14:20 L', '', '', '', ''],
+    ['21 Mar 26', '412', 'MUC', '15:10 Z', '00:05 Z +1', 'EWR', '35P', '[Block: 08:55] [Pos: FO]'],
+    ['21 Mar 26', 'HT', 'EWR', '', '', '', '', '[Layover: 24:15]'],
+    ['22 Mar 26', 'C/I', 'EWR', '20:50 L', '', '', '', ''],
+    ['23 Mar 26', '413', 'EWR', '01:50 Z', '09:25 Z', 'MUC', '35P', '[Pos: FO] [Block: 07:35]'],
+  ]);
+});
+
+test('"Crew Briefing": a day off, a duty\'s start / end around its flights, the other crew from the crew lines, block hours', () => {
+  const row = (y, cells) => cells.map(([text, x]) => iw(text, x, y, text.length * 4));
+  const items = [
+    ...row(30, [['Crew Briefing', 258]]), ...row(55, [['Doe,John', 14], ['Timed Mode:', 495], ['Local', 558]]),
+    ...row(96, [['Duty : DOFF', 14]]), ...row(104, [['01-Jul-2026 00:00(L) ~ 01-Jul-2026 23:59(L)', 394]]), ...row(111, [['Duty Detail', 14]]),
+    ...row(127, [['Assignment', 30], ['Location', 122], ['Date', 216], ['Start Time', 304], ['End Time', 420]]),
+    ...row(140, [['DOFF', 42], ['MNL', 130], ['01-Jul-2026', 201], ['00:00', 314], ['23:59', 428], ['-', 539]]),
+    ...row(188, [['Duty : 2P2043/2P2044', 14]]), ...row(202, [['Op : 10', 14], ['02-Jul-2026 14:20(L) ~ 03-Jul-2026 01:10(L)', 394]]), ...row(216, [['Duty Detail', 14]]),
+    ...row(232, [['Assignment', 25], ['Flight No.', 99], ['DEP', 167], ['ARR', 218], ['STD', 269], ['STA', 320], ['Acting', 367], ['Reg No.', 420], ['Fleet', 483], ['Conx', 540]]),
+    ...row(246, [['FLY', 41], ['2P2043', 103], ['MNL', 167], ['MPH', 217], ['15:50', 267], ['16:55', 317], ['CP', 373], ['RP-C8933', 415], ['320', 486], ['0:50', 542]]),
+    ...row(259, [['Block Hours', 24], ['Pax Hours', 98]]), ...row(273, [['1:00', 41], ['0:00', 111]]),
+    ...row(286, [['CP : Doe,John/100872/MNL/FLY', 14], ['FO : Roe,Alfe/103273/MNL/FLY', 300]]),
+    ...row(334, [['Assignment', 25], ['Flight No.', 99], ['DEP', 167], ['ARR', 218], ['STD', 269], ['STA', 320]]),
+    ...row(348, [['FLY', 41], ['2P2044', 103], ['MPH', 166], ['MNL', 218], ['23:05', 267], ['00:40', 317], ['CP', 373], ['RP-C8933', 415], ['320', 486]]),
+    ...row(361, [['Block Hours', 24]]), ...row(375, [['1:05', 41]]), ...row(388, [['CP : Doe,John/100872/MNL/FLY', 14], ['FO : Roe,Alfe/103273/MNL/FLY', 300]]),
+  ];
+  const r = parseNetlinePdf([{ page: 1, width: 595, height: 842, items }]);
+  assert.equal(r.format, 'crew-briefing');
+  assert.deepEqual(r.published.map(x => [x.date, x.duty, x.registration, x.dep, x.begin, x.end, x.arr, x.ac, x.crew, x.info]), [
+    ['1 Jul 26', 'DOFF', '', 'MNL', '00:00 L', '23:59 L', '', '', '', ''],
+    ['2 Jul 26', 'C/I', '', 'MNL', '14:20 L', '', '', '', '', ''],
+    ['2 Jul 26', '2P2043', 'RP-C8933', 'MNL', '15:50 L', '16:55 L', 'MPH', '320', '[FO - 103273 - Roe,Alfe]', '[Acting: CP] [Block: 1:00]'],
+    ['2 Jul 26', '2P2044', 'RP-C8933', 'MPH', '23:05 L', '00:40 L +1', 'MNL', '320', '[FO - 103273 - Roe,Alfe]', '[Acting: CP] [Block: 1:05]'],
+    ['2 Jul 26', 'C/O', '', '', '', '01:10 L +1', 'MNL', '', '', ''],
+  ]);
+});
+
+test('LATAM "LEGAL_BR_Logbook", AIMS-converted day grid, Malaysia month roster with sectors', () => {
+  const row = (y, cells) => cells.map(([text, x]) => iw(text, x, y, text.length * 4));
+  const log = parseNetlinePdf([{ page: 1, width: 1000, height: 1000, items: [
+    ...row(49, [['Crew ID', 12], ['is 1', 55], ['Vim Date', 133], ['is from 2024/06/01 until 2024/06/26', 185]]), ...row(244, [['LOGBOOK - LATAM Airlines', 315]]),
+    ...row(443, [['Flight', 19], ['Dep', 106], ['Arr', 191], ['Reg', 277], ['Aircraft', 362], ['Function', 448], ['Vim Date', 533], ['Out Z', 619], ['In Z', 704], ['Day Time', 790], ['Night Time', 876], ['Block Time', 962]]),
+    ...row(460, [['3557', 19], ['CNF', 105], ['GRU', 190], ['PT-MXC', 276], ['321', 361], ['PIC', 447], ['2024-06-04', 532], ['23:59', 618], ['01:09', 703], ['00:00', 789], ['01:10', 875], ['01:10', 961]]),
+  ] }]);
+  assert.equal(log.format, 'legal-br-logbook');
+  assert.deepEqual(log.published.map(x => [x.date, x.duty, x.registration, x.dep, x.begin, x.end, x.arr, x.ac, x.info]), [
+    ['4 Jun 24', '3557', 'PT-MXC', 'CNF', '23:59 Z', '01:09 Z +1', 'GRU', '321', '[Function: PIC] [Night: 01:10] [Block: 01:10]'],
+  ]);
+  const grid = parseNetlinePdf([{ page: 1, width: 842, height: 595, items: [
+    ...row(28, [['Escala de Tripulante Convertida para padrão AIMS', 285]]), ...row(41, [['Tripulante: JOHN DOE - BP: 1 - Base: GRU - 01/06/2024 até 30/06/2024', 182]]),
+    ...row(71, [['01Jun', 33], ['02Jun', 59]]), ...row(78, [['Sat', 37], ['Sun', 62]]),
+    ...row(100, [['OFF', 35], ['MCK', 59]]), ...row(108, [['22:01', 33], ['09:00', 59]]), ...row(115, [['22:01', 33], ['09:00', 59]]), ...row(123, [['GRU', 34], ['CGH', 59]]),
+    ...row(130, [['GRU', 34], ['CGH', 59]]), ...row(138, [['23:59', 33], ['13:00', 59]]), ...row(145, [['23:59', 33], ['13:00', 59]]),
+    ...row(157, [['EMG', 59]]), ...row(165, [['14:00', 59]]), ...row(172, [['14:00', 59]]), ...row(180, [['GRU', 59]]), ...row(188, [['GRU', 59]]), ...row(195, [['18:00', 59]]), ...row(203, [['18:00', 59]]),
+  ] }]);
+  assert.equal(grid.format, 'aims-converted-grid');
+  assert.deepEqual(grid.published.map(x => [x.date, x.duty, x.dep, x.begin, x.end]), [
+    ['1 Jun 24', 'OFF', 'GRU', '22:01 L', '23:59 L'], ['2 Jun 24', 'MCK', 'CGH', '09:00 L', '13:00 L'], ['2 Jun 24', 'EMG', 'GRU', '14:00 L', '18:00 L'],
+  ]);
+  const mas = parseNetlinePdf([{ page: 1, width: 700, height: 842, items: [
+    ...row(65, [['FEBRUARY 2026 ROSTER', 302]]),
+    ...row(152, [['DATE', 27], ['DAY', 59], ['DUTY', 101], ['SECTOR', 210], ['REPORTING', 336], ['TIME', 411], ['BLOCK HOUR', 581], ['REMARKS', 634]]),
+    ...row(167, [['1', 35], ['SUN', 59], ['STANDBY 4', 101], ['STANDBY HOME', 210], ['0:00', 336], ['16:00/23:59', 411], ['0:00', 581]]),
+    ...row(196, [['3', 35], ['TUE', 59], ['3507', 101], ['KUL-HKG', 210], ['20:20', 336], ['21:20/01:30', 411], ['4:10', 581]]),
+    ...row(210, [['4', 35], ['WED', 59], ['NS HKG', 101], ['NIGHTSTOP HKG', 210], ['0:00', 336], ['0:00', 411], ['0:00', 581]]),
+    ...row(340, [['13', 33], ['FRI', 59], ['382/383', 101], ['KUL-SIN-KUL', 210], ['0:00', 336], ['00:50/02:00/06:15/07:25', 411], ['2:20', 581]]),
+  ] }]);
+  assert.equal(mas.format, 'month-roster-sectors');
+  assert.deepEqual(mas.published.map(x => [x.date, x.duty, x.dep, x.begin, x.end, x.arr, x.info]), [
+    ['1 Feb 26', 'STANDBY 4', '', '16:00 L', '23:59 L', '', 'STANDBY HOME'],
+    ['3 Feb 26', 'C/I', 'KUL', '20:20 L', '', '', ''],
+    ['3 Feb 26', '3507', 'KUL', '21:20 L', '01:30 L +1', 'HKG', '[Block: 4:10]'],
+    ['4 Feb 26', 'HT', 'HKG', '', '', '', ''],
+    ['13 Feb 26', '382', 'KUL', '00:50 L', '02:00 L', 'SIN', '[Block: 2:20]'],
+    ['13 Feb 26', '383', 'SIN', '06:15 L', '07:25 L', 'KUL', ''],
+  ]);
+});
+
+test('ROCS "Individual plan" (kind lines left out, the day\'s FT / DP / FDP), Korean Air roster report with NUL items, Mistral "Programmazione Individuale"', () => {
+  const row = (y, cells) => cells.map(([text, x]) => iw(text, x, y, text.length * 4));
+  const rocs = parseNetlinePdf([{ page: 1, width: 595, height: 842, items: [
+    ...row(13, [['Individual plan', 50], ['ROCS', 494]]), ...row(75, [['01-01-2024 - 31-12-2024', 50]]),
+    ...row(99, [['Date', 50], ['Duty', 122], ['Departure', 275], ['Arrival', 355], ['AC', 435], ['Info', 489]]),
+    ...row(122, [['MON 2024', 50], ['OFF', 122]]), ...row(130, [['01 Jan', 50], ['OFF', 122], ['00:00', 307], ['21:00', 355]]),
+    ...row(191, [['WED 2024', 50], ['FLIGHT DUTY', 122]]),
+    ...row(199, [['03 Jan', 50], ['FR 5521', 122], ['MXP', 275], ['04:47', 307], ['09:20', 355], ['LPA', 387], ['73Q', 435], ['FT', 489], ['08:37', 515]]),
+    ...row(213, [['DP', 489], ['10:19', 515]]), ...row(221, [['FLIGHT DUTY', 122]]), ...row(227, [['FDP', 489], ['09:49', 515]]),
+    ...row(230, [['FR 5522', 122], ['LPA', 275], ['09:50', 307], ['13:54', 355], ['MXP', 387], ['73Q', 435]]),
+  ] }]);
+  assert.equal(rocs.format, 'rocs-individual-plan');
+  assert.deepEqual(rocs.published.map(x => [x.date, x.duty, x.dep, x.begin, x.end, x.arr, x.ac, x.info]), [
+    ['1 Jan 24', 'OFF', '', '00:00 Z', '21:00 Z', '', '', ''],
+    ['3 Jan 24', 'FR5521', 'MXP', '04:47 Z', '09:20 Z', 'LPA', '73Q', '[FT: 08:37] [DP: 10:19] [FDP: 09:49]'],
+    ['3 Jan 24', 'FR5522', 'LPA', '09:50 Z', '13:54 Z', 'MXP', '73Q', ''],
+  ]);
+  const nul = (x) => iw('\u0000', x, 272, 4);
+  const kal = parseNetlinePdf([{ page: 1, width: 595, height: 842, items: [
+    ...row(109, [['Roster', 184], ['Report', 225], ['from', 268], ['01JUN24', 299], ['30JUN24', 367]]),
+    ...row(141, [['Times', 193], ['shown', 231], ['are', 273], ['in', 295], ['Port', 310], ['Local', 338], ['times', 372]]),
+    ...row(243, [['Start', 36], ['DateDay', 55], ['Flight', 90], ['Number', 112], ['Sector', 139]]),
+    ...row(257, [['01JUN24 SAT', 36], ['ICN', 139], ['DO', 190], ['0', 392]]),
+    ...row(272, [['02JUN24 SUN', 36], ['KE', 90], ['0101', 100], ['ICN', 139], ['NKG 7MQ FLY', 153], ['F', 226], ['O', 233], ['F', 268], ['O', 275], ['0840 1012 1111 01', 306], ['59', 374], ['07', 392], ['41', 403]]),
+    nul(230), nul(272), nul(371),
+  ] }]);
+  assert.equal(kal.format, 'port-local-roster-report');
+  assert.equal(kal.period, '01Jun24 - 30Jun24');
+  assert.deepEqual(kal.published.map(x => [x.date, x.duty, x.dep, x.begin, x.end, x.arr, x.ac, x.info]), [
+    ['1 Jun 24', 'DO', 'ICN', '', '', '', '', ''],
+    ['2 Jun 24', 'C/I', 'ICN', '08:40 L', '', '', '', ''],
+    ['2 Jun 24', 'KE0101', 'ICN', '10:12 L', '11:11 L', 'NKG', '7MQ', '[Flight: 01:59] [Duty: 07:41]'],
+  ]);
+  const mistral = parseNetlinePdf([{ page: 1, width: 842, height: 595, items: [
+    ...row(45, [['Data e Ora = UTC', 31]]), ...row(59, [['Stampato il 28-03-2022 by someone', 31]]), ...row(72, [['Programmazione Individuale', 31]]),
+    ...row(115, [['Data', 59], ['Tipo', 133], ['Da', 197], ['A', 253], ['Descrizione', 371], ['Membri Equipaggio', 505]]),
+    ...row(128, [['CHECKIN', 109], ['18:25', 178], ['000:00', 699]]),
+    ...row(138, [['FLIGHT', 109], ['23:55', 178], ['==>>', 232], ['VBS(A)-CAG(B)', 286], ['FO', 353], ['001:30', 699]]), ...row(148, [['M4', 286], ['783', 300], ['EIGHA', 319]]),
+    ...row(158, [['Tue-15-Mar', 31], ['<<==', 178], ['01:25', 232]]),
+    ...row(189, [['23:00', 178], ['==>>', 232], ['FCO', 286]]), ...row(199, [['OFF', 286], ['RICHIESTO', 305]]),
+    ...row(209, [['Wed-16-Mar', 31], ['<<==', 178], ['22:59', 232]]),
+  ] }]);
+  assert.equal(mistral.format, 'programmazione-individuale');
+  assert.deepEqual(mistral.published.map(x => [x.date, x.duty, x.registration, x.dep, x.begin, x.end, x.arr, x.info]), [
+    ['14 Mar 22', 'C/I', '', 'VBS', '18:25 Z', '', '', ''],
+    ['14 Mar 22', 'M4783', 'EIGHA', 'VBS', '23:55 Z', '01:25 Z +1', 'CAG', '[Rank: FO] [Block: 01:30]'],
+    ['15 Mar 22', 'OFF', '', 'FCO', '23:00 Z', '22:59 Z +1', '', 'OFF RICHIESTO'],
+  ]);
+});
+
+test('papers about one flight: Icelandair "Flight Information", VistaJet journey log, NAVBLUE flight plan, RVSM report', () => {
+  const row = (y, cells) => cells.map(([text, x]) => iw(text, x, y, text.length * 5));
+  const info = parseNetlinePdf([{ page: 1, width: 595, height: 842, items: [
+    ...row(42, [['Digitally Signed By:', 240], ['KGA', 319]]), ...row(83, [['Flight Information', 34]]),
+    ...row(101, [['Flight No.:', 84], ['FI630(630)', 137], ['Origin:', 268], ['KBOS', 310]]), ...row(115, [['Date:', 104], ['10052022', 137], ['Destination:', 250], ['BIKF', 310]]),
+    ...row(130, [['Registration:', 74], ['TF-ISO', 137]]), ...row(158, [['CMD:', 78], ['KGA (Konrad Doe)', 115], ['F/O:', 325], ['GRT (Grettir Roe)', 354]]),
+    ...row(250, [['OFF Block Time:', 370], ['0043', 451]]), ...row(267, [['Take-Off Time:', 377], ['0055', 451]]), ...row(279, [['0555', 451]]), ...row(281, [['Landing Time:', 380]]),
+    ...row(296, [['ON Block Time:', 375], ['0558', 451]]), ...row(318, [['Total Airborne Time:', 354], ['0500', 451]]), ...row(332, [['Total Block Time:', 368], ['0515', 451]]),
+  ] }]);
+  assert.equal(info.format, 'flight-information');
+  assert.deepEqual(info.published.map(x => [x.date, x.duty, x.registration, x.dep, x.begin, x.takeoff, x.landing, x.end, x.arr, x.crew, x.info]), [
+    ['10 May 22', 'FI630', 'TF-ISO', 'KBOS', '00:43 Z', '00:55 Z', '05:55 Z', '05:58 Z', 'BIKF', '[F/O - GRT - Grettir Roe]', '[Block: 05:15] [Flight: 05:00]'],
+  ]);
+  const jl = parseNetlinePdf([{ page: 1, width: 842, height: 595, items: [
+    ...row(37, [['Journey Log', 223]]), ...row(59, [['Date of flight:', 38], ['Registration:', 110], ['A/C Type:', 163]]), ...row(69, [['05 Feb 24', 41], ['D-ASAP', 112], ['Legacy', 177]]),
+    ...row(86, [['650', 187]]), ...row(127, [['PF', 110], ['Pax', 163], ['Routing', 181]]),
+    ...row(166, [['1JSC', 88], ['1ERI', 122], ['LFSB', 198], ['10:00', 244], ['10:12', 309]]),
+    ...row(177, [['1', 42], ['VJH727', 55], ['C', 149], ['3', 168], ['05:35', 278], ['05:19', 340], ['1', 373], ['ILS', 391]]),
+    ...row(189, [['1JCH', 87], ['OBBI', 198], ['15:35', 244], ['15:31', 309]]),
+  ] }]);
+  assert.equal(jl.format, 'journey-log');
+  assert.deepEqual(jl.published.map(x => [x.date, x.duty, x.registration, x.ac, x.dep, x.begin, x.takeoff, x.landing, x.end, x.arr, x.crew, x.info]), [
+    ['5 Feb 24', 'VJH727', 'D-ASAP', 'Legacy 650', 'LFSB', '10:00 Z', '10:12 Z', '15:31 Z', '15:35 Z', 'OBBI', '[PIC - 1JSC][C/H - 1ERI][F/O - 1JCH]', '[Block: 05:35] [Flight: 05:19] [Pax: 3]'],
+  ]);
+  const plan = parseNetlinePdf([{ page: 1, width: 595, height: 842, items: [
+    ...row(31, [['***NAVBLUE FLIGHT PLAN***', 196]]),
+    ...row(103, [['LZB563', 30], ['-LBSF/LPPT 02MAY26', 83], ['M78:', 209], ['ACFT.', 355], ['LZROM', 395], ['/ A220-300S2', 441]]),
+    ...row(139, [['STD', 30], ['UTC', 57], [': 16:40', 96], ['STA UTC', 163], [': 21:15', 229]]),
+  ] }]);
+  assert.deepEqual(plan.published.map(x => [plan.format, x.date, x.duty, x.registration, x.ac, x.dep, x.begin, x.end, x.arr]), [
+    ['navblue-plan', '2 May 26', 'LZB563', 'LZROM', 'A220-300S2', 'LBSF', '16:40 Z', '21:15 Z', 'LPPT'],
+  ]);
+  const rvsm = parseNetlinePdf([{ page: 1, width: 595, height: 842, items: [
+    ...row(6, [['RVSM Report - 02 May 2026 16:22:07Z', 168]]), ...row(34, [['FLT NBR', 2], ['FB0563', 120], ['SKD', 214], ['02 May 16:40', 261]]), ...row(48, [['FROM', 2], ['LBSF', 120], ['TO', 214], ['LPPT', 261]]),
+  ] }]);
+  assert.deepEqual(rvsm.published.map(x => [rvsm.format, x.date, x.duty, x.dep, x.begin, x.arr]), [['flight-report-sheet', '2 May 26', 'FB0563', 'LBSF', '16:40 Z', 'LPPT']]);
+});
+
+test('"Schedule Summary" in UTC ("14 - 31 Jan 2026") and "Roster Summary" with "Post Flt Duty" as the release', () => {
+  const row = (y, cells) => cells.map(([text, x]) => iw(text, x, y, text.length * 4));
+  const utc = parseNetlinePdf([{ page: 1, width: 595, height: 842, items: [
+    ...row(9, [['JOHN DOE Schedule Summary, 14 - 31 Jan 2026', 14]]), ...row(42, [['Thu, 15', 21], ['January 2026 (UTC)', 76]]),
+    ...row(113, [['Report', 17], ['11:55 - 12:55', 104], ['ESB', 195]]),
+    ...row(128, [['TK2155 (Deadheading)', 17], ['12:55 - 14:10', 104], ['ESB - IST', 195], ['CP', 252], ['Flight Time: 01:15', 457]]),
+    ...row(159, [['Release', 17], ['14:10 - 14:40', 104], ['IST', 195]]),
+  ] }]);
+  assert.equal(utc.period, '14Jan26 - 31Jan26');
+  assert.deepEqual(utc.published.map(x => [x.date, x.dc, x.duty, x.dep, x.begin, x.end, x.arr]), [
+    ['15 Jan 26', '', 'C/I', 'ESB', '11:55 Z', '', ''], ['15 Jan 26', 'DH', 'TK2155', 'ESB', '12:55 Z', '14:10 Z', 'IST'], ['15 Jan 26', '', 'C/O', '', '', '14:40 Z', 'IST'],
+  ]);
+  const sq = parseNetlinePdf([{ page: 1, width: 595, height: 842, items: [
+    ...row(9, [['John Doe Roster Summary, 31 Jul - 31 Aug 2024', 14]]), ...row(42, [['Tue, 30', 21], ['July 2024 (Local time)', 75]]),
+    ...row(67, [['Report', 17], ['19:20 - 20:20', 104], ['SIN', 195]]), ...row(82, [['SQ818', 17], ['20:20 - 01:15 +1', 104], ['SIN - CKG', 195], ['FO', 252]]),
+    ...row(104, [['Wed, 31', 21], ['July 2024 (Local time)', 79]]), ...row(128, [['Post Flt Duty', 17], ['01:15 - 01:45', 104], ['CKG', 195]]),
+  ] }]);
+  assert.equal(sq.period, '31Jul24 - 31Aug24');
+  assert.deepEqual(sq.published.map(x => [x.date, x.duty, x.begin, x.end, x.arr]), [
+    ['30 Jul 24', 'C/I', '19:20 L', '', ''], ['30 Jul 24', 'SQ818', '20:20 L', '01:15 L +1', 'CKG'], ['31 Jul 24', 'C/O', '', '01:45 L', 'CKG'],
   ]);
 });

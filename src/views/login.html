@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sign in</title>
+  <script src="/assets/i18n/vi.js"></script>
+  <script src="/assets/i18n.js"></script>
+  <link rel="stylesheet" href="/assets/app.css">
+  <link rel="stylesheet" href="/assets/fontawesome/css/all.min.css">
+  <style>
+    .who { font-size: 14px; margin: 0 0 14px; overflow-wrap: anywhere; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <script src="/assets/nav.js"></script>
+  <main class="page">
+    <div class="card auth-card">
+      <h1><i class="fa-solid fa-right-to-bracket" aria-hidden="true"></i> <span>Sign in</span></h1>
+      <p class="lead">Sign in to make API keys for your apps and see your usage. Admins also get the admin pages.</p>
+
+      <div id="loading" class="lead">checking…</div>
+
+      <div id="signedIn" hidden>
+        <p class="who" id="who"></p>
+        <div class="providers">
+          <a class="auth-btn primary" id="continue" href="/account"><i class="fa-solid fa-arrow-right" aria-hidden="true"></i> <span>Continue</span></a>
+          <button type="button" class="auth-btn" id="signOut"><i class="fa-solid fa-right-from-bracket" aria-hidden="true"></i> <span>Sign out</span></button>
+        </div>
+      </div>
+
+      <div id="signIn" hidden>
+        <div class="providers">
+          <button type="button" class="auth-btn" data-provider="google" hidden><i class="fa-brands fa-google" aria-hidden="true"></i> <span>Sign in with Google</span></button>
+          <button type="button" class="auth-btn" data-provider="github" hidden><i class="fa-brands fa-github" aria-hidden="true"></i> <span>Sign in with GitHub</span></button>
+        </div>
+        <div id="passwordBox" hidden>
+          <div class="auth-or" id="orLine"><span>or</span></div>
+          <form id="passwordForm" class="auth-form">
+            <label><span>Email</span><input type="email" id="email" autocomplete="username" required></label>
+            <label><span>Password</span><input type="password" id="password" autocomplete="current-password" required></label>
+            <button type="button" class="auth-link" id="forgot" style="align-self:flex-end">Forgot your password?</button>
+            <button type="submit" class="auth-btn primary"><i class="fa-solid fa-right-to-bracket" aria-hidden="true"></i> <span>Sign in</span></button>
+          </form>
+        </div>
+        <p class="auth-foot"><span>No account yet?</span> <a class="auth-link" id="toSignup" href="/signup">Sign up</a></p>
+      </div>
+
+      <div id="msg" class="auth-msg" role="status" hidden></div>
+      <button type="button" class="auth-btn" id="resend" hidden style="margin-top:10px"><i class="fa-solid fa-envelope" aria-hidden="true"></i> <span>Send the link again</span></button>
+    </div>
+  </main>
+
+  <script type="module">
+    import { loadFirebase, describe, api, nextOf } from '/assets/firebase-auth.js';
+    const t = window.t;
+    const $ = (id) => document.getElementById(id);
+    const show = (text, kind = 'error') => { const m = $('msg'); m.textContent = text; m.className = `auth-msg ${kind}`; m.hidden = !text; };
+    const busy = (on) => document.querySelectorAll('#signIn button').forEach(b => { b.disabled = on; });
+    $('toSignup').href = `/signup${location.search}`;
+
+    const [config, me] = await Promise.all([api('/api/auth/config'), api('/api/auth/me')]).catch((e) => { show(e.message); return []; });
+    $('loading').hidden = true;
+    if (!config) throw new Error('no config');
+
+    $('signOut').addEventListener('click', async () => {
+      await api('/api/auth/logout', {}).catch(() => {});
+      location.reload();
+    });
+
+    if (me.user) {
+      $('who').textContent = t('Signed in as {email}', { email: me.user.email || me.user.name });
+      $('continue').href = nextOf(me.user.role);
+      $('signedIn').hidden = false;
+    } else if (!config.enabled) {
+      show(me.local ? t('Login is not set up yet. On this machine the admin pages open without it.') : t('Login is not set up on this server'), me.local ? 'info' : 'error');
+      if (me.local) { $('continue').href = nextOf('admin'); $('signedIn').hidden = false; $('who').hidden = true; $('signOut').hidden = true; }
+    } else {
+      $('signIn').hidden = false;
+      for (const b of document.querySelectorAll('[data-provider]')) b.hidden = !config.providers.includes(b.dataset.provider);
+      $('passwordBox').hidden = !config.providers.includes('password');
+      $('orLine').hidden = !config.providers.some(p => p !== 'password');
+    }
+    if (!config.enabled || me.user) throw new Error('nothing to sign in');
+
+    const fb = await loadFirebase(config);
+    let unverified = null; // a password sign-in whose email is not verified yet: the link can be sent again
+
+    async function run(signIn, { password = false } = {}) {
+      busy(true); show(''); $('resend').hidden = true;
+      try {
+        const cred = await signIn();
+        if (password && !cred.user.emailVerified) {
+          unverified = cred.user;
+          $('resend').hidden = false;
+          return show(t('Please verify your email first: open the link we sent to {email}', { email: cred.user.email }), 'info');
+        }
+        const { user } = await fb.toSession(cred);
+        location.replace(nextOf(user.role));
+      } catch (e) {
+        show(e.code === 'email-not-verified' ? e.message : describe(e));
+      } finally { busy(false); }
+    }
+
+    for (const b of document.querySelectorAll('[data-provider]')) b.addEventListener('click', () => run(() => fb.popup(b.dataset.provider)));
+    $('passwordForm').addEventListener('submit', (e) => {
+      e.preventDefault();
+      run(() => fb.fa.signInWithEmailAndPassword(fb.auth, $('email').value.trim(), $('password').value), { password: true });
+    });
+    $('resend').addEventListener('click', async () => {
+      if (!unverified) return;
+      try {
+        await fb.fa.sendEmailVerification(unverified);
+        show(t('A new link is on its way to {email}. Open it, then sign in again.', { email: unverified.email }), 'ok');
+      } catch (e) { show(describe(e)); }
+      $('resend').hidden = true;
+      await fb.fa.signOut(fb.auth).catch(() => {});
+      unverified = null;
+    });
+    $('forgot').addEventListener('click', async () => {
+      const email = $('email').value.trim();
+      if (!email) { $('email').focus(); return show(t('Type your email first')); }
+      try {
+        await fb.fa.sendPasswordResetEmail(fb.auth, email);
+        show(t('If {email} has an account, a link to set a new password is on its way.', { email }), 'ok');
+      } catch (e) { show(describe(e)); }
+    });
+  </script>
+</body>
+</html>

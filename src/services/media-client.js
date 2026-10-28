@@ -315,6 +315,12 @@ export async function pushFiles(prefix, localDir, rels = walkFiles(localDir)) {
   return rels.length;
 }
 
+// ---- benchmark history (services/benchmark-history.js) ----
+export const listBenchmarks = (kind) => media().listBenchmarks(kind);
+export const getBenchmark = (kind, id, part) => media().getBenchmark(kind, id, part);
+export const putBenchmark = (kind, id, summary, result) => media().putBenchmark(kind, id, summary, result);
+export const deleteBenchmark = (kind, id) => media().deleteBenchmark(kind, id);
+
 export const listModelObjects = (prefix) => media().listObjects(prefix);
 export const getModelObject = (key) => media().getObject(key);
 export const putModelObject = (key, buf) => media().putObject(key, buf);

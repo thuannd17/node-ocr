@@ -1,27 +1,28 @@
 // /routes/airports-api.js
 // Airport lookup for /airport (and the airport links on /calendar), mounted at /api/airports.
-// Data: data/airports.json, built by `npm run airports:update` (OurAirports + NOAA WMO numbers).
+// Data: airports.json in the site data bucket (services/site-data.js), built and published by
+// `npm run airports:update` (OurAirports + NOAA WMO numbers).
 // Weather: Open-Meteo forecast (free, no key), fetched by the server and cached.
 import { Router } from 'express';
 import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const dataFile = path.resolve(__dirname, '..', '..', 'data', 'airports.json');
+import { siteFile } from '../services/site-data.js';
 
 const router = Router();
+router.use((req, res, next) => loadAirports().then(() => next(), next));
 const CODE_FIELDS = ['iata', 'icao', 'faa', 'gps', 'local', 'id', 'wmo'];
 const TYPE_RANK = { large: 0, medium: 1, small: 2, seaplane: 3 };
 const countryNames = new Intl.DisplayNames(['en'], { type: 'region' });
 const countryName = (cc) => { try { return countryNames.of(cc) || cc; } catch { return cc; } };
 const fold = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 
-let db = null; // { list, byCode: Map<code, airport[]> }, loaded on first use
-function airports() {
-  if (db) return db;
-  if (!fs.existsSync(dataFile)) throw Object.assign(new Error('data/airports.json is missing: run `npm run airports:update`'), { status: 503 });
-  const { fields, rows } = JSON.parse(fs.readFileSync(dataFile, 'utf8'));
+let db = null; // { list, byCode: Map<code, airport[]>, mtime }: loadAirports() before using it
+
+/** Reads airports.json (again when a newer one came from the bucket). Every route that looks up airports awaits it. */
+export async function loadAirports() {
+  const file = await siteFile('airports.json');
+  const mtime = fs.statSync(file).mtimeMs;
+  if (db?.mtime === mtime) return db;
+  const { fields, rows } = JSON.parse(fs.readFileSync(file, 'utf8'));
   const list = rows.map((r) => {
     const a = Object.fromEntries(fields.map((f, i) => [f, r[i]]));
     a.countryName = countryName(a.country);
@@ -35,7 +36,12 @@ function airports() {
     if (!byCode.has(code)) byCode.set(code, []);
     if (!byCode.get(code).includes(a)) byCode.get(code).push(a);
   }
-  db = { list, byCode };
+  db = { list, byCode, mtime };
+  return db;
+}
+
+function airports() {
+  if (!db) throw Object.assign(new Error('The airports are not loaded yet'), { status: 503 });
   return db;
 }
 

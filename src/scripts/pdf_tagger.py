@@ -10,6 +10,7 @@ import sys
 from collections import Counter, defaultdict
 
 import numpy as np
+from scipy import sparse
 
 from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.feature_extraction import DictVectorizer
@@ -277,7 +278,11 @@ def allowed_fields(kind, classes):
 
 def predict_masked(vec, clf, X, kind=None):
     """clf.predict, choosing only among the fields this kind of document has."""
-    Xv = vec.transform(X)
+    return predict_matrix(clf, vec.transform(X), kind)
+
+
+def predict_matrix(clf, Xv, kind=None):
+    """predict_masked on words already made a matrix."""
     if not hasattr(clf, 'decision_function') or not hasattr(clf, 'classes_'):
         return list(clf.predict(Xv))
     classes = clf.classes_
@@ -296,9 +301,18 @@ def predict_masked(vec, clf, X, kind=None):
 # made LinearSVC converge very slowly. Every roster field stays under it (the rarest, co_info, ~80).
 CLASS_WEIGHT_CAP = float(os.environ.get('PDF_TAGGER_WEIGHT_CAP') or 100)
 # Fields trained at once (one binary classifier each). Each LinearSVC copies the training words into
-# liblinear's own format (~0.4 GB for the full data), so this is kept low: 6 at once ran the machine
-# out of memory. Threads, not processes (liblinear releases the GIL): no copy of the data per process.
-JOBS = int(os.environ.get('PDF_TAGGER_JOBS') or min(3, max(1, (os.cpu_count() or 2) - 2)))
+# liblinear's own format (~0.45 GB each for the full data, 2026-10-22: ~0.46 GB words + 0.45 GB per field
+# being trained), so this is kept low: 6 at once ran the machine out of memory. Threads, not processes
+# (liblinear releases the GIL): no copy of the data per process. PDF_TAGGER_JOBS overrides it.
+# Solver iterations per field. The fields with many words converge in 50-240 (2026-10-22, ~530k words); the
+# rare ones (ACARS fields, landing: a few dozen words weighed up to CLASS_WEIGHT_CAP) never do and ran all 3000,
+# in one training's fold an hour each. PDF_TAGGER_MAX_ITER overrides it.
+MAX_ITER = int(os.environ.get('PDF_TAGGER_MAX_ITER') or 300)
+JOBS = int(os.environ.get('PDF_TAGGER_JOBS') or min(4, max(1, (os.cpu_count() or 2) - 1)))
+# liblinear's solver: 'auto' (default: scikit-learn picks primal, more words than features), or 'dual'
+# (PDF_TAGGER_SOLVER=dual). On the PDF words (534k, 7k features, stage 1, 2026-10-28) dual took 563 s against
+# primal's 367 s and tagged 73.0% of held-out words right against 71.1% (row-field words 72.3% against 72.8%).
+DUAL = {'dual': True, 'primal': False}.get(os.environ.get('PDF_TAGGER_SOLVER', ''), 'auto')
 
 
 class OvRLinear:
@@ -306,24 +320,47 @@ class OvRLinear:
     LinearSVC one-vs-rest, its binary problems trained in parallel. Same objective as
     LinearSVC(class_weight=...) with multi_class='ovr': in the problem of field c, its own words weigh
     sample_weight * class_weight[c], the other words sample_weight (liblinear weights the positive class only).
+    An ACARS field (acars: the words of ACARS pictures) learns from those words alone: it is only ever
+    chosen on an ACARS picture (allowed_fields), and the ~720k roster words made each of the ten take
+    ~30 s per fit (2026-10-28) for nothing. Its weight is balanced among the ACARS words.
     """
 
-    def fit(self, X, y, sample_weight=None, class_weight=None):
+    def fit(self, X, y, sample_weight=None, class_weight=None, acars=None):
         from joblib import Parallel, delayed
         y = np.asarray(y)
         sw = np.ones(len(y)) if sample_weight is None else np.asarray(sample_weight, dtype=float)
         self.classes_ = np.unique(y)
         cw = class_weight or {}
+        acars = None if acars is None or not np.any(acars) else np.asarray(acars, dtype=bool)
+        if acars is not None:
+            Xa, ya, swa = X[acars], y[acars], sw[acars]
+            cwa = balanced_weights(list(ya))
+
+        import threading
+        import time
+        done, lock = [0], threading.Lock()
 
         def one(c):
-            pos = y == c
-            m = LinearSVC(C=SVC_C, max_iter=3000)
-            m.fit(X, pos.astype(int), sample_weight=np.where(pos, sw * cw.get(c, 1.0), sw))
+            t = time.time()
+            # (both kinds of word among the ACARS words, else LinearSVC has one class: all of them)
+            if acars is not None and c in ACARS_FIELDS and 0 < np.sum(ya == c) < len(ya):
+                Xc, yc, swc, wc = Xa, ya, swa, cwa.get(c, 1.0)
+            else:
+                Xc, yc, swc, wc = X, y, sw, cw.get(c, 1.0)
+            pos = yc == c
+            m = LinearSVC(C=SVC_C, max_iter=MAX_ITER, dual=DUAL)
+            m.fit(Xc, pos.astype(int), sample_weight=np.where(pos, swc * wc, swc))
+            with lock:  # (progress for the /models page: "[fields 3/24] dep 12s")
+                done[0] += 1
+                print(f'    [fields {done[0]}/{len(self.classes_)}] {c} {time.time() - t:.0f}s', flush=True)
             return m.coef_.ravel(), m.intercept_[0]
 
-        parts = Parallel(n_jobs=min(JOBS, len(self.classes_)), prefer='threads')(delayed(one)(c) for c in self.classes_)
-        self.coef_ = np.vstack([p[0] for p in parts])
-        self.intercept_ = np.array([p[1] for p in parts])
+        # the fields with most words first (the slowest, "O" ~5 min): not left running alone at the end
+        count = Counter(y.tolist())
+        order = sorted(self.classes_, key=lambda c: -count[c])
+        parts = dict(zip(order, Parallel(n_jobs=min(JOBS, len(self.classes_)), prefer='threads')(delayed(one)(c) for c in order)))
+        self.coef_ = np.vstack([parts[c][0] for c in self.classes_])
+        self.intercept_ = np.array([parts[c][1] for c in self.classes_])
         return self
 
     def decision_function(self, X):
@@ -354,35 +391,39 @@ def fit1(X, y, w=None):
 
 def weights(docs, keep):
     """
-    Every layout counts the same in training, however many files and words it has:
-    a format with one labeled file is learned as well as one with thirty. A word's
-    weight = 1 / (words of its layout), scaled so the mean is 1. Layout = d['family']
-    (the parser's format), or the file itself for a format only its label describes.
+    A layout counts by the square root of its words in training: a format with one labeled file is
+    still learned, and one with thirty (or a 200-page activity list) is not drowned by the many small
+    ones. A word's weight = sqrt(words of its layout) / (words of its layout), scaled so the mean is 1.
+    (Every layout the same, PDF_TAGGER_WEIGHT=family, left the big layouts at 56-85% of their own
+    training words once there were ~80 layouts: 2026-10-24.) Layout = d['family'] (the parser's
+    format), or the file itself for a format only its label describes.
     """
     fam = lambda d: d.get('family') or d['file']
     size = Counter()
     for d in docs:
         size[fam(d)] += len(keep(d))
-    raw = [1 / size[fam(d)] for d in docs for _ in keep(d)]
+    power = 0 if os.environ.get('PDF_TAGGER_WEIGHT') == 'family' else 0.5
+    raw = [size[fam(d)] ** power / size[fam(d)] for d in docs for _ in keep(d)]
     mean = sum(raw) / len(raw)
     return [r / mean for r in raw]
 
 
-def stage2_feats(d, s1):
-    """A word's own features plus what stage 1 said about it, its neighbours, the words above/below and its line."""
+NEIGHBOURS = ('L', 'R', 'U', 'D')
+
+
+def stage2_extras(s1, near, lines):
+    """What stage 1 said about a word, its neighbours (near[i]: L, R, U, D word or None), the words above/below and its line."""
     by_line = defaultdict(Counter)
-    for c, lab in zip(d['ctx'], s1):
-        by_line[c['line']][lab] += 1
+    for ln, lab in zip(lines, s1):
+        by_line[ln][lab] += 1
     out = []
-    for i, (f, c) in enumerate(zip(d['X'], d['ctx'])):
-        g = dict(f)
-        me = s1[i]
-        g['s1=' + me] = 1
-        for k in ('L', 'R', 'U', 'D'):
-            other = s1[c[k]] if c[k] is not None else '^'
+    for i, me in enumerate(s1):
+        g = {'s1=' + me: 1}
+        for k, j in zip(NEIGHBOURS, near[i]):
+            other = s1[j] if j is not None and j >= 0 else '^'
             g[f'{k}_s1={other}'] = 1
             g[f'{k}_s1={other}&s1={me}'] = 1
-        line = by_line[c['line']]
+        line = by_line[lines[i]]
         n = sum(line.values())
         for lab, k in line.items():
             g['line_s1=' + lab] = k / n
@@ -391,29 +432,146 @@ def stage2_feats(d, s1):
     return out
 
 
+def stage2_feats(d, s1):
+    """A word's own features plus what stage 1 said about it, its neighbours, the words above/below and its line."""
+    near = [tuple(c[k] for k in NEIGHBOURS) for c in d['ctx']]
+    return [dict(f) | g for f, g in zip(d['X'], stage2_extras(s1, near, [c['line'] for c in d['ctx']]))]
+
+
+# ---- Training with little memory ----
+# The features of ~500k words as dicts (a string key per feature, each word its own) took several GB, and
+# stage 2 copied them all again. For training a document's features are made a sparse matrix as soon as
+# they are read (Vocab, the columns DictVectorizer would give them) and the dicts dropped; stage 2 only adds
+# its own columns. The saved model is the same: DictVectorizer + classifier per stage (Vocab.vectorizer).
+
+class Vocab:
+    """Feature name -> column, growing as words are read; rows made as DictVectorizer.transform makes them."""
+
+    def __init__(self, names=()):
+        self.index = {}
+        for n in names:
+            self.index.setdefault(n, len(self.index))
+
+    def __len__(self):
+        return len(self.index)
+
+    def matrix(self, dicts, grow=True):
+        index = self.index
+        indptr, cols, vals = [0], [], []
+        for x in dicts:
+            for f, v in x.items():
+                if isinstance(v, str):
+                    f, v = f'{f}={v}', 1
+                elif not (v is None or isinstance(v, (int, float))):
+                    raise TypeError(f'feature {f}: {type(v)} value')
+                j = index.get(f)
+                if j is None:
+                    if not grow:
+                        continue
+                    j = index[f] = len(index)
+                if v:  # (a zero is no entry: the same to the model, less memory)
+                    cols.append(j)
+                    vals.append(float(v))
+            indptr.append(len(cols))
+        return sparse.csr_matrix((np.array(vals, dtype=np.float64), np.array(cols, dtype=np.int32), np.array(indptr, dtype=np.int64)),
+                                 shape=(len(indptr) - 1, len(index)))
+
+    def vectorizer(self):
+        """A fitted DictVectorizer with these columns (what the app's pdf_tagger_predict.py uses)."""
+        vec = DictVectorizer()
+        vec.vocabulary_ = dict(self.index)
+        vec.feature_names_ = sorted(self.index, key=self.index.get)
+        return vec
+
+
+def sort_columns(vocab, mats):
+    """The columns renumbered in name order, each row's entries sorted: the matrices DictVectorizer makes. liblinear's
+    result depends on the order of a row's entries, so this is what makes the model the same as before."""
+    names = sorted(vocab.index)
+    perm = np.empty(len(names), dtype=np.int32)
+    for j, n in enumerate(names):
+        perm[vocab.index[n]] = j
+    vocab.index = {n: j for j, n in enumerate(names)}
+    out = []
+    for m in mats:
+        m = widen(m, len(names))
+        m = sparse.csr_matrix((m.data, perm[m.indices], m.indptr), shape=m.shape)
+        m.sort_indices()
+        out.append(m)
+    return out
+
+
+def widen(m, ncols):
+    """m with ncols columns (a document read before the vocabulary grew), sharing its data."""
+    return m if m.shape[1] == ncols else sparse.csr_matrix((m.data, m.indices, m.indptr), shape=(m.shape[0], ncols))
+
+
+def compact_doc(d, vocab):
+    """A document of train_pdf_tagger.load for training: features -> d['M'] (sparse, vocab's columns), context -> arrays."""
+    ctx = d.pop('ctx')
+    d['M'] = vocab.matrix(d.pop('X'))
+    d['near'] = np.array([[-1 if c[k] is None else c[k] for k in NEIGHBOURS] for c in ctx], dtype=np.int32).reshape(-1, 4)
+    ids = {}
+    d['lines'] = np.array([ids.setdefault(c['line'], len(ids)) for c in ctx], dtype=np.int32)
+    return d
+
+
+def rows_of(docs, ncols, keep, mats=None):
+    """The kept words of docs, one matrix."""
+    parts = [widen((mats[k] if mats else d['M']), ncols)[keep(d)] for k, d in enumerate(docs)]
+    return sparse.vstack(parts, format='csr') if parts else sparse.csr_matrix((0, ncols))
+
+
 class Tagger:
     """Two stages: word features -> field; then again with the stage-1 fields of the context."""
 
     def fit(self, docs):
+        """docs from train_pdf_tagger.load: features as matrices (compact_doc, with docs[0]['vocab'])."""
+        vocab = docs[0]['vocab']
+        n1 = len(vocab)
         # Words marked "?" (the label could not be matched there) are context only, never a training target.
-        keep = lambda d: [i for i, l in enumerate(d['y']) if l != '?']
-        X = [d['X'][i] for d in docs for i in keep(d)]
+        keep = lambda d: np.flatnonzero(np.asarray(d['y']) != '?')
         y = [d['y'][i] for d in docs for i in keep(d)]
         w = weights(docs, keep)
-        self.s1 = fit1(X, y, w)
-        # Stage-1 fields of the training files as they would be on new files: from models that did not see them.
-        oof = {}
+        # which kept words are an ACARS picture's (OvRLinear: the ACARS fields learn from those alone)
+        acars = lambda ds: np.concatenate([np.full(len(keep(d)), d.get('kind') == 'acars') for d in ds]) if ds else None
         k = 3 if len(docs) >= 3 else 1
+        # (progress for the /models page: "[fit 2/5] ...")
+        step = lambda n, what: print(f'  [fit {n}/{k + 2}] {what}: {len(y)} words', flush=True)
+        step(1, 'stage 1, every file')
+        self.s1 = (vocab.vectorizer(), fit1m(rows_of(docs, n1, keep), y, w, acars(docs)))
+        # Stage-1 fields of the training files as they would be on new files: from models that did not see them.
+        # (Columns of features a part's training files lack weigh 0 in its model: as if its own vectorizer left them out.)
+        oof = {}  # by the document's place: a name can be a PDF's words and its picture's too
         for g in range(k):
             test = [d for i, d in enumerate(docs) if i % k == g]
             train = [d for i, d in enumerate(docs) if i % k != g] or docs
-            vec, clf = fit1([d['X'][i] for d in train for i in keep(d)], [d['y'][i] for d in train for i in keep(d)], weights(train, keep))
+            step(g + 2, f'stage 1 without part {g + 1} of {k} (what it says on the files it did not see)')
+            clf = fit1m(rows_of(train, n1, keep), [d['y'][i] for d in train for i in keep(d)], weights(train, keep), acars(train))
             for d in test:
-                oof[d['file']] = predict_masked(vec, clf, d['X'], d.get('kind'))
-        self.s2 = fit1([f for d in docs for i, f in enumerate(stage2_feats(d, oof[d['file']])) if d['y'][i] != '?'], y, w)
+                oof[id(d)] = predict_matrix(clf, widen(d['M'], n1), d.get('kind'))
+            del clf
+        step(k + 2, 'stage 2, every file')
+        # stage 2's columns: stage 1's, then its own
+        vocab2 = Vocab(vocab.index)
+        extra = [vocab2.matrix(stage2_extras(oof[id(d)], d['near'], d['lines'])) for d in docs]
+        n2 = len(vocab2)
+        mats = sort_columns(vocab2, [widen(d['M'], n2) + widen(e, n2) for d, e in zip(docs, extra)])
+        del extra
+        X2 = rows_of(docs, n2, keep, mats)
+        del mats
+        self.s2 = (vocab2.vectorizer(), fit1m(X2, y, w, acars(docs)))
         return self
 
     def predict(self, d):
+        if 'M' in d:  # a training document (compact_doc)
+            vec, clf = self.s1
+            s1 = predict_matrix(clf, vec_rows(vec, d['M'], d['vocab']), d.get('kind'))
+            vec, clf = self.s2
+            v2 = Vocab(d['vocab'].index)
+            e = v2.matrix(stage2_extras(s1, d['near'], d['lines']))
+            n = len(v2)
+            return predict_matrix(clf, vec_rows(vec, widen(d['M'], n) + widen(e, n), v2), d.get('kind'))
         vec, clf = self.s1
         s1 = predict_masked(vec, clf, d['X'], d.get('kind'))
         vec, clf = self.s2
@@ -422,4 +580,25 @@ class Tagger:
 
 def fit(docs):
     return Tagger().fit(docs)
+
+
+def fit1m(Xv, y, w=None, acars=None):
+    """fit1 on words already made a matrix: the classifier only. acars: which words are an ACARS picture's."""
+    # (liblinear's result depends on the order of a row's entries: sorted, as DictVectorizer gives them)
+    Xv = Xv.tocsr()
+    Xv.sort_indices()
+    if MODEL == 'hgb':
+        clf = Dense(HistGradientBoostingClassifier(max_iter=300, learning_rate=0.1, max_leaf_nodes=63, class_weight=balanced_weights(y), random_state=0))
+        clf.fit(Xv, y, sample_weight=w)
+        return clf
+    return OvRLinear().fit(Xv, y, sample_weight=w, class_weight=balanced_weights(y), acars=acars)
+
+
+def vec_rows(vec, m, vocab):
+    """m (vocab's columns) in the columns of vec (a model trained on other documents, whose columns may be fewer or ordered otherwise)."""
+    names = sorted(vocab.index, key=vocab.index.get)[:m.shape[1]]
+    to = np.array([vec.vocabulary_.get(n, -1) for n in names], dtype=np.int64)
+    m = m.tocoo()
+    ok = to[m.col] >= 0
+    return sparse.csr_matrix((m.data[ok], (m.row[ok], to[m.col[ok]])), shape=(m.shape[0], len(vec.vocabulary_)))
 
