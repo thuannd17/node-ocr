@@ -6,6 +6,7 @@
 import { Router } from 'express';
 import fs from 'node:fs';
 import { siteFile } from '../services/site-data.js';
+import * as cache from '../services/cache.js';
 
 const router = Router();
 router.use((req, res, next) => loadAirports().then(() => next(), next));
@@ -113,9 +114,9 @@ router.get('/:code', (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// 7-day forecast at the airport. Cached per airport for 30 min so a busy page does not hammer the free API.
-const WEATHER_TTL_MS = 30 * 60 * 1000;
-const weatherCache = new Map();
+// 7-day forecast at the airport. Cached per airport for 30 min (services/cache.js: Redis, shared by the app's
+// instances and kept across restarts) so a busy page does not hammer the free API.
+const WEATHER_TTL_SEC = 30 * 60;
 const DAILY = ['weather_code', 'temperature_2m_max', 'temperature_2m_min', 'precipitation_sum', 'precipitation_probability_max',
   'wind_speed_10m_max', 'wind_gusts_10m_max', 'wind_direction_10m_dominant', 'sunrise', 'sunset'];
 const CURRENT = ['temperature_2m', 'relative_humidity_2m', 'weather_code', 'wind_speed_10m', 'wind_direction_10m', 'pressure_msl', 'visibility', 'cloud_cover'];
@@ -126,8 +127,8 @@ router.get('/:code/weather', async (req, res, next) => {
     const hit = findByCode(req.params.code);
     if (!hit) return res.status(404).json({ error: `Airport "${req.params.code}" not found` });
     const a = hit.airport;
-    const cached = weatherCache.get(a.id);
-    if (cached && Date.now() - cached.at < WEATHER_TTL_MS) return res.json(cached.data);
+    const cached = await cache.get(`weather:${a.id}`);
+    if (cached) return res.json(cached);
     const url = `https://api.open-meteo.com/v1/forecast?latitude=${a.lat}&longitude=${a.lon}&timezone=auto&forecast_days=7`
       + `&wind_speed_unit=kn&daily=${DAILY.join(',')}&current=${CURRENT.join(',')}`;
     const r = await fetch(url, { signal: AbortSignal.timeout(15000) });
@@ -149,7 +150,7 @@ router.get('/:code/weather', async (req, res, next) => {
         sunrise: d.sunrise[i], sunset: d.sunset[i],
       })),
     };
-    weatherCache.set(a.id, { at: Date.now(), data });
+    await cache.set(`weather:${a.id}`, data, WEATHER_TTL_SEC);
     res.json(data);
   } catch (err) {
     if (err.name === 'TimeoutError' || err.cause) return res.status(502).json({ error: `Could not get the weather: ${err.message}` });

@@ -1065,11 +1065,11 @@
           "Night time"
         ],
         "summary": "Night time of a flight",
-        "description": "The aircraft flies the great circle from `dep` to `arr` at a constant speed between off-block and on-block; the sun's altitude is taken at its position (SunCalc), and each day / night edge is found to the second. Night = the sun below −6° (`civil`: end of evening to beginning of morning civil twilight, ICAO Annex 1 / EASA / FAA) below −0.833° (`sunset`: sunset to sunrise) or below −12° (`nautical`: end of evening to beginning of morning nautical twilight), or by fixed hours (`fixed`: before `sunrise` and from `sunset` on, default 06:00 / 18:00 local time at the aircraft, i.e. the mean solar time of its longitude). Minutes are rounded; `nightMinutes + dayMinutes = blockMinutes`.",
+        "description": "The aircraft flies the great circle from `dep` to `arr` at a constant speed from take-off to landing (`takeoff` / `landing`; without them off-block + 10 min taxi-out and on-block − 5 min taxi-in, `estimated`); the sun's altitude is taken at its position (SunCalc), and each day / night edge is found to the second. Night = the sun below −6° (`civil`: end of evening to beginning of morning civil twilight, ICAO Annex 1 / EASA / FAA) below −0.833° (`sunset`: sunset to sunrise) or below −12° (`nautical`: end of evening to beginning of morning nautical twilight), or by fixed hours (`fixed`: before `sunrise` and from `sunset` on, default 06:00 / 18:00 local time at the aircraft, i.e. the mean solar time of its longitude). Minutes are rounded; `nightMinutes + dayMinutes = flightMinutes`.",
         "operationId": "calcNightTime",
         "responses": {
           "200": {
-            "description": "Night, day and block time with the day / night segments",
+            "description": "Night, day, flight and block time with the day / night segments",
             "content": {
               "application/json": {
                 "schema": {
@@ -1094,12 +1094,20 @@
                   },
                   "offBlock": "2025-03-11T13:00:00.000Z",
                   "onBlock": "2025-03-11T23:50:00.000Z",
+                  "takeoff": "2025-03-11T13:10:00.000Z",
+                  "landing": "2025-03-11T23:45:00.000Z",
+                  "estimated": {
+                    "takeoff": true,
+                    "landing": true
+                  },
                   "blockMinutes": 650,
-                  "nightMinutes": 447,
-                  "dayMinutes": 203,
+                  "flightMinutes": 635,
+                  "nightMinutes": 443,
+                  "dayMinutes": 192,
                   "block": "10:50",
-                  "night": "7:27",
-                  "day": "3:23",
+                  "flight": "10:35",
+                  "night": "7:23",
+                  "day": "3:12",
                   "takeoffAtNight": false,
                   "landingAtNight": false,
                   "distanceKm": 8214.5,
@@ -1108,51 +1116,51 @@
                   "segments": [
                     {
                       "night": false,
-                      "from": "2025-03-11T13:00:00.000Z",
-                      "to": "2025-03-11T15:36:12.000Z",
-                      "minutes": 156,
+                      "from": "2025-03-11T13:10:00.000Z",
+                      "to": "2025-03-11T15:38:53.000Z",
+                      "minutes": 149,
                       "fromPosition": {
                         "lat": 48.1103,
                         "lon": 16.5697
                       },
                       "toPosition": {
-                        "lat": 49.31,
-                        "lon": 43.56
+                        "lat": 49.35628,
+                        "lon": 42.89685
                       },
-                      "fromSunAltitude": 32.4,
-                      "toSunAltitude": -6
+                      "fromSunAltitude": 31.4,
+                      "toSunAltitude": -6.01
                     },
                     {
                       "night": true,
-                      "from": "2025-03-11T15:36:12.000Z",
-                      "to": "2025-03-11T23:03:22.000Z",
-                      "minutes": 447,
+                      "from": "2025-03-11T15:38:53.000Z",
+                      "to": "2025-03-11T23:02:18.000Z",
+                      "minutes": 443,
                       "fromPosition": {
-                        "lat": 49.31,
-                        "lon": 43.56
+                        "lat": 49.35628,
+                        "lon": 42.89685
                       },
                       "toPosition": {
-                        "lat": 24.98,
-                        "lon": 101.75
+                        "lat": 24.74939,
+                        "lon": 102.00738
                       },
-                      "fromSunAltitude": -6,
-                      "toSunAltitude": -6
+                      "fromSunAltitude": -6.01,
+                      "toSunAltitude": -5.99
                     },
                     {
                       "night": false,
-                      "from": "2025-03-11T23:03:22.000Z",
-                      "to": "2025-03-11T23:50:00.000Z",
-                      "minutes": 47,
+                      "from": "2025-03-11T23:02:18.000Z",
+                      "to": "2025-03-11T23:45:00.000Z",
+                      "minutes": 43,
                       "fromPosition": {
-                        "lat": 24.98,
-                        "lon": 101.75
+                        "lat": 24.74939,
+                        "lon": 102.00738
                       },
                       "toPosition": {
                         "lat": 21.2212,
                         "lon": 105.807
                       },
-                      "fromSunAltitude": -6,
-                      "toSunAltitude": 8.7
+                      "fromSunAltitude": -5.99,
+                      "toSunAltitude": 7.54
                     }
                   ]
                 }
@@ -1756,8 +1764,34 @@
             "type": "string",
             "format": "date-time"
           },
+          "takeoff": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Take-off: as sent, or off-block + 10 min"
+          },
+          "landing": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Landing: as sent, or on-block − 5 min"
+          },
+          "estimated": {
+            "type": "object",
+            "description": "true where the time was not sent and comes from the taxi times",
+            "properties": {
+              "takeoff": {
+                "type": "boolean"
+              },
+              "landing": {
+                "type": "boolean"
+              }
+            }
+          },
           "blockMinutes": {
             "type": "integer"
+          },
+          "flightMinutes": {
+            "type": "integer",
+            "description": "Take-off to landing, the time the night time is counted in"
           },
           "nightMinutes": {
             "type": "integer"
@@ -1768,6 +1802,10 @@
           "block": {
             "type": "string",
             "description": "h:mm"
+          },
+          "flight": {
+            "type": "string",
+            "example": "10:35"
           },
           "night": {
             "type": "string",
@@ -1983,6 +2021,18 @@
             "format": "date-time",
             "description": "On-block time, ISO 8601; at most 24 h after `off`",
             "example": "2025-03-11T23:50Z"
+          },
+          "takeoff": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Take-off time, ISO 8601, within the block time. Default: `off` + 10 min (taxi-out)",
+            "example": "2025-03-11T13:12Z"
+          },
+          "landing": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Landing time, ISO 8601, within the block time. Default: `on` − 5 min (taxi-in)",
+            "example": "2025-03-11T23:41Z"
           },
           "rule": {
             "type": "string",

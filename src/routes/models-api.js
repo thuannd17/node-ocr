@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { listModels, activateModel, deleteModel, syncModels } from '../services/ai-models.js';
 import { listRecModels, activateRec, deleteRec, syncRecModels } from '../services/rec-models.js';
 import { ROOT } from '../utils/paths.js';
-import { startJob, jobState } from '../services/train-jobs.js';
+import { startJob, jobState, stopJob } from '../services/train-jobs.js';
 
 const router = Router();
 
@@ -47,6 +47,33 @@ function scoreLines(b, __) {
   return out;
 }
 
+/** Training time "1 h 27 m" (null: not recorded, versions trained before it was kept). */
+const duration = (sec) => {
+  if (sec == null) return null;
+  const h = Math.floor(sec / 3600), m = Math.floor(sec / 60) % 60, s = sec % 60;
+  return h ? `${h} h ${String(m).padStart(2, '0')} m` : m ? `${m} m ${String(s).padStart(2, '0')} s` : `${s} s`;
+};
+const STEP_NAMES = { words: 'training words', conventions: 'conventions', tagger: 'word tagger' };
+
+/** How its word tagger was made (meta.json tagger, scripts/model-train.mjs). */
+const taggerRun = (t, __) => {
+  if (!t) return '';
+  if (t.mode === 'conventions') return __('conventions only, tagger of {id}', { id: t.from });
+  if (t.mode === 'incremental') return __('incremental from {id} ({n} new files)', { id: t.base, n: t.new + t.changed });
+  return __('full run');
+};
+
+/** A roster version's training time: total, the steps, and words per minute (to compare runs on more data). */
+const rosterTime = (m, __) => (m.seconds == null ? null : {
+  total: duration(m.seconds),
+  lines: [
+    taggerRun(m.tagger, __),
+    ...Object.entries(m.stepSeconds || {}).filter(([k]) => STEP_NAMES[k]).map(([k, s]) => `${__(STEP_NAMES[k])} ${duration(s)}`),
+    m.words ? __('{n} words/min', { n: Math.round(m.words / (m.seconds / 60)).toLocaleString('en') }) : '',
+    m.cpus ? __('{n} CPU cores', { n: m.cpus }) : '',
+  ].filter(Boolean),
+});
+
 const REC_STATUS = { deployed: 'in use', candidate: 'candidate', rejected: 'rejected', retired: 'replaced', baseline: 'baseline' };
 const VERDICT = { better: 'better', worse: 'worse' };
 
@@ -56,10 +83,11 @@ const FAMILIES = {
     icon: 'fa-brain',
     description: 'Reads the words (OCR text of an image, or the text layer of a PDF) into roster rows: puts every word in a column (date, duty, dep, begin…), then joins them into rows. Learns from the labels (in MinIO).',
     applyNote: 'Activating takes effect at once on /roster and the AI model benchmark.',
-    trainNote: 'Trains a new version on all image labels + PDF, CSV, XLS, XLSX, TXT + ACARS pictures (about 10 minutes). When done the new version is activated; the old one stays here.',
-    train: () => ({ args: ['src/scripts/model-train.mjs'] }),
+    trainNote: 'Trains a new version on all image labels + PDF, CSV, XLS, XLSX, TXT + ACARS pictures. Incremental: builds on the active version (about half the time of a full run; every 5th run is full by itself). Full: from nothing. Conventions only: keeps the active word tagger and learns how the layouts are written again (minutes). The new version is activated if it reads at least as well; the old one stays here.',
+    trainModes: [['incremental', 'Incremental'], ['full', 'Full'], ['conventions', 'Conventions only']],
+    train: ({ mode } = {}) => ({ args: ['src/scripts/model-train.mjs', ...({ full: ['--full'], conventions: ['--conventions-only'] }[mode] || [])] }),
     versions: (__) => listModels().map(m => ({
-      id: m.id, active: m.active, createdAt: m.trainedAt, status: m.active ? __('in use') : '',
+      id: m.id, active: m.active, createdAt: m.trainedAt, status: m.active ? __('in use') : '', time: rosterTime(m, __),
       data: __('{files} files ({by}) · {rows} rows · {words} words', { files: m.files ?? '?', by: trainedOn(m, __), rows: (m.rows ?? 0).toLocaleString('en'), words: (m.words ?? 0).toLocaleString('en') }),
       score: m.benchmark ? scoreLines(m.benchmark, __) : [],
       scoreNote: m.benchmark ? __('measured by the AI model benchmark') : __('not benchmarked yet (Benchmark page → AI model)'),
@@ -84,6 +112,7 @@ const FAMILIES = {
       const c = m.comparison;
       return {
         id: m.id, title: m.name ? `${m.id} · ${m.name}` : m.id, active: m.active, createdAt: m.createdAt,
+        time: m.seconds == null ? null : { total: duration(m.seconds), lines: [] },
         status: m.active ? __('in use') : (REC_STATUS[m.status] ? __(REC_STATUS[m.status]) : m.status),
         data: m.id === 'stock' ? __('stock PaddleOCR, not fine-tuned')
           : m.trainedOn == null ? __('training data not recorded')
@@ -125,7 +154,7 @@ function familyView(id, __) {
   const f = FAMILIES[id];
   return {
     id, name: __(f.name), icon: f.icon, description: __(f.description), applyNote: f.applyNote && __(f.applyNote), trainNote: __(f.trainNote),
-    trainable: !!f.train, versions: f.versions(__), training: jobState(id, 0),
+    trainable: !!f.train, trainModes: (f.trainModes || []).map(([value, label]) => ({ value, label: __(label) })), versions: f.versions(__), training: jobState(id, 0),
   };
 }
 
@@ -148,7 +177,7 @@ router.post('/:family/train', (req, res) => {
   try {
     const f = familyOf(req);
     if (!f.train) throw Object.assign(new Error('This model cannot be trained from the app yet.'), { status: 400 });
-    const { args, env } = f.train();
+    const { args, env } = f.train(req.body || {});
     startJob(req.params.family, args, { env });
     res.json({ started: true, training: jobState(req.params.family) });
   } catch (e) { fail(res, e); }
@@ -156,6 +185,15 @@ router.post('/:family/train', (req, res) => {
 
 router.get('/:family/train', (req, res) => {
   try { familyOf(req); res.json(jobState(req.params.family)); } catch (e) { fail(res, e); }
+});
+
+// Stop a training run (and the processes it started); a version not yet uploaded is dropped, the active one stays.
+router.post('/:family/train/stop', (req, res) => {
+  try {
+    familyOf(req);
+    if (!stopJob(req.params.family)) return res.status(404).json({ error: 'This model is not training.' });
+    res.json({ ok: true, stopping: true, training: jobState(req.params.family) });
+  } catch (e) { fail(res, e); }
 });
 
 router.post('/:family/:id/activate', async (req, res) => {
@@ -174,6 +212,15 @@ router.delete('/:family/:id', async (req, res) => {
     await f.remove(req.params.id);
     res.json({ ok: true, family: familyView(req.params.family, req.__) });
   } catch (e) { fail(res, e); }
+});
+
+/** The training run of each family that has one (running, or finished since the app started): /api/jobs. */
+export const trainingJobs = (__) => ORDER.map((id) => ({ id, name: __(FAMILIES[id].name), state: jobState(id, 0) })).filter(j => j.state.startedAt);
+
+/** The version each model family uses now, from the local mirror (no MinIO sync): /dashboard. */
+export const activeModels = (__) => ORDER.map((id) => {
+  const f = familyView(id, __), a = f.versions.find(v => v.active);
+  return { id, name: f.name, icon: f.icon, active: a ? { id: a.id, title: a.title || a.id, createdAt: a.createdAt || null, score: a.score || [] } : null, training: !!f.training?.running };
 });
 
 export default router;

@@ -9,8 +9,11 @@
   <link rel="stylesheet" href="/assets/app.css">
   <link rel="stylesheet" href="/assets/fontawesome/css/all.min.css">
   <style>
-    .pipeline { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 13px; color: #555; padding: 12px 16px; }
+    .pipeline { display: flex; flex-direction: column; gap: 10px; font-size: 13px; color: #555; padding: 12px 16px; }
+    .pipeline .flow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .pipeline .source { min-width: 120px; }
     .pipeline .step { background: #f5f7fb; border: 1px solid #e3e8f0; border-radius: 6px; padding: 6px 10px; }
+    .pipeline .step.skip { background: transparent; border-style: dashed; color: #999; }
     .pipeline .step b { color: #2b3a55; }
     .pipeline .arrow { color: #aaa; }
     .family { margin-top: 20px; }
@@ -19,6 +22,7 @@
     .family-head .desc { flex-basis: 100%; font-size: 13px; color: #666; margin: 2px 0 0; }
     .family-head .active-name { font-size: 13px; color: #2e7d32; font-weight: 600; }
     .train-box { padding: 0 16px 12px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .train-box select { font: inherit; font-size: 14px; padding: 7px 8px; border: 1px solid var(--border); border-radius: 6px; background: #fff; color: var(--text); }
     .train-box .note { font-size: 12px; color: #777; flex: 1 1 400px; }
     .apply-note { padding: 0 16px 10px; font-size: 12px; color: #8a6d00; }
     .btn { background: var(--primary); color: #fff; border: none; padding: 8px 14px; border-radius: 6px; cursor: pointer; font-size: 14px; white-space: nowrap; }
@@ -93,7 +97,7 @@
       if (kind === 'ok') setTimeout(() => el.classList.remove('visible'), 6000);
     }
 
-    // How a roster is read: image -> detect -> recognise -> roster reader; a PDF with text goes straight to the reader.
+    // How a roster is read: image -> detect -> recognise -> roster reader; roster text (PDF with text, CSV, XLS, XLSX, TXT) goes straight to the reader.
     function renderPipeline() {
       const by = Object.fromEntries(families.map(f => [f.id, f]));
       const step = (id) => {
@@ -101,8 +105,9 @@
         const a = f?.versions.find(v => v.active);
         return `<span class="step"><i class="fa-solid ${f?.icon || 'fa-cube'}" aria-hidden="true"></i> <b>${escapeHtml(f?.name || id)}</b> ${a ? `<span class="muted">(${escapeHtml(a.id)})</span>` : ''}</span>`;
       };
-      $('pipeline').innerHTML = `<span><i class="fa-solid fa-image" aria-hidden="true"></i> ${__('Roster image')}</span><span class="arrow">→</span>${step('detect')}<span class="arrow">→</span>${step('rec')}<span class="arrow">→</span>${step('roster')}<span class="arrow">→</span><span>${__('Roster rows')}</span>
-        <span class="muted" style="flex-basis:100%">${__('PDFs with a text layer go straight to <b>{name}</b> (no OCR).', { name: escapeHtml(by.roster?.name || __('Roster AI')) })}</span>`;
+      const arrow = '<span class="arrow">→</span>';
+      $('pipeline').innerHTML = `<div class="flow"><span class="source"><i class="fa-solid fa-image" aria-hidden="true"></i> ${__('Roster image')}</span>${arrow}${step('detect')}${arrow}${step('rec')}${arrow}${step('roster')}${arrow}<span>${__('Roster rows')}</span></div>
+        <div class="flow"><span class="source" title="${__('PDF with a text layer, CSV, XLS, XLSX, TXT')}"><i class="fa-solid fa-file-lines" aria-hidden="true"></i> ${__('Roster text')}</span>${arrow}<span class="step skip"><i class="fa-solid fa-forward" aria-hidden="true"></i> ${__('No OCR: the text is read as it is')}</span>${arrow}${step('roster')}${arrow}<span>${__('Roster rows')}</span></div>`;
     }
 
     function versionRow(f, v) {
@@ -110,6 +115,7 @@
       return `<tr class="${v.active ? 'active-row' : ''}">
         <td data-label="${__('Version')}"><b>${escapeHtml(v.title || v.id)}</b> ${v.status ? `<span class="badge ${v.active ? 'active' : ''}">${escapeHtml(v.status)}</span>` : ''}</td>
         <td data-label="${__('Created')}">${escapeHtml(fmtDate(v.createdAt))}</td>
+        <td data-label="${__('Training time')}">${v.time ? `<b>${escapeHtml(v.time.total)}</b>${(v.time.lines || []).map(l => `<br/><span class="muted">${escapeHtml(l)}</span>`).join('')}` : v.readOnly ? '' : `<span class="muted">${__('not recorded')}</span>`}</td>
         <td data-label="${__('Training data')}">${escapeHtml(v.data || '')}</td>
         <td data-label="${__('Accuracy')}">${score || ''}${v.scoreNote ? `${score ? '<br/>' : ''}<span class="muted">${escapeHtml(v.scoreNote)}${v.scoreAt ? ` ${__('at {time}', { time: escapeHtml(fmtDate(v.scoreAt)) })}` : ''}</span>` : ''}</td>
         <td data-label="${__('Size')}">${fmtSize(v.sizeBytes)}</td>
@@ -130,15 +136,17 @@
           <p class="desc">${escapeHtml(f.description)}</p>
         </div>
         <div class="train-box">
+          ${f.trainable && f.trainModes.length ? `<select id="train-mode-${f.id}" aria-label="${__('Kind of training run')}" ${t.running ? 'disabled' : ''}>${f.trainModes.map(m => `<option value="${m.value}">${escapeHtml(m.label)}</option>`).join('')}</select>` : ''}
           ${f.trainable ? `<button class="btn" data-train="${f.id}" ${t.running ? 'disabled' : ''}><i class="fa-solid fa-graduation-cap" aria-hidden="true"></i> ${t.running ? __('Training…') : __('Train a new version')}</button>` : ''}
+          ${t.running ? `<button class="btn danger" data-train-stop="${f.id}" ${t.stopping ? 'disabled' : ''} title="${__('Stop this training run: the version it is making is dropped, the active one stays')}"><i class="fa-solid fa-stop" aria-hidden="true"></i> ${t.stopping ? __('Stopping…') : __('Stop')}</button>` : ''}
           <span class="note" id="train-status-${f.id}">${escapeHtml(f.trainNote)}</span>
         </div>
         ${f.applyNote ? `<div class="apply-note"><i class="fa-solid fa-circle-info" aria-hidden="true"></i> ${escapeHtml(f.applyNote)}</div>` : ''}
         <div class="train-progress" id="train-progress-${f.id}" hidden><div class="bar"><span></span></div><div class="where"></div></div>
         <div class="train-log" id="train-log-${f.id}"></div>
         <div class="table-wrap"><table class="stack-sm">
-          <thead><tr><th>${__('Version')}</th><th>${__('Created')}</th><th>${__('Training data')}</th><th>${__('Accuracy')}</th><th>${__('Size')}</th><th></th></tr></thead>
-          <tbody>${f.versions.map(v => versionRow(f, v)).join('') || `<tr><td colspan="6" class="muted">${__('No versions yet.')}</td></tr>`}</tbody>
+          <thead><tr><th>${__('Version')}</th><th>${__('Created')}</th><th>${__('Training time')}</th><th>${__('Training data')}</th><th>${__('Accuracy')}</th><th>${__('Size')}</th><th></th></tr></thead>
+          <tbody>${f.versions.map(v => versionRow(f, v)).join('') || `<tr><td colspan="7" class="muted">${__('No versions yet.')}</td></tr>`}</tbody>
         </table></div>
       </section>`;
     }
@@ -190,6 +198,18 @@
       const act = e.target.closest('[data-activate]');
       const del = e.target.closest('[data-delete]');
       const train = e.target.closest('[data-train]');
+      const stopTrain = e.target.closest('[data-train-stop]');
+      if (stopTrain && !stopTrain.disabled) {
+        const family = stopTrain.dataset.trainStop;
+        const f = families.find(x => x.id === family);
+        if (!confirm(__('Stop training "{name}"? The version it is making is dropped; the active version stays in use.', { name: f.name }))) return;
+        stopTrain.disabled = true;
+        const res = await fetch(`/api/models/${family}/train/stop`, { method: 'POST' });
+        if (!res.ok) { stopTrain.disabled = false; return showMsg(await fail(res), 'error'); }
+        stopTrain.innerHTML = `<i class="fa-solid fa-stop" aria-hidden="true"></i> ${__('Stopping…')}`;
+        window.dispatchEvent(new Event('rp:jobs'));
+        return;
+      }
       if (act && !act.disabled) {
         const { family, activate: id } = act.dataset;
         const res = await fetch(`/api/models/${family}/${encodeURIComponent(id)}/activate`, { method: 'POST' });
@@ -207,10 +227,13 @@
         load();
       } else if (train && !train.disabled) {
         const family = train.dataset.train;
-        const res = await fetch(`/api/models/${family}/train`, { method: 'POST' });
+        const mode = $(`train-mode-${family}`)?.value;
+        const res = await fetch(`/api/models/${family}/train`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode }) });
         if (!res.ok) return showMsg(await fail(res), 'error');
         train.disabled = true;
         watchTraining(family);
+        load({ sync: false }); // shows its Stop button (the versions as they are, no MinIO sync)
+        window.dispatchEvent(new Event('rp:jobs')); // the status bar under the top bar (nav.js)
       }
     });
 
@@ -241,7 +264,8 @@
         if (t && log) {
           log.textContent = (t.log || []).join('\n');
           log.scrollTop = log.scrollHeight;
-          status.textContent = t.running ? __('Training (since {time})…', { time: fmtDate(t.startedAt) }) : t.ok ? __('Training finished.') : __('Training stopped or failed: see the log.');
+          status.textContent = t.running ? (t.stopping ? __('Stopping the training run…') : __('Training (since {time})…', { time: fmtDate(t.startedAt) }))
+            : t.stopped ? __('Training stopped: no new version, the active one stays.') : t.nothingNew ? __('Nothing new to learn since the active version (same labels, files and code): no version made. Add or fix labels, then train.') : t.ok ? __('Training finished.') : __('Training stopped or failed: see the log.');
           showProgress(family, t);
         }
         if (!t || !t.running) break;

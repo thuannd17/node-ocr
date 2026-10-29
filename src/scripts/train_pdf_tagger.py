@@ -11,9 +11,11 @@ and its line and neighbours.
   .venv/Scripts/python scripts/train_pdf_tagger.py            # evaluate (by file, and leaving one layout out)
   .venv/Scripts/python scripts/train_pdf_tagger.py --save     # also train on everything -> <ROSTER_WORK_DIR>/models/pdf-tagger/
   .venv/Scripts/python scripts/train_pdf_tagger.py --no-eval --save DIR   # only train and save (the app's retrain)
+      [--base VERSION_DIR]   # incremental: reuse that version's saved stage-1 fields (stage1-oof.joblib)
   .venv/Scripts/python scripts/train_pdf_tagger.py --predict file|layout|one   # tags from models that never saw the file
   .venv/Scripts/python scripts/train_pdf_tagger.py --curve    # how many labeled files a new layout needs
 """
+import hashlib
 import json
 import os
 import sys
@@ -24,7 +26,7 @@ import numpy as np
 from sklearn.metrics import classification_report
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from pdf_tagger import HEADER_WORDS, Vocab, compact_doc, doc_features, fit, sort_columns, use_learned_header_words  # noqa: E402
+from pdf_tagger import HEADER_WORDS, Vocab, compact_doc, doc_features, doc_key, fit, sort_columns, use_learned_header_words  # noqa: E402
 
 # Training words: PDFs (build-pdf-token-data.mjs), roster images (build-image-token-data.mjs) and
 # ACARS pictures (build-acars-token-data.mjs). --pdf-only: the PDFs alone.
@@ -114,7 +116,7 @@ def load():
                 cut_files += 1
             X, ctxs = doc_features(doc['pages'])
             y = [t['field'] for page in doc['pages'] for t in page['tokens']]
-            docs.append(compact_doc({'file': doc['file'], 'kind': doc.get('kind', 'pdf'), 'family': family(doc), 'X': X, 'y': y, 'ctx': ctxs,
+            docs.append(compact_doc({'file': doc['file'], 'kind': doc.get('kind', 'pdf'), 'family': family(doc), 'X': X, 'y': y, 'ctx': ctxs, 'sig': words_sig(doc),
                                      'doc': doc if keep_doc else None, 'vocab': vocab}, vocab))
             del X, ctxs, doc
     for d, m in zip(docs, sort_columns(vocab, [d['M'] for d in docs])):
@@ -122,6 +124,74 @@ def load():
     if cut_words:
         print(f'{cut_words} words of {cut_files} long files left out ({MAX_WORDS} words of each, from all over it: PDF_TAGGER_MAX_WORDS)', flush=True)
     return docs
+
+
+def words_sig(doc):
+    """A file's words as trained (after sample_pages), not their fields: its saved stage-1 fields are good while it is the same."""
+    words = [[[t['t'], round(t.get('x', 0), 1), round(t.get('y', 0), 1)] for t in p['tokens']] for p in doc['pages']]
+    return hashlib.sha1(json.dumps(words).encode('utf-8')).hexdigest()
+
+
+# Incremental runs (--base): the stage-1 fields of the last version's training files are reused (pdf_tagger.Tagger.fit),
+# from a full run at most this many runs back (each reuse drifts a little from what a full run would give).
+FULL_EVERY = int(os.environ.get('PDF_TAGGER_FULL_EVERY') or 5)
+OOF_FILE = 'stage1-oof.joblib'  # a version's saved stage-1 fields, by file: {code, generation, classes, docs: {key: (sig, codes)}}
+
+
+def code_sig():
+    """The tagger's code and settings: saved stage-1 fields from other code or settings are not reused."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    h = hashlib.sha1()
+    for name in ('pdf_tagger.py', 'train_pdf_tagger.py'):
+        with open(os.path.join(here, name), 'rb') as f:
+            h.update(f.read())
+    knobs = sorted((k, v) for k, v in os.environ.items() if k.startswith('PDF_TAGGER_') and k not in ('PDF_TAGGER_JOBS', 'PDF_TAGGER_FULL_EVERY'))
+    h.update(json.dumps(knobs).encode('utf-8'))
+    return h.hexdigest()
+
+
+def incremental_base(docs, base_dir):
+    """(prior for pdf_tagger.fit or None, what kind of run it is and why: tagger-run.json)."""
+    import joblib
+    full = lambda why: (None, {'mode': 'full', 'reason': why, 'generation': 0})
+    if not base_dir:
+        return full('asked for a full run')
+    path = os.path.join(base_dir, OOF_FILE)
+    if not os.path.exists(path):
+        return full('the last version has no saved stage-1 fields (trained before incremental runs)')
+    cache = joblib.load(path)
+    if cache.get('code') != code_sig():
+        return full('the tagger code or its PDF_TAGGER_ settings changed since the last version')
+    generation = cache.get('generation', 0) + 1
+    if generation >= FULL_EVERY:
+        return full(f'{FULL_EVERY - 1} incremental runs since the last full one (PDF_TAGGER_FULL_EVERY={FULL_EVERY})')
+    classes = cache['classes']
+    oof = {}
+    for d in docs:
+        hit = cache['docs'].get(doc_key(d))
+        if hit and hit[0] == d['sig']:
+            oof[doc_key(d)] = [classes[i] for i in hit[1]]
+    seen = set(cache['docs'])
+    changed = sum(1 for d in docs if doc_key(d) in seen and doc_key(d) not in oof)
+    if changed * 3 > len(docs):
+        return full(f'the words of {changed} of {len(docs)} files changed since the last version')
+    s1 = joblib.load(os.path.join(base_dir, 'tagger.joblib')).s1
+    return {'oof': oof, 'seen': seen, 's1': s1}, {
+        'mode': 'incremental', 'generation': generation, 'base': os.path.basename(os.path.normpath(base_dir)),
+        'reused': len(oof), 'new': sum(1 for d in docs if doc_key(d) not in seen), 'changed': changed,
+    }
+
+
+def save_oof(model, docs, out, run):
+    """The stage-1 fields the model was trained with, for the next incremental run (kept out of tagger.joblib)."""
+    import joblib
+    oof = model.__dict__.pop('oof_')
+    classes = sorted({c for v in oof.values() for c in v})
+    code = {c: i for i, c in enumerate(classes)}
+    joblib.dump({
+        'code': code_sig(), 'generation': run['generation'], 'classes': classes,
+        'docs': {doc_key(d): (d['sig'], np.array([code[c] for c in oof[doc_key(d)]], dtype=np.uint8)) for d in docs},
+    }, os.path.join(out, OOF_FILE), compress=3)
 
 
 def evaluate(docs, groups, title):
@@ -238,9 +308,16 @@ def main():
         import joblib
         at = sys.argv.index('--save') + 1
         out = sys.argv[at] if at < len(sys.argv) and not sys.argv[at].startswith('--') else os.path.join(WORK, 'models', 'pdf-tagger')
-        model = fit(docs)
+        base = sys.argv[sys.argv.index('--base') + 1] if '--base' in sys.argv else None
+        prior, run = incremental_base(docs, base)
+        print(f"{run['mode']} run: {run.get('reason') or 'stage-1 fields of ' + run['base'] + ' reused'}", flush=True)
+        model = fit(docs, prior)
+        del prior
         os.makedirs(out, exist_ok=True)
+        save_oof(model, docs, out, run)
         joblib.dump(model, os.path.join(out, 'tagger.joblib'))
+        with open(os.path.join(out, 'tagger-run.json'), 'w', encoding='utf-8') as f:
+            json.dump(run, f)
         print(f'saved {os.path.join(out, "tagger.joblib")}')
 
 

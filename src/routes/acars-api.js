@@ -127,14 +127,9 @@ router.post('/acars/corrections', uploadFile, async (req, res) => {
 router.get('/acars/files', async (req, res) => {
   try {
     const { index } = await acars.syncMedia({ maxAgeMs: 2000 });
-    const labeled = new Set(index.labels.map(l => l.name));
+    const labeled = new Map(index.labels.map(l => [l.name, l.md5]));
     const files = index.files.filter(f => kindOf(f.name) === 'image').sort((a, b) => a.name.localeCompare(b.name));
-    const firstByHash = new Map();
-    for (const f of files) if (!firstByHash.has(f.md5)) firstByHash.set(f.md5, f.name);
-    const items = files.map(f => {
-      const first = firstByHash.get(f.md5);
-      return { name: f.name, labeled: labeled.has(f.name), review: labeled.has(f.name) ? reviewState(ACARS_LABELS_ROOT, f.name) : null, duplicateOf: first === f.name ? null : first };
-    });
+    const items = files.map(f => ({ name: f.name, labeled: labeled.has(f.name), review: labeled.has(f.name) ? reviewState(ACARS_LABELS_ROOT, f.name, labeled.get(f.name)) : null }));
     res.json({ items, counts: { files: items.length, labeled: items.filter(i => i.labeled).length } });
   } catch (e) {
     fail(res, e, 'GET /api/acars/files');

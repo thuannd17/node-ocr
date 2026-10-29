@@ -83,7 +83,7 @@
   <main class="page">
     <div class="page-header">
       <h1><i class="fa-solid fa-moon" aria-hidden="true"></i> Night Time</h1>
-      <p class="subtitle">Night time of a flight: the aircraft flies the great circle between the two airports at a constant speed from off-block to on-block, and the sun's altitude is taken at its position at every moment (SunCalc).</p>
+      <p class="subtitle">Night time of a flight: the aircraft flies the great circle between the two airports at a constant speed from take-off to landing, and the sun's altitude is taken at its position at every moment (SunCalc).</p>
     </div>
 
     <form class="card" id="form" autocomplete="off">
@@ -109,6 +109,16 @@
           <div class="who" id="blockWho">UTC (Z)</div>
         </div>
         <div class="field">
+          <label for="takeoff">Take-off (UTC)</label>
+          <input id="takeoff" type="datetime-local" step="60">
+          <div class="who" id="takeoffWho"></div>
+        </div>
+        <div class="field">
+          <label for="landing">Landing (UTC)</label>
+          <input id="landing" type="datetime-local" step="60">
+          <div class="who" id="landingWho"></div>
+        </div>
+        <div class="field">
           <label for="rule">Night mode</label>
           <select id="rule">
             <option value="sunset">Sunset → sunrise (−0.833°)</option>
@@ -132,7 +142,7 @@
         <button class="btn" type="submit"><i class="fa-solid fa-calculator" aria-hidden="true"></i> Calculate night time</button>
         <button class="btn secondary" type="button" id="swapBtn" title="Swap"><i class="fa-solid fa-right-left" aria-hidden="true"></i> Swap</button>
         <button class="btn secondary" type="button" id="copyLinkBtn" title="Copy a link to this calculation"><i class="fa-solid fa-link" aria-hidden="true"></i> Copy link</button>
-        <span class="hint">Airports: IATA / ICAO / FAA code, or coordinates "lat, lon". An on-block before the off-block is taken as the next day.</span>
+        <span class="hint">Airports: IATA / ICAO / FAA code, or coordinates "lat, lon". An on-block before the off-block is taken as the next day. Without take-off / landing: off-block + 10 min (taxi-out), on-block − 5 min (taxi-in).</span>
       </div>
       <div id="formMsg"></div>
     </form>
@@ -147,7 +157,7 @@
     const $ = (id) => document.getElementById(id);
     const escapeHtml = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     const pad = (n) => String(n).padStart(2, '0');
-    const { compute, hmm, RULES } = window.NightTime;
+    const { compute, airborne, hmm, RULES } = window.NightTime;
 
     // ---- times: datetime-local inputs hold UTC ----
     const toInput = (d) => `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
@@ -193,32 +203,50 @@
       if (off && on && on <= off && on > off - 86400000) { on = new Date(+on + 86400000); nextDay = true; }
       return { off, on, nextDay };
     }
-    function showBlock() {
-      const { off, on, nextDay } = blockTimes();
-      $('blockWho').textContent = off && on && on > off ? `UTC (Z) · block ${hmm(on - off)}${nextDay ? ` · ${__('next day')}` : ''}` : 'UTC (Z)';
+    // the night time is that of the flight: take-off -> landing; an empty one comes from the block time less the taxi (NightTime.airborne)
+    function flightTimes() {
+      const block = blockTimes();
+      const takeoff = fromInput($('takeoff').value);
+      let landing = fromInput($('landing').value);
+      if (takeoff && landing && landing <= takeoff && landing > takeoff - 86400000) landing = new Date(+landing + 86400000);
+      return { ...block, ...airborne({ off: block.off, on: block.on, takeoff, landing }) };
     }
-    for (const id of ['off', 'on']) $(id).addEventListener('input', showBlock);
+    function showBlock() {
+      const t = flightTimes();
+      const ok = t.off && t.on && t.on > t.off;
+      $('blockWho').textContent = ok ? `UTC (Z) · block ${hmm(t.on - t.off)}${t.nextDay ? ` · ${__('next day')}` : ''}` : 'UTC (Z)';
+      const auto = (d, how) => (ok && d ? `${__('Empty: {time}', { time: utcText(d) })} · ${how}` : how);
+      $('takeoffWho').textContent = t.estimated.takeoff ? auto(t.takeoff, __('off-block + 10 min taxi-out')) : 'UTC (Z)';
+      $('landingWho').textContent = t.estimated.landing ? auto(t.landing, __('on-block − 5 min taxi-in'))
+        : ok && t.takeoff && t.landing > t.takeoff ? `UTC (Z) · ${__('flight {time}', { time: hmm(t.landing - t.takeoff) })}` : 'UTC (Z)';
+    }
+    for (const id of ['off', 'on', 'takeoff', 'landing']) $(id).addEventListener('input', showBlock);
 
     // ---- run ----
     let map = null;
     async function run(pushUrl) {
       $('formMsg').innerHTML = '';
       const [from, to] = await Promise.all([showWho('dep'), showWho('arr')]);
-      const { off, on } = blockTimes();
-      const problem = !from ? __('Departure airport not found.') : !to ? __('Arrival airport not found.') : !off || !on ? __('Enter the off-block and on-block times.') : on <= off ? __('On-block must be after off-block.') : on - off > 24 * 3600000 ? __('Block time over 24 hours.') : '';
+      const t = flightTimes();
+      const { off, on } = t;
+      const problem = !from ? __('Departure airport not found.') : !to ? __('Arrival airport not found.') : !off || !on ? __('Enter the off-block and on-block times.') : on <= off ? __('On-block must be after off-block.') : on - off > 24 * 3600000 ? __('Block time over 24 hours.')
+        : t.takeoff < off || t.landing > on ? __('Take-off and landing must be within the block time.') : t.landing <= t.takeoff ? __('Landing must be after take-off.') : '';
       if (problem) { $('formMsg').innerHTML = `<div class="msg error">${problem}</div>`; return; }
       const rule = $('rule').value;
       const sunrise = $('sunrise').value || '06:00', sunset = $('sunset').value || '18:00';
-      const r = compute({ from, to, off, on, rule, sunrise, sunset });
-      const q = new URLSearchParams({ dep: $('dep').value.trim(), arr: $('arr').value.trim(), off: off.toISOString().slice(0, 16) + 'Z', on: on.toISOString().slice(0, 16) + 'Z' });
+      const r = compute({ from, to, off: t.takeoff, on: t.landing, rule, sunrise, sunset });
+      const iso = (d) => d.toISOString().slice(0, 16) + 'Z';
+      const q = new URLSearchParams({ dep: $('dep').value.trim(), arr: $('arr').value.trim(), off: iso(off), on: iso(on) });
+      if (!t.estimated.takeoff) q.set('takeoff', iso(t.takeoff));
+      if (!t.estimated.landing) q.set('landing', iso(t.landing));
       if (rule !== 'civil') q.set('rule', rule);
       if (rule === 'fixed') { q.set('sunrise', r.sunrise); q.set('sunset', r.sunset); }
       history[pushUrl ? 'pushState' : 'replaceState'](null, '', `/night-time?${q}`);
       document.title = `Night ${hmm(r.nightMs)} · ${from.code} → ${to.code}`;
-      render(r, from, to);
+      render(r, from, to, t);
     }
 
-    function render(r, from, to) {
+    function render(r, from, to, t) {
       const nightPct = Math.round((r.nightMs / r.totalMs) * 100);
       const rows = r.segments.map((s, i) => `<tr class="${s.night ? 'night' : ''}">
           <td><span class="tag ${s.night ? 'night' : 'day'}"><i class="fa-solid ${s.night ? 'fa-moon' : 'fa-sun'}" aria-hidden="true"></i> ${s.night ? 'Night' : 'Day'}</span></td>
@@ -227,11 +255,12 @@
           <td class="mono"><b>${hmm(s.to - s.from)}</b></td></tr>`).join('');
       $('result').innerHTML = `
         <div class="card">
-          <h2 style="margin-top:0;font-size:17px;color:var(--nav-bg)">${escapeHtml(from.code)} → ${escapeHtml(to.code)} <span class="sub">· ${utcText(r.segments[0].from)} → ${utcText(r.segments.at(-1).to)} · ${escapeHtml(__(RULES[r.rule].label, { sunrise: r.sunrise, sunset: r.sunset }))}</span></h2>
+          <h2 style="margin-top:0;font-size:17px;color:var(--nav-bg)">${escapeHtml(from.code)} → ${escapeHtml(to.code)} <span class="sub">· ${utcText(t.off)} → ${utcText(t.on)} · ${escapeHtml(__(RULES[r.rule].label, { sunrise: r.sunrise, sunset: r.sunset }))}</span></h2>
           <div class="stats">
-            <div class="stat night"><div class="k">Night time</div><div class="v">${hmm(r.nightMs)}</div><div class="s">${nightPct}% block time</div></div>
+            <div class="stat night"><div class="k">Night time</div><div class="v">${hmm(r.nightMs)}</div><div class="s">${nightPct}% flight time</div></div>
             <div class="stat"><div class="k">Day time</div><div class="v">${hmm(r.dayMs)}</div><div class="s">${100 - nightPct}%</div></div>
-            <div class="stat"><div class="k">Block time</div><div class="v">${hmm(r.totalMs)}</div><div class="s">off → on block</div></div>
+            <div class="stat"><div class="k">Flight time</div><div class="v">${hmm(r.totalMs)}</div><div class="s">${t.estimated.takeoff || t.estimated.landing ? __('take-off → landing, taxi left out') : __('take-off → landing')}</div></div>
+            <div class="stat"><div class="k">Block time</div><div class="v">${hmm(t.on - t.off)}</div><div class="s">off → on block</div></div>
             <div class="stat"><div class="k">${__('Distance')}</div><div class="v">${Math.round(r.distanceKm).toLocaleString('en')}</div><div class="s">km · ${Math.round(r.distanceKm / 1.852).toLocaleString('en')} NM great circle</div></div>
             <div class="stat"><div class="k">${__('Take-off')}</div><div class="v" style="font-size:18px;padding:4px 0"><span class="tag ${r.takeoffNight ? 'night' : 'day'}"><i class="fa-solid ${r.takeoffNight ? 'fa-moon' : 'fa-sun'}" aria-hidden="true"></i> ${r.takeoffNight ? 'Night' : 'Day'}</span></div><div class="s">${__('at {code}, sun {deg}°', { code: escapeHtml(from.code), deg: r.segments[0].fromAlt.toFixed(1) })}</div></div>
             <div class="stat"><div class="k">${__('Landing')}</div><div class="v" style="font-size:18px;padding:4px 0"><span class="tag ${r.landingNight ? 'night' : 'day'}"><i class="fa-solid ${r.landingNight ? 'fa-moon' : 'fa-sun'}" aria-hidden="true"></i> ${r.landingNight ? 'Night' : 'Day'}</span></div><div class="s">${__('at {code}, sun {deg}°', { code: escapeHtml(to.code), deg: r.segments.at(-1).toAlt.toFixed(1) })}</div></div>
@@ -265,7 +294,7 @@
               <div id="chart" style="margin-top:14px"></div>
             </div>
           </div>
-          <div class="note"><i class="fa-solid fa-circle-info" aria-hidden="true"></i> ${__('Assumes the great circle at a constant speed for the whole block time (no taxi, actual route or wind). The sun\'s altitude is taken at the ground right below the aircraft; at cruise altitude the sun "sets" a little later. Day/night edges are exact to the second; totals are rounded to the minute. For reference: the official logbook follows the operator\'s rules.')}</div>
+          <div class="note"><i class="fa-solid fa-circle-info" aria-hidden="true"></i> ${__('Assumes the great circle at a constant speed from take-off to landing (no actual route or wind). Without take-off / landing times the taxi is left out: off-block + 10 min, on-block − 5 min. The sun\'s altitude is taken at the ground right below the aircraft; at cruise altitude the sun "sets" a little later. Day/night edges are exact to the second; totals are rounded to the minute. For reference: the official logbook follows the operator\'s rules.')}</div>
         </div>`;
       drawMap(r, from, to);
       drawChart(r);
@@ -291,12 +320,12 @@
       const first = r.samples[0], last = r.samples.at(-1);
       const end = (p, color, ap, html) => L.circleMarker([p.lat, p.lon], { pane: 'flownPane', radius: 6, color: '#fff', weight: 2, fillColor: color, fillOpacity: 1 })
         .bindTooltip(ap.code, { permanent: true, direction: 'right', offset: [6, 0], className: 'map-code' }).bindPopup(html).addTo(map);
-      end(first, '#2e7d32', from, `<b>${escapeHtml(from.code)}</b> ${escapeHtml(from.name)}<br>Off-block ${utcText(r.segments[0].from)}<br>${__('Sun {deg}°', { deg: r.segments[0].fromAlt.toFixed(1) })} · ${r.takeoffNight ? 'night' : 'day'}`);
-      end(last, '#c62828', to, `<b>${escapeHtml(to.code)}</b> ${escapeHtml(to.name)}<br>On-block ${utcText(r.segments.at(-1).to)}<br>${__('Sun {deg}°', { deg: r.segments.at(-1).toAlt.toFixed(1) })} · ${r.landingNight ? 'night' : 'day'}`);
+      end(first, '#2e7d32', from, `<b>${escapeHtml(from.code)}</b> ${escapeHtml(from.name)}<br>${__('Take-off')} ${utcText(r.segments[0].from)}<br>${__('Sun {deg}°', { deg: r.segments[0].fromAlt.toFixed(1) })} · ${r.takeoffNight ? 'night' : 'day'}`);
+      end(last, '#c62828', to, `<b>${escapeHtml(to.code)}</b> ${escapeHtml(to.name)}<br>${__('Landing')} ${utcText(r.segments.at(-1).to)}<br>${__('Sun {deg}°', { deg: r.segments.at(-1).toAlt.toFixed(1) })} · ${r.landingNight ? 'night' : 'day'}`);
       // where night starts / ends: a small dot in that colour
       r.segments.slice(1).forEach((s) => {
         L.circleMarker([s.fromPos.lat, s.fromPos.lon], { pane: 'flownPane', radius: 5, color: '#fff', weight: 2, fillColor: s.night ? NIGHT_COLOR : DAY_COLOR, fillOpacity: 1 }).addTo(map)
-          .bindPopup(`<b>${s.night ? __('Night starts') : __('Night ends')}</b><br>${utcText(s.from)}<br>${latLonText(s.fromPos)}<br>${__('Sun {deg}°', { deg: s.fromAlt.toFixed(2) })}<br>${__('{time} after off-block', { time: hmm(s.from - r.segments[0].from) })}`);
+          .bindPopup(`<b>${s.night ? __('Night starts') : __('Night ends')}</b><br>${utcText(s.from)}<br>${latLonText(s.fromPos)}<br>${__('Sun {deg}°', { deg: s.fromAlt.toFixed(2) })}<br>${__('{time} after take-off', { time: hmm(s.from - r.segments[0].from) })}`);
       });
       map.fitBounds(L.latLngBounds(r.samples.map(p => [p.lat, p.lon])), { padding: [30, 30] });
       map.on('focus', () => map.scrollWheelZoom.enable());
@@ -315,7 +344,7 @@
       mapLayers = null; // drawMap made a new Leaflet map
       current = { r, from, to };
       tStart = +r.segments[0].from; tEnd = +r.segments.at(-1).to;
-      // start at the first night edge if there is one, else at off-block
+      // start at the first night edge if there is one, else at take-off
       tNow = r.segments.length > 1 ? +r.segments[1].from : tStart;
       $('viewSeg').addEventListener('click', (e) => {
         const b = e.target.closest('[data-view]');
@@ -357,7 +386,8 @@
           style: {
             version: 8,
             projection: { type: 'globe' },
-            sky: { 'atmosphere-blend': ['interpolate', ['linear'], ['zoom'], 0, 1, 5, 1, 7, 0] },
+            // no atmosphere: MapLibre lights its glow from a fixed light (a white wash at the top left), not the real sun
+            sky: { 'atmosphere-blend': 0 },
             sources: {
               osm: {
                 type: 'raster', tileSize: 256, maxzoom: 12,
@@ -486,7 +516,7 @@
       const shown = new Date(Math.floor(tNow / 60000) * 60000); // hh:mm, no seconds
       $('nowClock').textContent = `${pad(shown.getUTCDate())}/${pad(shown.getUTCMonth() + 1)} ${pad(shown.getUTCHours())}:${pad(shown.getUTCMinutes())}Z`;
       $('nowTag').innerHTML = `<span class="tag ${night ? 'night' : 'day'}"><i class="fa-solid ${night ? 'fa-moon' : 'fa-sun'}" aria-hidden="true"></i> ${night ? __('Night') : __('Day')}</span>`;
-      $('nowInfo').textContent = `${__('sun {deg}°', { deg: alt.toFixed(1) })} · ${latLonText(p)} · ${__('{time} after off-block', { time: hmm(Math.floor((tNow - tStart) / 60000) * 60000) })}`;
+      $('nowInfo').textContent = `${__('sun {deg}°', { deg: alt.toFixed(1) })} · ${latLonText(p)} · ${__('{time} after take-off', { time: hmm(Math.floor((tNow - tStart) / 60000) * 60000) })}`;
     }
     function frame(ts) {
       if (!playing) return;
@@ -548,7 +578,7 @@
       setTimeout(() => { $('copyLinkBtn').innerHTML = '<i class="fa-solid fa-link" aria-hidden="true"></i> Copy link'; }, 1500);
     });
 
-    // /night-time?dep=VIE&arr=PRN&off=2025-03-11T21:45Z&on=2025-03-11T23:20Z[&rule=sunset|nautical|fixed[&sunrise=06:00&sunset=18:00]]  (links from /calendar)
+    // /night-time?dep=VIE&arr=PRN&off=2025-03-11T21:45Z&on=2025-03-11T23:20Z[&takeoff=..Z&landing=..Z][&rule=sunset|nautical|fixed[&sunrise=06:00&sunset=18:00]]  (links from /calendar)
     const showFixed = () => document.querySelectorAll('.fixed-field').forEach(f => { f.hidden = $('rule').value !== 'fixed'; });
     $('rule').addEventListener('change', showFixed);
     function fromUrl() {
@@ -558,6 +588,8 @@
       const iso = (v) => { const d = v ? new Date(v) : null; return d && !isNaN(d) ? toInput(d) : ''; };
       $('off').value = iso(q.get('off'));
       $('on').value = iso(q.get('on'));
+      $('takeoff').value = iso(q.get('takeoff'));
+      $('landing').value = iso(q.get('landing'));
       $('rule').value = RULES[q.get('rule')] ? q.get('rule') : 'civil';
       const clock = (v, d) => (/^\d{1,2}:\d{2}$/.test(v || '') ? v.padStart(5, '0') : d);
       $('sunrise').value = clock(q.get('sunrise'), '06:00');

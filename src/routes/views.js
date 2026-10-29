@@ -81,11 +81,13 @@ router.get('/models', (req, res) => {
 	res.sendFile(path.join(viewsDir, 'models.html'));
 });
 
-// Admin: the roster files and labels of MinIO (media/, services/media-client.js)
-router.get('/media', (req, res) => {
-	res.sendFile(path.join(viewsDir, 'media.html'));
+// Admin: health of the servers, counts of labels / tickets / users, the active models, links to the admin pages
+router.get('/dashboard', (req, res) => {
+	res.sendFile(path.join(viewsDir, 'dashboard.html'));
 });
-router.get('/storage', (req, res) => res.redirect(301, '/media'));
+
+// The old Media page is part of /label now (files, upload, delete all unlabeled)
+router.get(['/media', '/storage'], (req, res) => res.redirect(301, '/label'));
 
 // Admin: the correction suggestions sent from /roster, their state and the reply by email (routes/suggestions-api.js)
 router.get('/helpdesk', (req, res) => {

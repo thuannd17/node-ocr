@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dashboard</title>
+  <script src="/assets/i18n/vi.js"></script>
+  <script src="/assets/i18n.js"></script>
+  <link rel="stylesheet" href="/assets/app.css">
+  <link rel="stylesheet" href="/assets/fontawesome/css/all.min.css">
+  <style>
+    .btn { background: #fff; color: var(--primary); border: 1px solid var(--primary); padding: 7px 12px; border-radius: 6px; cursor: pointer; font-size: 13px; display: inline-flex; gap: 6px; align-items: center; }
+    .btn:hover:not(:disabled) { background: #eef4ff; }
+    .btn:disabled { color: #bbb; border-color: #ddd; cursor: default; }
+    .updated { font-size: 12px; color: var(--muted); }
+    .section-title { font-size: 16px; color: var(--nav-bg); margin: 26px 0 10px; display: flex; gap: 8px; align-items: center; }
+    .section-title .more { margin-left: auto; font-size: 13px; font-weight: normal; }
+    .section-title .more a, .stat a { color: var(--primary); text-decoration: none; }
+    .more a::after { content: ' →'; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+    .grid > .card { margin-bottom: 0; }
+    .grid.health-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    @media (max-width: 1100px) { .grid.health-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    @media (max-width: 600px) { .grid.health-grid { grid-template-columns: 1fr; } }
+
+    /* Health: one tile per server */
+    .health { padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; border-left: 4px solid #bbb; }
+    .health.ok { border-left-color: #2e7d32; }
+    .health.bad { border-left-color: #c62828; background: #fff8f8; }
+    .health .top { display: flex; gap: 8px; align-items: center; font-weight: 600; color: var(--nav-bg); }
+    .health .state { margin-left: auto; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 10px; }
+    .health.ok .state { background: #e3f4e4; color: #2e7d32; }
+    .health.bad .state { background: #fdecea; color: #c62828; }
+    .health .detail { font-family: Consolas, Menlo, monospace; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+    .health .err { font-size: 12px; color: #c62828; overflow-wrap: anywhere; }
+    .health .info { font-size: 12px; color: var(--muted); }
+
+    /* Reports: a card per subject, big numbers */
+    .stat { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+    .stat h3 { margin: 0; font-size: 15px; color: var(--nav-bg); display: flex; gap: 8px; align-items: center; }
+    .stat h3 .more { margin-left: auto; font-size: 12px; font-weight: normal; }
+    .nums { display: flex; gap: 10px; flex-wrap: wrap; }
+    .num { flex: 1 1 80px; background: #f7f9fc; border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; }
+    .num b { display: block; font-size: 22px; color: var(--nav-bg); font-variant-numeric: tabular-nums; }
+    .num span { font-size: 12px; color: var(--muted); }
+    .num.warn b { color: #b26a00; }
+    .num.good b { color: #2e7d32; }
+    .stat table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .stat th, .stat td { padding: 6px 4px; border-top: 1px solid #eef0f3; text-align: right; font-variant-numeric: tabular-nums; }
+    .stat th { font-weight: 600; color: var(--muted); font-size: 12px; border-top: 0; }
+    .stat th:first-child, .stat td:first-child { text-align: left; }
+    .stat tfoot td { font-weight: 600; }
+    .bar { height: 6px; border-radius: 3px; background: #eceff3; overflow: hidden; display: flex; }
+    .bar span { height: 100%; }
+    .bar .l { background: #2e7d32; } .bar .r { background: #e08a00; }
+    .legend { font-size: 11px; color: var(--muted); display: flex; gap: 12px; flex-wrap: wrap; }
+    .legend i { font-size: 9px; }
+    .unavailable { font-size: 13px; color: var(--muted); }
+    .unavailable .err { color: #c62828; overflow-wrap: anywhere; }
+
+    /* Active model versions */
+    .models td, .models th { padding: 10px 12px; border-top: 1px solid #eee; text-align: left; vertical-align: top; font-size: 13px; }
+    .models th { background: #f5f5f5; font-weight: 600; font-size: 12px; color: #444; border-top: 0; }
+    .models table { width: 100%; border-collapse: collapse; }
+    .models .ver { font-family: Consolas, Menlo, monospace; font-weight: 600; }
+    .models .score { color: var(--muted); font-size: 12px; }
+    .badge { display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 10px; background: #e3eefc; color: #2a5ea8; }
+
+    /* Admin pages (moved from the home page) */
+    a.tool { padding: 18px; margin-bottom: 0; text-decoration: none; color: inherit; display: flex; gap: 14px; align-items: flex-start; transition: transform 0.15s, box-shadow 0.15s; }
+    a.tool:hover { transform: translateY(-2px); box-shadow: 0 4px 16px rgba(0,0,0,0.12); }
+    a.tool .icon { font-size: 26px; color: #8a6d3b; width: 32px; text-align: center; flex: none; }
+    a.tool h4 { margin: 0 0 4px; font-size: 15px; color: var(--nav-bg); }
+    a.tool p { margin: 0; font-size: 13px; color: var(--muted); line-height: 1.45; }
+    .grid.tools { grid-template-columns: repeat(3, 1fr); }
+    @media (max-width: 1100px) { .grid.tools { grid-template-columns: repeat(2, 1fr); } }
+    @media (max-width: 700px) { .grid.tools { grid-template-columns: 1fr; } }
+    .skeleton { height: 90px; border-radius: 6px; background: linear-gradient(90deg, #eceff3 25%, #f6f7f9 50%, #eceff3 75%); background-size: 200% 100%; animation: shimmer 1.2s infinite; }
+    @keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+    @media (max-width: 600px) { .page-header .header-extra { margin-left: 0; } }
+  </style>
+</head>
+<body>
+  <script src="/assets/nav.js"></script>
+  <main class="page">
+    <div class="page-header">
+      <h1><i class="fa-solid fa-gauge-high" aria-hidden="true"></i> Dashboard</h1>
+      <div class="header-extra">
+        <span class="updated" id="updated"></span>
+        <button class="btn" id="refresh" title="Refresh"><i class="fa-solid fa-rotate" aria-hidden="true"></i> <span>Refresh</span></button>
+      </div>
+      <p class="subtitle">The state of the servers, the data and the models at a glance, and the administration pages.</p>
+    </div>
+
+    <h2 class="section-title"><i class="fa-solid fa-heart-pulse" aria-hidden="true"></i> <span>Health check</span></h2>
+    <div class="grid health-grid" id="health"><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div></div>
+
+    <h2 class="section-title"><i class="fa-solid fa-chart-pie" aria-hidden="true"></i> <span>Reports</span></h2>
+    <div class="grid" id="reports"><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div></div>
+
+    <h2 class="section-title"><i class="fa-solid fa-brain" aria-hidden="true"></i> <span>Active model versions</span> <span class="more"><a href="/models">AI Models</a></span></h2>
+    <div class="card models" id="models" style="padding:0;overflow:hidden"><div class="skeleton" style="margin:12px"></div></div>
+
+    <h2 class="section-title"><i class="fa-solid fa-user-gear" aria-hidden="true"></i> <span>Administration</span></h2>
+    <div class="grid tools">
+      <a class="card tool" href="/label"><div class="icon"><i class="fa-solid fa-tags" aria-hidden="true"></i></div><div><h4>Label Tool</h4><p>Label (ground truth) every roster file and ACARS picture, with Auto-fill from OCR to fix by hand. Upload files, delete the unlabeled ones.</p></div></a>
+      <a class="card tool" href="/benchmark"><div class="icon"><i class="fa-solid fa-chart-column" aria-hidden="true"></i></div><div><h4>Benchmark</h4><p>Accuracy of every cell (date, duty, dep, begin, end, arr…) against the labels.</p></div></a>
+      <a class="card tool" href="/models"><div class="icon"><i class="fa-solid fa-brain" aria-hidden="true"></i></div><div><h4>AI Models</h4><p>The model versions that read rosters: train new ones, compare their scores, activate or delete them.</p></div></a>
+      <a class="card tool" href="/helpdesk"><div class="icon"><i class="fa-solid fa-headset" aria-hidden="true"></i></div><div><h4>Helpdesk</h4><p>The correction suggestions sent from /roster: who sent them, their state, and a reply by email.</p></div></a>
+      <a class="card tool" href="/users"><div class="icon"><i class="fa-solid fa-users" aria-hidden="true"></i></div><div><h4>Users</h4><p>Every account: role, plan and limits of the API, today's calls and API keys.</p></div></a>
+      <a class="card tool" href="/billing"><div class="icon"><i class="fa-solid fa-file-invoice-dollar" aria-hidden="true"></i></div><div><h4>Billing</h4><p>The paid plans: PayPal subscriptions, invoices, refunds and the revenue of each month.</p></div></a>
+    </div>
+  </main>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[c]));
+    const fmt = (n) => Number(n || 0).toLocaleString();
+    // again every minute while the page is shown; the server keeps the answer a minute too (Redis), so opening the
+    // page reads it from there; Refresh asks for a new one (?fresh=1)
+    const REFRESH_MS = 60000;
+    const ICONS = { minio: 'fa-database', acars: 'fa-satellite-dish', ocr: 'fa-eye', mongo: 'fa-leaf', redis: 'fa-bolt' };
+
+    const unavailable = (e) => `<div class="unavailable">${__('Not available')}: <span class="err">${esc(__(e.error))}</span></div>`;
+    const num = (n, label, cls = '') => `<div class="num ${cls}"><b>${fmt(n)}</b><span>${label}</span></div>`;
+
+    function renderHealth(list) {
+      if (!Array.isArray(list)) { $('health').innerHTML = `<div class="card health bad">${unavailable(list)}</div>`; return; }
+      $('health').innerHTML = list.map(h => {
+        const i = h.info;
+        return `<div class="card health ${h.ok ? 'ok' : 'bad'}">
+          <div class="top"><i class="fa-solid ${ICONS[h.id] || 'fa-server'}" aria-hidden="true"></i> ${esc(__(h.name))}
+            <span class="state">${h.ok ? `<i class="fa-solid fa-circle-check" aria-hidden="true"></i> ${__('Up')}` : `<i class="fa-solid fa-circle-xmark" aria-hidden="true"></i> ${__('Down')}`}</span></div>
+          ${h.detail ? `<div class="detail">${esc(h.detail)}</div>` : ''}
+          ${h.error ? `<div class="err">${esc(__(h.error))}</div>` : ''}
+          ${h.id === 'ocr' && i ? `<div class="info">${i.engineReady ? __('Engine ready') : __('Engine starts on the first read')} · ${__('{n} reading, {w} waiting', { n: i.inflight, w: i.waiting })}</div>` : ''}
+          ${h.id === 'redis' && i ? `<div class="info">Redis ${esc(i.version || '')} · ${__('{m} used', { m: esc(i.memory || '?') })} · ${__('{n} keys of this app', { n: fmt(i.keys) })}</div>` : ''}
+          <div class="info">${__('Answered in {ms} ms', { ms: h.ms })}</div>
+        </div>`;
+      }).join('');
+    }
+
+    function labelsCard(l) {
+      const head = `<h3><i class="fa-solid fa-tags" aria-hidden="true"></i> ${__('Labels')} <span class="more"><a href="/label">${__('Label Tool')}</a></span></h3>`;
+      if (l.error) return `<div class="card stat">${head}${unavailable(l)}</div>`;
+      const rows = [[__('Roster images'), l.roster.image], [__('Roster text'), l.roster.text], [__('ACARS pictures'), l.acars]];
+      const sum = rows.reduce((a, [, r]) => ({ files: a.files + r.files, labeled: a.labeled + r.labeled, unlabeled: a.unlabeled + r.unlabeled, toReview: a.toReview + r.toReview }), { files: 0, labeled: 0, unlabeled: 0, toReview: 0 });
+      const pct = (n) => (sum.files ? (100 * n) / sum.files : 0);
+      return `<div class="card stat">${head}
+        <div class="nums">${num(sum.labeled, __('Labeled'), 'good')}${num(sum.unlabeled, __('Not labeled'), sum.unlabeled ? 'warn' : '')}${num(sum.toReview, __('To review'), sum.toReview ? 'warn' : '')}</div>
+        <div class="bar" title="${__('{p}% labeled', { p: Math.round(pct(sum.labeled)) })}"><span class="l" style="width:${pct(sum.labeled - sum.toReview)}%"></span><span class="r" style="width:${pct(sum.toReview)}%"></span></div>
+        <div class="legend"><span><i class="fa-solid fa-circle" style="color:#2e7d32"></i> ${__('Labeled')}</span><span><i class="fa-solid fa-circle" style="color:#e08a00"></i> ${__('To review')}</span><span><i class="fa-solid fa-circle" style="color:#d5dae2"></i> ${__('Not labeled')}</span></div>
+        <table><thead><tr><th></th><th>${__('Files')}</th><th>${__('Labeled')}</th><th>${__('Not labeled')}</th><th>${__('To review')}</th></tr></thead>
+          <tbody>${rows.map(([name, r]) => `<tr><td>${name}</td><td>${fmt(r.files)}</td><td>${fmt(r.labeled)}</td><td>${fmt(r.unlabeled)}</td><td>${fmt(r.toReview)}</td></tr>`).join('')}</tbody>
+          <tfoot><tr><td>${__('Total')}</td><td>${fmt(sum.files)}</td><td>${fmt(sum.labeled)}</td><td>${fmt(sum.unlabeled)}</td><td>${fmt(sum.toReview)}</td></tr></tfoot></table>
+      </div>`;
+    }
+
+    function helpdeskCard(d) {
+      const head = `<h3><i class="fa-solid fa-headset" aria-hidden="true"></i> ${__('Helpdesk tickets')} <span class="more"><a href="/helpdesk">${__('Helpdesk')}</a></span></h3>`;
+      if (d.error) return `<div class="card stat">${head}${unavailable(d)}</div>`;
+      return `<div class="card stat">${head}
+        <div class="nums">${num(d.open, __('Open (not handled)'), d.open ? 'warn' : '')}${num(d.in_progress, __('In progress'), d.in_progress ? 'warn' : '')}</div>
+        <div class="nums">${num(d.resolved, __('Resolved'), 'good')}${num(d.closed, __('Closed'))}${num(d.total, __('Total'))}</div>
+      </div>`;
+    }
+
+    function usersCard(u) {
+      const head = `<h3><i class="fa-solid fa-users" aria-hidden="true"></i> ${__('Users')} <span class="more"><a href="/users">${__('Users')}</a></span></h3>`;
+      if (u.error) return `<div class="card stat">${head}${unavailable(u)}</div>`;
+      return `<div class="card stat">${head}
+        <div class="nums">${num(u.total, __('Accounts'))}${u.byPlan.map(p => num(p.n, __(p.label), p.id === 'free' ? '' : 'good')).join('')}</div>
+        <div class="legend"><span>${__('{n} admins', { n: u.admins })}</span>${u.disabled ? `<span>${__('{n} disabled', { n: u.disabled })}</span>` : ''}</div>
+      </div>`;
+    }
+
+    function renderModels(m) {
+      if (m.error) { $('models').innerHTML = `<div style="padding:12px 16px">${unavailable(m)}</div>`; return; }
+      $('models').innerHTML = `<table><thead><tr><th>${__('Model')}</th><th>${__('Active version')}</th><th>${__('Accuracy')}</th></tr></thead><tbody>
+        ${m.map(f => `<tr>
+          <td><i class="fa-solid ${esc(f.icon)}" aria-hidden="true"></i> <b>${esc(f.name)}</b>${f.training ? ` <span class="badge">${__('Training…')}</span>` : ''}</td>
+          <td>${f.active ? `<span class="ver">${esc(f.active.title)}</span>${f.active.createdAt ? `<div class="score">${esc(new Date(f.active.createdAt).toLocaleString())}</div>` : ''}` : `<span class="score">${__('None active')}</span>`}</td>
+          <td class="score">${(f.active?.score || []).map(esc).join('<br>')}</td>
+        </tr>`).join('')}</tbody></table>`;
+    }
+
+    let timer = null;
+    async function load(fresh = false) {
+      $('refresh').disabled = true;
+      try {
+        const res = await fetch(`/api/dashboard${fresh === true ? '?fresh=1' : ''}`);
+        const d = await res.json();
+        if (!res.ok) throw new Error(d.error || `HTTP ${res.status}`);
+        renderHealth(d.health);
+        $('reports').innerHTML = labelsCard(d.labels) + helpdeskCard(d.helpdesk) + usersCard(d.users);
+        renderModels(d.models);
+        $('updated').textContent = __('Updated {time}', { time: new Date(d.at).toLocaleTimeString() }) + (d.cached ? ` · ${__('from the cache')}` : '');
+        $('updated').title = d.cached ? __('Kept for a minute: Refresh checks everything again now') : '';
+      } catch (e) {
+        $('updated').textContent = `${__('Could not load')}: ${e.message}`;
+      } finally {
+        $('refresh').disabled = false;
+        clearTimeout(timer);
+        timer = setTimeout(() => { if (!document.hidden) load(); }, REFRESH_MS);
+      }
+    }
+    $('refresh').addEventListener('click', () => load(true));
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) load(); });
+    load();
+  </script>
+</body>
+</html>

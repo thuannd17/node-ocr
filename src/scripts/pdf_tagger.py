@@ -29,6 +29,13 @@ def use_learned_header_words(conventions_file):
     except (OSError, ValueError):
         pass
 
+
+def tagger_words_file(model_dir):
+    """The file with the header words a version's tagger was trained with: tagger-words.json when its conventions were
+    learned again after the tagger (scripts/model-train.mjs --conventions-only), else its conventions.json."""
+    own = os.path.join(model_dir, 'tagger-words.json')
+    return own if os.path.exists(own) else os.path.join(model_dir, 'conventions.json')
+
 TIME = re.compile(r'^!?\d{4}([+-]\d)?$')
 HHMM = re.compile(r'^\d{1,3}:\d{2}\]?$')
 AIRPORT = re.compile(r'^[A-Z]{3}$')
@@ -525,8 +532,15 @@ def rows_of(docs, ncols, keep, mats=None):
 class Tagger:
     """Two stages: word features -> field; then again with the stage-1 fields of the context."""
 
-    def fit(self, docs):
-        """docs from train_pdf_tagger.load: features as matrices (compact_doc, with docs[0]['vocab'])."""
+    def fit(self, docs, prior=None):
+        """
+        docs from train_pdf_tagger.load: features as matrices (compact_doc, with docs[0]['vocab']).
+        prior (an incremental run, train_pdf_tagger.incremental_base): {'oof': {doc key: stage-1 fields}, 'seen': the
+        keys the last version was trained on, 's1': its stage 1}. The stage-1 fields of a file the last version saw
+        unchanged are its saved ones; of a file it never saw, its stage 1's (it did not see that file); only files it saw
+        whose words changed need a stage 1 trained without them. Saves the 3 stage-1 fits by parts of a full run.
+        self.oof_: the stage-1 fields used, by doc key (train_pdf_tagger.py saves them for the next run and drops them).
+        """
         vocab = docs[0]['vocab']
         n1 = len(vocab)
         # Words marked "?" (the label could not be matched there) are context only, never a training target.
@@ -535,23 +549,50 @@ class Tagger:
         w = weights(docs, keep)
         # which kept words are an ACARS picture's (OvRLinear: the ACARS fields learn from those alone)
         acars = lambda ds: np.concatenate([np.full(len(keep(d)), d.get('kind') == 'acars') for d in ds]) if ds else None
-        k = 3 if len(docs) >= 3 else 1
+        oof = {}  # by the document's place: a name can be a PDF's words and its picture's too
+        if prior is None:
+            k = 3 if len(docs) >= 3 else 1
+            fits = k + 2
+        else:
+            for d in docs:
+                if doc_key(d) in prior['oof']:
+                    oof[id(d)] = prior['oof'][doc_key(d)]
+            new = [d for d in docs if id(d) not in oof and doc_key(d) not in prior['seen']]
+            changed = [d for d in docs if id(d) not in oof and doc_key(d) in prior['seen']]
+            fits = 2 + bool(new) + bool(changed)
         # (progress for the /models page: "[fit 2/5] ...")
-        step = lambda n, what: print(f'  [fit {n}/{k + 2}] {what}: {len(y)} words', flush=True)
-        step(1, 'stage 1, every file')
+        n = iter(range(1, fits + 1))
+        step = lambda what: print(f'  [fit {next(n)}/{fits}] {what}: {len(y)} words', flush=True)
+        step('stage 1, every file')
         self.s1 = (vocab.vectorizer(), fit1m(rows_of(docs, n1, keep), y, w, acars(docs)))
         # Stage-1 fields of the training files as they would be on new files: from models that did not see them.
         # (Columns of features a part's training files lack weigh 0 in its model: as if its own vectorizer left them out.)
-        oof = {}  # by the document's place: a name can be a PDF's words and its picture's too
-        for g in range(k):
-            test = [d for i, d in enumerate(docs) if i % k == g]
-            train = [d for i, d in enumerate(docs) if i % k != g] or docs
-            step(g + 2, f'stage 1 without part {g + 1} of {k} (what it says on the files it did not see)')
-            clf = fit1m(rows_of(train, n1, keep), [d['y'][i] for d in train for i in keep(d)], weights(train, keep), acars(train))
-            for d in test:
-                oof[id(d)] = predict_matrix(clf, widen(d['M'], n1), d.get('kind'))
-            del clf
-        step(k + 2, 'stage 2, every file')
+        if prior is None:
+            for g in range(k):
+                test = [d for i, d in enumerate(docs) if i % k == g]
+                train = [d for i, d in enumerate(docs) if i % k != g] or docs
+                step(f'stage 1 without part {g + 1} of {k} (what it says on the files it did not see)')
+                clf = fit1m(rows_of(train, n1, keep), [d['y'][i] for d in train for i in keep(d)], weights(train, keep), acars(train))
+                for d in test:
+                    oof[id(d)] = predict_matrix(clf, widen(d['M'], n1), d.get('kind'))
+                del clf
+        else:
+            print(f'  stage 1 of the last version: {len(oof)} files saved, {len(new)} new, {len(changed)} with changed words', flush=True)
+            if new:
+                step(f'stage 1 of the last version on the {len(new)} new files')
+                vec, clf = prior['s1']
+                for d in new:
+                    oof[id(d)] = predict_matrix(clf, vec_rows(vec, d['M'], d['vocab']), d.get('kind'))
+            if changed:
+                redo = {id(d) for d in changed}
+                train = [d for d in docs if id(d) not in redo] or docs
+                step(f'stage 1 without the {len(changed)} files whose words changed')
+                clf = fit1m(rows_of(train, n1, keep), [d['y'][i] for d in train for i in keep(d)], weights(train, keep), acars(train))
+                for d in changed:
+                    oof[id(d)] = predict_matrix(clf, widen(d['M'], n1), d.get('kind'))
+                del clf
+        self.oof_ = {doc_key(d): oof[id(d)] for d in docs}
+        step('stage 2, every file')
         # stage 2's columns: stage 1's, then its own
         vocab2 = Vocab(vocab.index)
         extra = [vocab2.matrix(stage2_extras(oof[id(d)], d['near'], d['lines'])) for d in docs]
@@ -578,8 +619,13 @@ class Tagger:
         return predict_masked(vec, clf, stage2_feats(d, s1), d.get('kind'))
 
 
-def fit(docs):
-    return Tagger().fit(docs)
+def doc_key(d):
+    """A training document's name across runs: its kind and file (a PDF's words and its picture's are two)."""
+    return f"{d.get('kind', 'pdf')}:{d['file']}"
+
+
+def fit(docs, prior=None):
+    return Tagger().fit(docs, prior)
 
 
 def fit1m(Xv, y, w=None, acars=None):

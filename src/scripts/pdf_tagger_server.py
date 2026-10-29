@@ -6,7 +6,7 @@ The learned extractor's tagger kept running for the app (services/pdf-ai-extract
   one JSON answer per line on stdout:   {"id": 1, "fields": [[...]]}  |  {"id": 1, "error": "..."}
 
 Models are kept per version folder and loaded again when tagger.joblib changes. The header words
-(pdf_tagger.HEADER_WORDS) are the built-in ones plus the version's own (conventions.json), as in
+(pdf_tagger.HEADER_WORDS) are the built-in ones plus the version's tagger's own (tagger-words.json or conventions.json), as in
 pdf_tagger_predict.py, set again whenever a request is for another version.
 """
 import json
@@ -35,7 +35,7 @@ def model_for(model_dir):
     if words_of != model_dir:
         pdf_tagger.HEADER_WORDS.clear()
         pdf_tagger.HEADER_WORDS.update(BASE_HEADER_WORDS)
-        pdf_tagger.use_learned_header_words(os.path.join(model_dir, 'conventions.json'))
+        pdf_tagger.use_learned_header_words(pdf_tagger.tagger_words_file(model_dir))
         words_of = model_dir
     return hit[1]
 

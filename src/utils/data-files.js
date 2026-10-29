@@ -88,13 +88,25 @@ export function listLabels(root, kind = 'all') {
  * submitted on /roster or /acars, a change made by a script). Saving it on /label writes it without `_review`.
  * Such labels are left out of training, benchmarks and checks until then (listReviewedLabels).
  */
-export function reviewOf(root, name) {
-	try { return JSON.parse(fs.readFileSync(labelFile(root, name), 'utf8'))._review || null; } catch { return null; }
+export function reviewOf(root, name, version) {
+	try {
+		// file lists ask this for every label: parse a label again only once it changed
+		// (version: its md5 from the media index, which saves a stat per label)
+		const file = labelFile(root, name);
+		let key = version;
+		if (!key) { const st = fs.statSync(file); key = `${st.mtimeMs}:${st.size}`; }
+		const c = reviewCache.get(file);
+		if (c && c.key === key) return c.review;
+		const review = JSON.parse(fs.readFileSync(file, 'utf8'))._review || null;
+		reviewCache.set(file, { key, review });
+		return review;
+	} catch { return null; }
 }
+const reviewCache = new Map(); // label path -> { key: md5 or mtime:size, review }
 
 /** What a file list shows of a label waiting for review: { by, at, suggestion?, note? } (not the proposed rows), or null. */
-export function reviewState(root, name) {
-	const r = reviewOf(root, name);
+export function reviewState(root, name, version) {
+	const r = reviewOf(root, name, version);
 	return r ? { by: r.by || 'user', at: r.at || null, ...(r.suggestion ? { suggestion: r.suggestion } : {}), ...(r.note ? { note: r.note } : {}), proposed: !!r.proposed } : null;
 }
 

@@ -29,7 +29,7 @@
     .cta { display: flex; justify-content: center; align-items: center; gap: 8px; width: 100%; padding: 11px 14px; border-radius: 8px; font: inherit; font-size: 15px; font-weight: 600; text-decoration: none; border: 1px solid var(--primary); color: var(--primary); background: #fff; cursor: pointer; }
     .cta.primary { background: var(--primary); color: #fff; }
     .cta.current { border-color: #2e7d32; color: #2e7d32; cursor: default; }
-    #paypal { min-height: 46px; }
+    #paypalButtons { min-height: 46px; }
     .secure { font-size: 12px; color: var(--muted); text-align: center; margin-top: 8px; display: flex; gap: 6px; justify-content: center; align-items: center; flex-wrap: wrap; }
     .secure i { font-size: 20px; color: #555; }
     .faq { max-width: 760px; margin: 0 auto; }
@@ -73,7 +73,7 @@
         <div id="proAction">
           <a class="cta primary" id="proSignin" href="/login?next=%2Fpricing" hidden>Sign in to subscribe</a>
           <a class="cta current" id="proCurrent" href="/account" hidden><i class="fa-solid fa-circle-check" aria-hidden="true"></i> <span>Your plan</span></a>
-          <div id="paypal" hidden></div>
+          <div id="paypalButtons" hidden></div>
           <div class="secure" id="secure" hidden><i class="fa-brands fa-cc-paypal" aria-hidden="true"></i><i class="fa-brands fa-cc-visa" aria-hidden="true"></i><i class="fa-brands fa-cc-mastercard" aria-hidden="true"></i>
             <span>Paid through PayPal, with a PayPal account or a card. Your card number never reaches this site.</span></div>
           <div class="auth-msg info block" id="closed" hidden>Payments are not open yet. Ask an admin for Pro.</div>
@@ -135,19 +135,21 @@
     // server (it knows the account), approved in PayPal's window, then checked by this server again
     let sdk = null;
     async function renderPaypal() {
-      $('paypal').hidden = false; $('secure').hidden = false;
+      $('paypalButtons').hidden = false; $('secure').hidden = false;
       sdk ||= new Promise((resolve, reject) => {
         const s = document.createElement('script');
         s.src = `https://www.paypal.com/sdk/js?client-id=${encodeURIComponent(cfg.clientId)}&vault=true&intent=subscription&components=buttons&currency=${encodeURIComponent(offer().currency)}`;
-        s.onload = resolve;
+        // the SDK under a name of its own: an element id="paypal" would be window.paypal and keep the SDK out
+        s.dataset.namespace = 'paypalSdk';
+        s.onload = () => (window.paypalSdk?.Buttons ? resolve() : reject(new Error(t('PayPal could not be loaded: check your connection or an ad blocker, then reload the page'))));
         s.onerror = () => reject(new Error(t('PayPal could not be loaded: check your connection or an ad blocker, then reload the page')));
         document.head.appendChild(s);
       });
       try { await sdk; } catch (e) { return show(e.message); }
       if (buttons) await buttons.close().catch(() => {});
-      $('paypal').innerHTML = '';
+      $('paypalButtons').innerHTML = '';
       const chosen = offer();
-      buttons = window.paypal.Buttons({
+      buttons = window.paypalSdk.Buttons({
         style: { layout: 'vertical', shape: 'rect', label: 'subscribe', height: 44 },
         createSubscription: async () => { show(''); return (await api('/api/billing/subscriptions', { plan: chosen.plan, interval: chosen.interval })).id; },
         onApprove: async (data) => {
@@ -160,7 +162,7 @@
         onCancel: () => show(t('Nothing was paid: you closed the PayPal window.'), 'info'),
         onError: (e) => show(e?.message || t('PayPal could not start the payment, please try again')),
       });
-      buttons.render('#paypal');
+      buttons.render('#paypalButtons');
     }
 
     document.querySelector('.switch').addEventListener('click', (e) => {

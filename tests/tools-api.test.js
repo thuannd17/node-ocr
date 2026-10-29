@@ -18,10 +18,17 @@ test('POST /api/night-time/calc: night, day and block minutes with the day / nig
   const r = await night({ dep: 'VIE', arr: 'HAN', off: '2025-03-11T13:00Z', on: '2025-03-11T23:50Z' });
   const b = await r.json();
   assert.equal(r.status, 200);
-  assert.equal(b.night, '7:27');
-  assert.equal(b.nightMinutes + b.dayMinutes, b.blockMinutes);
+  // no take-off / landing: off-block + 10 min taxi-out, on-block - 5 min taxi-in
+  assert.deepEqual([b.takeoff, b.landing, b.estimated], ['2025-03-11T13:10:00.000Z', '2025-03-11T23:45:00.000Z', { takeoff: true, landing: true }]);
+  assert.deepEqual([b.blockMinutes, b.flightMinutes, b.night], [650, 635, '7:23']);
+  assert.equal(b.nightMinutes + b.dayMinutes, b.flightMinutes);
   assert.deepEqual(b.segments.map(s => s.night), [false, true, false]);
   assert.equal(b.track, undefined);
+  // the roster's take-off / landing as they are
+  const air = await (await night({ dep: 'VIE', arr: 'HAN', off: '2025-03-11T13:00Z', on: '2025-03-11T23:50Z', takeoff: '2025-03-11T13:20Z', landing: '2025-03-11T23:30Z' })).json();
+  assert.deepEqual([air.estimated, air.flightMinutes, air.nightMinutes], [{ takeoff: false, landing: false }, 610, 438]);
+  assert.equal((await night({ dep: 'VIE', arr: 'HAN', off: '2025-03-11T13:00Z', on: '2025-03-11T23:50Z', takeoff: '2025-03-11T12:50Z' })).status, 400);
+  assert.equal((await night({ dep: 'VIE', arr: 'HAN', off: '2025-03-11T13:00Z', on: '2025-03-11T23:50Z', takeoff: '2025-03-11T20:00Z', landing: '2025-03-11T19:00Z' })).status, 400);
   const naut = await (await night({ dep: 'VIE', arr: 'HAN', off: '2025-03-11T13:00Z', on: '2025-03-11T23:50Z', rule: 'nautical' })).json();
   assert.deepEqual([naut.rule, naut.sunAltitudeLimit], ['nautical', -12]);
   assert.ok(naut.nightMinutes < b.nightMinutes);
@@ -31,7 +38,7 @@ test('POST /api/night-time/calc: night, day and block minutes with the day / nig
   assert.ok(fixed.nightMinutes > 0 && fixed.nightMinutes < fixed.blockMinutes);
   assert.equal((await night({ dep: 'VIE', arr: 'HAN', off: '2025-03-11T13:00Z', on: '2025-03-11T23:50Z', rule: 'fixed', sunset: '6pm' })).status, 400);
   const track = await (await night({ dep: '48.11,16.57', arr: 'PRN', off: '2025-03-11T21:45Z', on: '2025-03-11T23:20Z', track: true })).json();
-  assert.equal(track.nightMinutes, 95);
+  assert.equal(track.nightMinutes, 80); // 95 min block less 15 min taxi
   assert.ok(track.track.length > 50);
   const bad = await night({ dep: 'VIE', arr: 'ZZZZ9', off: '2025-03-11T21:45Z', on: '2025-03-11T23:20Z' }, { cookie: 'lang=vi' });
   assert.equal(bad.status, 404);

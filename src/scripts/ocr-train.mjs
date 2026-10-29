@@ -524,6 +524,7 @@ This exact run was already done as ${repeatOf.v} (${repeatOf.m.createdAt}): ${c.
 	const losses = testNames.filter(n => b.perImage[n].ok < a.perImage[n].ok).length;
 	const meta = {
 		version: next, createdAt: new Date().toISOString().slice(0, 10), status: verdict === 'better' ? 'candidate' : 'rejected',
+		seconds: Math.round((Date.now() - Date.parse(state.startedAt)) / 1000), // from the run's start (a resumed run counts the pause too)
 		recipe, dataset: rel(finalDataset), split: `models/rec/${next}/split.json`,
 		trainedOn: trainSet.sort((x, y) => x.name.localeCompare(y.name)),
 		testedOn: (rosterMode === 'unseen' ? fresh : []).sort((x, y) => x.name.localeCompare(y.name)),

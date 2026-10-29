@@ -107,17 +107,7 @@
     .compare { border-top: 1px solid #eee; margin-top: 12px; padding-top: 4px; }
     .compare h4 { color: #2b3a55; margin: 14px 0 8px; }
     .controls .run { margin-left: auto; } /* the Run button on the right edge */
-    /* Server status at the top: is the OCR server running, on the GPU or the CPU */
-    .server-status { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; background: white; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); padding: 14px 16px; margin-bottom: 24px; font-size: 14px; border-left: 4px solid #bbb; }
-    .server-status.gpu { border-left-color: #2e7d32; }
-    .server-status.cpu { border-left-color: #f9a825; }
-    .server-status.off { border-left-color: #c62828; }
-    .server-status .state { font-weight: 600; }
-    .server-status.gpu .state { color: #2e7d32; } .server-status.cpu .state { color: #8d6e00; } .server-status.off .state { color: #c62828; }
-    .server-status .chip { font-size: 12px; padding: 2px 8px; border-radius: 10px; background: #f0f2f5; color: #444; white-space: nowrap; }
-    .server-status .chip.gpu { background: #e8f5e9; color: #2e7d32; } .server-status .chip.cpu { background: #fff8e1; color: #8d6e00; }
-    .server-status .hint { font-size: 12px; color: #666; }
-    .server-status button { margin-left: auto; background: none; border: 1px solid #ddd; color: #4a90e2; padding: 5px 10px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+
     /* Info, warnings and the run's progress under a section's controls */
     .bench-info { background: white; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); padding: 10px 16px; margin: -12px 0 24px; font-size: 13px; color: #555; display: flex; flex-direction: column; gap: 6px; }
     .bench-info > div { display: flex; gap: 8px; align-items: baseline; }
@@ -138,14 +128,7 @@
     <p class="subtitle" data-i18n>Scores on the labeled files (<code>labels/&lt;ext&gt;/</code>): (1) OCR text recognition from images, (2) the AI model reading roster data, per file type, (3) the AI model reading ACARS pictures</p>
   </div>
 
-  <div class="server-status" id="serverStatus">
-    <b><i class="fa-solid fa-server" aria-hidden="true"></i> OCR server</b>
-    <span class="state" id="ocrState">checking…</span>
-    <span id="ocrDetails" style="display:contents"></span>
-    <button id="ocrRecheck" type="button"><i class="fa-solid fa-rotate" aria-hidden="true"></i> Check again</button>
-  </div>
-
-  <section class="ocr-section">
+  <section class="ocr-section" id="bench-ocr">
     <h2 class="bench-heading"><i class="fa-solid fa-font" aria-hidden="true"></i> <span data-i18n>1. Text recognition from images (OCR) <small>PaddleOCR only, before the parser / model: is every cell of an image label read out with the right text</small></span></h2>
     <div class="controls">
       <b>OCR</b>
@@ -153,7 +136,7 @@
     </div>
     <div class="bench-info">
       <div class="info"><i class="fa-solid fa-circle-info" aria-hidden="true"></i> <span id="ocrCount">loading…</span></div>
-      <div class="warn" data-needs-ocr hidden><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> <span>The OCR server is not running: start it first (status at the top of the page).</span></div>
+      <div class="warn" data-needs-ocr hidden><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> <span data-i18n>The OCR server is not running: start it first (its state is on the <a href="/dashboard">Dashboard</a>).</span></div>
       <div class="progress"><i class="fa-solid fa-clock" aria-hidden="true"></i> <span id="ocrStatus"></span></div>
     </div>
     <div id="ocrError" class="error"></div>
@@ -163,7 +146,7 @@
     </div>
   </section>
 
-  <section class="model-section" style="margin-top:32px">
+  <section class="model-section" id="bench-model" style="margin-top:32px">
     <h2 class="bench-heading"><i class="fa-solid fa-brain" aria-hidden="true"></i> <span data-i18n>2. Reading roster data per file type <small>the AI model reads like on /roster, compared with the labels</small></span></h2>
     <div class="controls">
       <b>File types</b>
@@ -172,7 +155,7 @@
     </div>
     <div class="bench-info">
       <div class="info"><i class="fa-solid fa-circle-info" aria-hidden="true"></i> <span data-i18n>About 10 minutes for all file types. Images are read by the OCR server first, the other files from their text.</span></div>
-      <div class="warn" data-needs-ocr hidden><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> <span>The OCR server is not running: image files would fail (status at the top of the page).</span></div>
+      <div class="warn" data-needs-ocr hidden><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> <span data-i18n>The OCR server is not running: image files would fail (its state is on the <a href="/dashboard">Dashboard</a>).</span></div>
       <div class="progress"><i class="fa-solid fa-clock" aria-hidden="true"></i> <span id="modelStatus"></span></div>
     </div>
     <div id="modelError" class="error"></div>
@@ -182,7 +165,7 @@
     </div>
   </section>
 
-  <section class="acars-section" style="margin-top:32px">
+  <section class="acars-section" id="bench-acars" style="margin-top:32px">
     <h2 class="bench-heading"><i class="fa-solid fa-satellite-dish" aria-hidden="true"></i> <span data-i18n>3. Reading ACARS pictures <small>the AI model reads like on /acars, compared with the labels field by field</small></span></h2>
     <div class="controls">
       <b>ACARS</b>
@@ -190,7 +173,7 @@
     </div>
     <div class="bench-info">
       <div class="info"><i class="fa-solid fa-circle-info" aria-hidden="true"></i> <span id="acarsCount">loading…</span></div>
-      <div class="warn" data-needs-ocr hidden><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> <span>The OCR server is not running: start it first (status at the top of the page).</span></div>
+      <div class="warn" data-needs-ocr hidden><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> <span data-i18n>The OCR server is not running: start it first (its state is on the <a href="/dashboard">Dashboard</a>).</span></div>
       <div class="progress"><i class="fa-solid fa-clock" aria-hidden="true"></i> <span id="acarsStatus"></span></div>
     </div>
     <div id="acarsError" class="error"></div>
@@ -253,59 +236,46 @@
     // What the OCR server reads on: { device: 'gpu' | 'cpu', name } | null
     const deviceText = (d) => (!d ? '–' : d.device === 'gpu' ? 'GPU' : 'CPU');
     const deviceTitle = (d) => (!d ? '' : d.name || deviceText(d));
-    // Server status at the top (/api/benchmark/ocr-server): running or not, GPU or CPU; a section that needs it warns when it is down
-    async function refreshServer() {
-      const box = $('serverStatus');
+    // The sections that need the OCR server warn when it is down (its state is on /dashboard): /api/benchmark/ocr-server
+    async function checkOcrServer() {
       const o = await fetch('/api/benchmark/ocr-server').then(r => r.json()).catch(() => null);
-      const d = o?.running ? o.device : null;
-      box.className = `server-status ${o?.running ? d?.device || '' : 'off'}`;
-      const chip = (html, cls = '') => `<span class="chip ${cls}">${html}</span>`;
-      if (o?.running) {
-        $('ocrState').textContent = __('Running');
-        $('ocrDetails').innerHTML = [
-          d && chip(`<i class="fa-solid fa-microchip" aria-hidden="true"></i> ${d.name ? `${deviceText(d)} · ${escapeHtml(d.name)}` : deviceText(d)}`, d.device),
-          o.rec && chip(`${__('recognition model')} <code>${escapeHtml(o.rec)}</code>`),
-          o.inflight ? chip(__('{n} images in progress', { n: o.inflight })) : '',
-          d?.device === 'cpu' ? `<span class="hint">${__('On the CPU: much slower than on a GPU.')}</span>` : '',
-          `<span class="hint">${escapeHtml(o.url)}</span>`,
-        ].filter(Boolean).join('');
-      } else {
-        $('ocrState').textContent = __('Not running');
-        $('ocrDetails').innerHTML = `<span class="hint">${__('Start it with {cmd} (expected at {url}). The OCR and ACARS benchmarks and the roster images need it.', { cmd: '<code>npm run ocr:server</code>', url: escapeHtml(o?.url || '') })}</span>`;
-      }
       for (const el of document.querySelectorAll('[data-needs-ocr]')) el.hidden = !!o?.running;
     }
-    $('ocrRecheck').onclick = refreshServer;
-    refreshServer();
-    setInterval(() => { if (!document.hidden) refreshServer(); }, 30000);
+    checkOcrServer();
+    setInterval(() => { if (!document.hidden) checkOcrServer(); }, 30000);
 
     const card = (v, label) => `<div class="stat-card"><div class="stat-value">${v}</div><div class="stat-label">${label}</div></div>`;
     const reviewLink = (file, review) => `<a href="/label?name=${encodeURIComponent(file)}" data-label-popup="${escapeHtml(file)}"${review ? ' data-review="1"' : ''} title="${review ? __('Open the file and its label, with the cells the AI model read differently marked') : __('Open the file and its label')}"><i class="fa-solid fa-pen-to-square" aria-hidden="true"></i> ${__('Review &amp; fix')}</a>`;
 
     /**
-     * Runs a benchmark stream (/api/benchmark/<what>/stream): the button starts it and,
-     * while it runs, stops it. progress(files seen) -> status text; render(result) on done.
+     * A benchmark of one kind (/api/benchmark/<kind>/stream). The run belongs to the server (services/bench-jobs.js):
+     * the button starts one (or stops the one going); leaving the page only stops following it, and opening the page
+     * follows the run going on (or just finished) again, its files so far played back.
+     * progress(files seen) -> status text; render(result) on done; onParams(settings of the run) when following one.
      */
-    function streamRunner({ kind, btn, status, error, label, url, progress, render }) {
-      let run = null;
+    function streamRunner({ kind, btn, status, error, label, url, progress, render, onParams }) {
+      let run = null; // { es, runId }
       const idle = `<i class="fa-solid fa-play" aria-hidden="true"></i> ${label}`;
-      btn.onclick = () => {
-        if (run) {
-          fetch(`/api/benchmark/stop?runId=${encodeURIComponent(run.runId)}`, { method: 'POST' });
-          status.textContent = __('Stopping…');
-          return;
-        }
-        const target = url();
-        if (!target) return;
-        const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-        error.classList.remove('visible');
-        refreshServer();
-        const started = Date.now();
-        const es = new EventSource(`${target}${target.includes('?') ? '&' : '?'}runId=${encodeURIComponent(runId)}`);
-        run = { es, runId };
-        btn.innerHTML = `<i class="fa-solid fa-stop" aria-hidden="true"></i> ${__('Stop')}`;
-        const done = (msg) => { es.close(); run = null; btn.innerHTML = idle; status.textContent = msg; };
+      const stopping = `<i class="fa-solid fa-stop" aria-hidden="true"></i> ${__('Stop')}`;
+      const at = (iso) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+      function followRun(src, { attach = false } = {}) {
+        const es = new EventSource(src);
+        run = { es, runId: null };
+        let started = Date.now(), job = null;
         const seen = [];
+        const done = (msg) => { es.close(); run = null; btn.innerHTML = idle; btn.disabled = false; if (msg != null) status.textContent = msg; };
+        es.addEventListener('none', () => done(null));
+        es.addEventListener('job', (e) => {
+          job = JSON.parse(e.data);
+          run.runId = job.runId;
+          started = Date.parse(job.startedAt);
+          onParams?.(job.params || {});
+          if (job.running) {
+            btn.innerHTML = stopping;
+            if (attach) status.textContent = __('Running since {time}: it goes on even when you leave this page.', { time: at(job.startedAt) });
+          }
+        });
         es.addEventListener('start', (e) => { status.textContent = __('0/{n} files…', { n: JSON.parse(e.data).total }); });
         es.addEventListener('file', (e) => {
           const d = JSON.parse(e.data);
@@ -316,18 +286,47 @@
           const result = JSON.parse(e.data).result;
           render(result);
           const min = ((Date.now() - started) / 60000).toFixed(1);
-          done(result.ocrDevice ? __('Done ({n} min, OCR on {device}).', { n: min, device: deviceText(result.ocrDevice) }) : __('Done ({n} min).', { n: min }));
-          refreshServer();
+          const msg = job && !job.running
+            ? __('Last run: started {time}.', { time: at(job.startedAt) })
+            : result.ocrDevice ? __('Done ({n} min, OCR on {device}).', { n: min, device: deviceText(result.ocrDevice) }) : __('Done ({n} min).', { n: min });
+          done(msg);
+          checkOcrServer();
           if (result.historyId) loadHistory(kind); // kept in the history (a stopped run is not)
         });
+        es.addEventListener('end', () => { if (run?.es === es) done(null); });
         es.addEventListener('error', (e) => {
+          if (!e.data) {
+            // the connection dropped (server restarted, network): the run, if any, is still the server's
+            if (run?.es === es) done(job?.running ? __('Lost the connection: the run goes on on the server, reload the page to follow it.') : null);
+            return;
+          }
           let msg = __('Lost the connection to the server');
-          try { msg = JSON.parse(e.data).error || msg; } catch { /* a dropped connection has no data */ }
+          try { msg = JSON.parse(e.data).error || msg; } catch { /* no JSON */ }
           error.textContent = __('Error: {error}', { error: __(msg) });
           error.classList.add('visible');
           done('');
         });
+      }
+
+      btn.onclick = () => {
+        if (run?.runId) {
+          btn.disabled = true;
+          fetch(`/api/benchmark/stop?runId=${encodeURIComponent(run.runId)}`, { method: 'POST' }).finally(() => { btn.disabled = false; });
+          status.textContent = __('Stopping…');
+          return;
+        }
+        if (run) return; // still connecting
+        const target = url();
+        if (!target) return;
+        const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`; // starts a run once (a reconnect only follows it)
+        error.classList.remove('visible');
+        checkOcrServer();
+        btn.innerHTML = stopping;
+        followRun(`${target}${target.includes('?') ? '&' : '?'}runId=${encodeURIComponent(runId)}`);
+        window.dispatchEvent(new Event('rp:jobs')); // the status bar under the top bar (nav.js)
       };
+      // a run going on (or just finished) when the page opens: follow it
+      followRun(`/api/benchmark/${kind}/stream?attach=1`, { attach: true });
     }
 
     // ---- 1. OCR over images (/api/benchmark/ocr/stream) ----
@@ -378,11 +377,15 @@
     // every picture is 'image'; a text file is its extension (services/model-benchmark.js typeOf)
     const typeOfFile = (name) => { const ext = name.split('.').pop().toLowerCase(); return ext in TYPE_NAMES ? ext : 'image'; };
 
+    // the file types of a run being followed: set on the boxes, also when they come after it
+    let followedTypes = null;
+    const showTypes = () => { if (followedTypes) for (const i of document.querySelectorAll('#typeChoices input')) i.checked = followedTypes.includes(i.value); };
     fetch('/api/benchmark/types').then(r => r.json()).then(({ types, counts, acars }) => {
       $('acarsCount').textContent = __('{n} labeled ACARS pictures', { n: acars || 0 });
       $('typeChoices').innerHTML = types.map(t => `<label title="${__('{n} labeled files', { n: counts[t] || 0 })}"><input type="checkbox" value="${t}" ${counts[t] ? 'checked' : 'disabled'}>
         <i class="fa-solid ${TYPE_ICONS[t]}" aria-hidden="true"></i> ${TYPE_NAMES[t] || t} <small style="color:#888">(${counts[t] || 0})</small></label>`).join('');
       $('ocrCount').textContent = __('{n} labeled images', { n: counts.image || 0 });
+      showTypes();
     }).catch(() => { $('typeChoices').textContent = __('Could not load the file types'); });
 
     function renderModel(r) {
@@ -436,6 +439,7 @@
         if (!types.length) { $('modelStatus').textContent = __('Pick at least one file type.'); return null; }
         return `/api/benchmark/model/stream?types=${types.join(',')}`;
       },
+      onParams: ({ types }) => { if (types?.length) { followedTypes = types; showTypes(); } },
       progress: (seen) => {
         const m = seen.reduce((a, f) => a + (f.rowMatches || 0), 0), t = seen.reduce((a, f) => a + (f.rowTotal || 0), 0);
         return __('so far {pct}% of rows right', { pct: t ? (100 * m / t).toFixed(1) : 0 });

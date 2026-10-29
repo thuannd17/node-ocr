@@ -9,170 +9,429 @@
   <link rel="stylesheet" href="/assets/app.css">
   <link rel="stylesheet" href="/assets/fontawesome/css/all.min.css">
   <style>
-    .grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-      gap: 20px;
+    /* ---- Landing page: hero with a live globe, how it works, tools, API ---- */
+    .landing { max-width: 1180px; margin: 0 auto; }
+    .landing section { margin: 0 0 64px; }
+    .eyebrow { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--primary-dark); }
+    .section-head { text-align: center; max-width: 640px; margin: 0 auto 28px; }
+    .section-head h2 { margin: 8px 0 8px; font-size: 28px; color: var(--nav-bg); letter-spacing: -0.02em; }
+    .section-head p { margin: 0; color: var(--muted); font-size: 15px; line-height: 1.6; }
+
+    /* hero */
+    .hero { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr); gap: 40px; align-items: center; padding-top: 18px; }
+    .hero h1 { margin: 14px 0 16px; font-size: clamp(32px, 4.4vw, 52px); line-height: 1.08; letter-spacing: -0.03em; color: var(--nav-bg); }
+    .hero h1 .grad { background: linear-gradient(100deg, #3466c4 10%, #7c4dff 55%, #11a39a 95%); -webkit-background-clip: text; background-clip: text; color: transparent; }
+    .hero .lead { margin: 0 0 26px; font-size: 17px; line-height: 1.6; color: var(--muted); max-width: 520px; }
+    .cta { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 26px; }
+    .cta a { display: inline-flex; align-items: center; gap: 9px; padding: 12px 20px; border-radius: 999px; font-weight: 600; font-size: 15px; text-decoration: none; transition: transform .15s, box-shadow .15s, background .15s; }
+    .cta a:hover { transform: translateY(-2px); }
+    .cta .primary { background: linear-gradient(100deg, var(--primary), #7c4dff); color: #fff; box-shadow: 0 8px 22px rgba(74, 127, 224, 0.35); }
+    .cta .primary:hover { box-shadow: 0 12px 28px rgba(74, 127, 224, 0.45); }
+    .cta .ghost { background: var(--card); color: var(--nav-bg); border: 1px solid var(--glass-edge); box-shadow: var(--shadow); -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur); }
+    .formats { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 13px; color: var(--muted); }
+    .formats span.chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 999px; background: rgba(255, 255, 255, 0.6); border: 1px solid var(--border); color: var(--nav-bg); font-weight: 600; font-size: 12px; }
+
+    /* the globe: real day and night right now, flights along great circles */
+    .globe-wrap { position: relative; aspect-ratio: 1 / 1; max-height: 560px; width: 100%; justify-self: center; }
+    .globe-wrap::before { /* the glow behind the earth */
+      content: ''; position: absolute; inset: 6%; border-radius: 50%;
+      background: radial-gradient(circle at 50% 50%, rgba(124, 77, 255, 0.35), rgba(74, 127, 224, 0.18) 45%, transparent 70%);
+      filter: blur(30px); z-index: 0;
     }
-    a.card {
-      padding: 24px;
-      margin-bottom: 0;
-      text-decoration: none;
-      color: inherit;
-      transition: transform 0.15s, box-shadow 0.15s;
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
+    #globe { position: absolute; inset: 0; z-index: 1; }
+    #globe .maplibregl-canvas { outline: none; }
+    #globe .maplibregl-ctrl-attrib { background: rgba(255, 255, 255, 0.6); border-radius: 10px; font-size: 10px; }
+    .globe-fallback { position: absolute; inset: 9%; border-radius: 50%; z-index: 1;
+      background: radial-gradient(circle at 35% 30%, #cfe3ff, #6f9fe8 40%, #2b3a8a 75%, #141c44);
+      box-shadow: inset -40px -30px 80px rgba(6, 16, 58, 0.6), 0 20px 60px rgba(43, 58, 138, 0.3);
+      transition: opacity .6s; }
+    .globe-wrap.ready .globe-fallback { opacity: 0; pointer-events: none; }
+    .globe-caption { position: absolute; left: 50%; bottom: 2%; transform: translateX(-50%); z-index: 2; display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px;
+      background: var(--glass-dark); color: #eef2fb; font-size: 12px; white-space: nowrap; -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur); border: 1px solid var(--glass-dark-edge); }
+    .globe-caption .dot { width: 8px; height: 8px; border-radius: 50%; background: #3ddc97; box-shadow: 0 0 0 0 rgba(61, 220, 151, .7); animation: pulse 2s infinite; }
+    .globe-caption b { font-variant-numeric: tabular-nums; }
+    @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(61, 220, 151, .6); } 70% { box-shadow: 0 0 0 8px rgba(61, 220, 151, 0); } 100% { box-shadow: 0 0 0 0 rgba(61, 220, 151, 0); } }
+
+    /* how it works: a roster picture is scanned, its rows come out */
+    .demo { display: grid; grid-template-columns: minmax(0, 0.8fr) auto minmax(0, 1.2fr); gap: 22px; align-items: center; padding: 28px; }
+    .doc { position: relative; aspect-ratio: 4 / 5; max-height: 320px; border-radius: 12px; background: #fff; border: 1px solid var(--border); overflow: hidden; padding: 18px 16px; box-shadow: 0 12px 30px rgba(31, 45, 72, 0.12); justify-self: center; width: 100%; max-width: 260px; }
+    .doc .hd { height: 12px; width: 55%; border-radius: 6px; background: #2b3a55; opacity: .85; margin-bottom: 14px; }
+    .doc .ln { display: flex; gap: 6px; margin: 0 0 14px; }
+    .doc .ln:nth-child(6) { margin-top: 22px; } /* a gap between the two tables of a roster */
+    .doc .ln i { display: block; height: 8px; border-radius: 4px; background: #d5deec; }
+    .doc .ln i.k { background: #a9bde0; }
+    .doc .scan { position: absolute; left: 0; right: 0; height: 46px; top: -46px;
+      background: linear-gradient(180deg, transparent, rgba(124, 77, 255, 0.18) 70%, rgba(124, 77, 255, 0.7) 100%);
+      border-bottom: 2px solid #7c4dff; animation: scan 8s ease-in-out infinite; }
+    @keyframes scan { 0% { top: -46px; } 45% { top: 100%; } 100% { top: 100%; } }
+    .arrow { font-size: 26px; color: var(--primary); display: grid; justify-items: center; gap: 6px; }
+    .arrow small { font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+    .rows { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+    .rows th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); padding: 6px 8px; border-bottom: 1px solid var(--border); }
+    .rows td { padding: 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+    .rows tbody tr { opacity: 0; transform: translateX(-8px); animation: row 8s infinite; }
+    .rows tbody tr:nth-child(1) { animation-delay: .6s; } .rows tbody tr:nth-child(2) { animation-delay: 1.1s; }
+    .rows tbody tr:nth-child(3) { animation-delay: 1.6s; } .rows tbody tr:nth-child(4) { animation-delay: 2.1s; }
+    .rows tbody tr:nth-child(5) { animation-delay: 2.6s; } .rows tbody tr:nth-child(6) { animation-delay: 3.1s; }
+    @keyframes row { 0% { opacity: 0; transform: translateX(-8px); } 6% { opacity: 1; transform: none; } 80% { opacity: 1; transform: none; } 90%, 100% { opacity: 0; } }
+    .rows .duty { font-weight: 700; color: var(--nav-bg); }
+    .rows .tag { display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 700; }
+    .rows .tag.n { background: #e3e8ff; color: #3d4fc4; } .rows .tag.d { background: #fff1d6; color: #a46200; }
+    .steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; margin-top: 18px; }
+    .step { display: flex; gap: 14px; align-items: flex-start; }
+    .step .n { flex: none; width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; font-weight: 800; color: #fff; background: linear-gradient(135deg, var(--primary), #7c4dff); }
+    .step h3 { margin: 4px 0 4px; font-size: 16px; color: var(--nav-bg); }
+    .step p { margin: 0; font-size: 14px; color: var(--muted); line-height: 1.55; }
+
+    /* tools */
+    .tools { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
+    a.tool { display: flex; flex-direction: column; gap: 10px; margin: 0; padding: 22px; text-decoration: none; color: inherit; transition: transform .18s, box-shadow .18s; }
+    a.tool:hover { transform: translateY(-4px); box-shadow: 0 16px 36px rgba(31, 45, 72, 0.16); }
+    a.tool .ic { width: 46px; height: 46px; border-radius: 12px; display: grid; place-items: center; font-size: 20px; color: #fff; }
+    a.tool h3 { margin: 4px 0 0; font-size: 17px; color: var(--nav-bg); }
+    a.tool p { margin: 0; font-size: 14px; color: var(--muted); line-height: 1.55; flex: 1; }
+    a.tool .go { font-size: 13px; font-weight: 600; color: var(--primary-dark); }
+    a.tool .go i { transition: transform .15s; }
+    a.tool:hover .go i { transform: translateX(4px); }
+    .ic.c1 { background: linear-gradient(135deg, #4a7fe0, #7c4dff); } .ic.c2 { background: linear-gradient(135deg, #11a39a, #3ddc97); }
+    .ic.c3 { background: linear-gradient(135deg, #f39c12, #e8590c); } .ic.c4 { background: linear-gradient(135deg, #2b3a55, #4a7fe0); }
+    .ic.c5 { background: linear-gradient(135deg, #3d5afe, #06103a); } .ic.c6 { background: linear-gradient(135deg, #e64980, #7c4dff); }
+
+    /* API */
+    .api { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); gap: 34px; align-items: center; padding: 30px; }
+    .api h2 { margin: 8px 0 10px; font-size: 26px; color: var(--nav-bg); letter-spacing: -0.02em; }
+    .api p { color: var(--muted); line-height: 1.6; font-size: 15px; margin: 0 0 18px; }
+    .api ul { margin: 0 0 22px; padding: 0; list-style: none; display: grid; gap: 8px; font-size: 14px; }
+    .api li i { color: #11a39a; margin-right: 8px; }
+    .code { margin: 0; background: #111a2e; color: #d7e0f3; border-radius: 12px; padding: 18px 20px; font: 12.5px/1.65 ui-monospace, Consolas, Menlo, monospace; overflow-x: auto; box-shadow: 0 16px 36px rgba(17, 26, 46, 0.25); }
+    .code .c { color: #7f8db0; } .code .k { color: #8fb4ff; } .code .s { color: #9be7c4; } .code .v { color: #ffcf8a; }
+
+    .final { text-align: center; padding: 40px 24px; }
+    .card.final h2 { margin: 0 0 10px; font-size: 26px; color: var(--nav-bg); }
+    .final p { margin: 0 auto 22px; color: var(--muted); max-width: 520px; line-height: 1.6; }
+    .final .cta { justify-content: center; margin: 0; }
+    footer { text-align: center; font-size: 13px; color: var(--muted); padding-bottom: 10px; }
+    footer a { color: var(--primary-dark); }
+
+    /* scroll-in */
+    .reveal { opacity: 0; transform: translateY(18px); transition: opacity .7s ease, transform .7s ease; }
+    .reveal.in { opacity: 1; transform: none; }
+
+    @media (max-width: 960px) {
+      .hero { grid-template-columns: 1fr; gap: 10px; }
+      .globe-wrap { max-width: 460px; }
+      .tools { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .api { grid-template-columns: 1fr; }
+      .demo { grid-template-columns: 1fr; }
+      .arrow i { transform: rotate(90deg); }
+      .steps { grid-template-columns: 1fr; }
     }
-    a.card:hover {
-      transform: translateY(-3px);
-      box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+    @media (max-width: 600px) {
+      .landing section { margin-bottom: 44px; }
+      .tools { grid-template-columns: 1fr; }
+      .demo, .api { padding: 18px; }
+      .rows .opt { display: none; }
+      .section-head h2, .api h2, .card.final h2 { font-size: 22px; }
+      .cta a { flex: 1 1 auto; justify-content: center; }
     }
-    .card .icon { font-size: 36px; }
-    .card h2 { margin: 0; font-size: 18px; color: #2b3a55; }
-    .card p { margin: 0; font-size: 14px; color: #666; line-height: 1.5; }
-    .card .url {
-      font-family: Consolas, Menlo, monospace;
-      font-size: 12px;
-      color: #4a90e2;
-      background: #f0f6ff;
-      padding: 4px 8px;
-      border-radius: 4px;
-      align-self: flex-start;
+    @media (prefers-reduced-motion: reduce) {
+      .doc .scan, .globe-caption .dot { animation: none; }
+      .doc .scan { display: none; }
+      .rows tbody tr { animation: none; opacity: 1; transform: none; }
+      .reveal { opacity: 1; transform: none; transition: none; }
     }
-    .badge {
-      display: inline-block;
-      font-size: 11px;
-      font-weight: 600;
-      padding: 2px 8px;
-      border-radius: 10px;
-      align-self: flex-start;
-    }
-    .badge.green { background: #d3f3d3; color: #2a7d2a; }
-    .badge.orange { background: #ffe8cc; color: #b26a00; }
-    .badge.blue { background: #e3eefc; color: #2a5ea8; }
-    .group { margin-bottom: 32px; }
-    .group-title { font-size: 17px; color: #2b3a55; margin: 0 0 4px; display: flex; gap: 8px; align-items: center; }
-    .group-note { margin: 0 0 14px; font-size: 13px; color: #666; }
-    .group.admin { padding: 18px; border: 1px dashed #c5ccd8; border-radius: 10px; background: #fafbfd; }
-    .group.admin .card .icon { color: #8a6d3b; }
-    footer { margin-top: 40px; font-size: 13px; color: #999; }
-    footer a { color: #4a90e2; }
   </style>
 </head>
 <body>
   <script src="/assets/nav.js"></script>
-  <main class="page">
-  <div class="page-header">
-    <h1>RosterParser</h1>
-    <p class="subtitle">Reads crew rosters (eCrew screenshots, duty-plan PDFs, CSV / Excel exports) into Published / Planned rows with a self-learning AI model, and turns them into calendars, airport details and night time.</p>
-  </div>
+  <main class="page landing">
 
-  <section class="group">
-    <h2 class="group-title"><i class="fa-solid fa-globe" aria-hidden="true"></i> Tools</h2>
-    <p class="group-note">Open to everyone, also as a public API for other apps.</p>
-    <div class="grid">
-    <a class="card" href="/roster">
-      <div class="icon"><i class="fa-solid fa-file-lines" aria-hidden="true"></i></div>
-      <h2>Roster</h2>
-      <p>Upload roster images, PDFs, CSV or Excel files (drop or pick) and see the Published / Planned rows the AI model reads, then export them to a calendar.</p>
-      <span class="url">/roster</span>
-      <span class="badge green">AI Model</span>
-    </a>
-    <a class="card" href="/acars">
-      <div class="icon"><i class="fa-solid fa-satellite-dish" aria-hidden="true"></i></div>
-      <h2>ACARS</h2>
-      <p>Scan or upload a picture of the cockpit's ACARS OOOI page: flight number, date, airports, OUT, OFF, ON, IN and the block and flight times.</p>
-      <span class="url">/acars</span>
-      <span class="badge green">AI Model</span>
-    </a>
-    <a class="card" href="/calendar">
-      <div class="icon"><i class="fa-solid fa-calendar-days" aria-hidden="true"></i></div>
-      <h2>Calendar</h2>
-      <p>Open .ics files as a month or list calendar: duties from check-in to check-out with their flights, sims and hotels.</p>
-      <span class="url">/calendar</span>
-    </a>
-    <a class="card" href="/airport">
-      <div class="icon"><i class="fa-solid fa-plane-departure" aria-hidden="true"></i></div>
-      <h2>Airport</h2>
-      <p>Find an airport by IATA, ICAO, FAA or WMO code or by name: codes, coordinates, map and 7-day weather.</p>
-      <span class="url">/airport</span>
-    </a>
-    <a class="card" href="/night-time">
-      <div class="icon"><i class="fa-solid fa-moon" aria-hidden="true"></i></div>
-      <h2>Night Time</h2>
-      <p>Night time of a flight along the great circle, from the sun's altitude at the aircraft, with the route on a map.</p>
-      <span class="url">/night-time</span>
-    </a>
-    <a class="card" href="/api-docs">
-      <div class="icon"><i class="fa-solid fa-book" aria-hidden="true"></i></div>
-      <h2>API Docs</h2>
-      <p>The public API for other apps: read rosters, export .ics, airports and weather, night time (OpenAPI). Sign up for a free API key.</p>
-      <span class="url">/api-docs</span>
-      <span class="badge blue">OpenAPI</span>
-    </a>
-    </div>
-  </section>
+    <!-- Hero -->
+    <section class="hero">
+      <div>
+        <span class="eyebrow"><i class="fa-solid fa-plane-up" aria-hidden="true"></i> <span>For airline crew</span></span>
+        <h1 data-i18n>Your roster, <span class="grad">read for you.</span></h1>
+        <p class="lead" data-i18n>Drop in a roster screenshot, a duty-plan PDF or an Excel export. RosterParser's AI model reads every duty, flight and hotel into clean rows, then turns them into a calendar, route maps and night time.</p>
+        <div class="cta">
+          <a class="primary" href="/roster"><i class="fa-solid fa-cloud-arrow-up" aria-hidden="true"></i> <span>Read a roster</span></a>
+          <a class="ghost" href="/api-docs"><i class="fa-solid fa-code" aria-hidden="true"></i> <span>Explore the API</span></a>
+        </div>
+        <div class="formats"><span>Reads</span>
+          <span class="chip"><i class="fa-regular fa-image" aria-hidden="true"></i> PNG · JPG</span>
+          <span class="chip"><i class="fa-regular fa-file-pdf" aria-hidden="true"></i> PDF</span>
+          <span class="chip"><i class="fa-solid fa-table" aria-hidden="true"></i> CSV · XLS · XLSX</span>
+          <span class="chip"><i class="fa-regular fa-file-lines" aria-hidden="true"></i> TXT</span>
+          <span class="chip"><i class="fa-solid fa-satellite-dish" aria-hidden="true"></i> ACARS</span>
+        </div>
+      </div>
+      <div class="globe-wrap" id="globeWrap">
+        <div class="globe-fallback" aria-hidden="true"></div>
+        <div id="globe" role="img" aria-label="A globe with day and night as they are now, and flights moving along great circles"></div>
+        <div class="globe-caption"><span class="dot" aria-hidden="true"></span><span>Day and night right now</span> · <b id="utcNow">--:--Z</b></div>
+      </div>
+    </section>
 
-  <section class="group admin" id="adminGroup" hidden>
-    <h2 class="group-title"><i class="fa-solid fa-user-gear" aria-hidden="true"></i> Administration</h2>
-    <p class="group-note">Managing the data and the models. These pages need an admin sign-in.</p>
-    <div class="grid">
-    <a class="card" href="/label">
-      <div class="icon"><i class="fa-solid fa-tags" aria-hidden="true"></i></div>
-      <h2>Label Tool</h2>
-      <p>Label (ground truth) every roster file and ACARS picture, with Auto-fill from OCR to fix by hand.</p>
-      <span class="url">/label</span>
-      <span class="badge orange">Data</span>
-    </a>
-    <a class="card" href="/benchmark">
-      <div class="icon"><i class="fa-solid fa-chart-column" aria-hidden="true"></i></div>
-      <h2>Benchmark</h2>
-      <p>Accuracy of every cell (date, duty, dep, begin, end, arr…) against the labels.</p>
-      <span class="url">/benchmark</span>
-      <span class="badge orange">Measure</span>
-    </a>
-    <a class="card" href="/models">
-      <div class="icon"><i class="fa-solid fa-brain" aria-hidden="true"></i></div>
-      <h2>AI Models</h2>
-      <p>The model versions that read rosters: train new ones, compare their scores, activate or delete them.</p>
-      <span class="url">/models</span>
-      <span class="badge orange">Models</span>
-    </a>
-    <a class="card" href="/media">
-      <div class="icon"><i class="fa-solid fa-photo-film" aria-hidden="true"></i></div>
-      <h2>Media</h2>
-      <p>The roster files kept in MinIO: preview, labeled or not, delete.</p>
-      <span class="url">/media</span>
-      <span class="badge orange">Data</span>
-    </a>
-    <a class="card" href="/users">
-      <div class="icon"><i class="fa-solid fa-users" aria-hidden="true"></i></div>
-      <h2>Users</h2>
-      <p>Every account: role, plan and limits of the API, today's calls and API keys.</p>
-      <span class="url">/users</span>
-    </a>
-    <a class="card" href="/billing">
-      <div class="icon"><i class="fa-solid fa-file-invoice-dollar" aria-hidden="true"></i></div>
-      <h2>Billing</h2>
-      <p>The paid plans: PayPal subscriptions, invoices, refunds and the revenue of each month.</p>
-      <span class="url">/billing</span>
-    </a>
-    <a class="card" href="/helpdesk">
-      <div class="icon"><i class="fa-solid fa-headset" aria-hidden="true"></i></div>
-      <h2>Helpdesk</h2>
-      <p>The correction suggestions sent from /roster: who sent them, their state, and a reply by email.</p>
-      <span class="url">/helpdesk</span>
-      <span class="badge orange">Support</span>
-    </a>
-    </div>
-  </section>
+    <!-- How it works -->
+    <section class="reveal">
+      <div class="section-head">
+        <span class="eyebrow"><i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i> <span>How it works</span></span>
+        <h2>From a picture to rows in seconds</h2>
+        <p>No typing duties by hand. The model learns from every labelled roster, so new layouts keep getting better.</p>
+      </div>
+      <div class="card demo">
+        <div class="doc" aria-hidden="true">
+          <div class="hd"></div>
+          <div class="ln"><i class="k" style="width:18%"></i><i style="width:14%"></i><i style="width:30%"></i><i style="width:20%"></i></div>
+          <div class="ln"><i class="k" style="width:18%"></i><i style="width:14%"></i><i style="width:22%"></i><i style="width:26%"></i></div>
+          <div class="ln"><i class="k" style="width:18%"></i><i style="width:14%"></i><i style="width:34%"></i><i style="width:16%"></i></div>
+          <div class="ln"><i class="k" style="width:18%"></i><i style="width:14%"></i><i style="width:26%"></i><i style="width:22%"></i></div>
+          <div class="ln"><i class="k" style="width:18%"></i><i style="width:14%"></i><i style="width:20%"></i></div>
+          <div class="ln"><i class="k" style="width:18%"></i><i style="width:14%"></i><i style="width:32%"></i><i style="width:18%"></i></div>
+          <div class="ln"><i class="k" style="width:18%"></i><i style="width:14%"></i><i style="width:24%"></i><i style="width:24%"></i></div>
+          <div class="ln"><i class="k" style="width:18%"></i><i style="width:14%"></i><i style="width:28%"></i></div>
+          <div class="ln"><i class="k" style="width:18%"></i><i style="width:14%"></i><i style="width:30%"></i><i style="width:20%"></i></div>
+          <div class="scan"></div>
+        </div>
+        <div class="arrow" aria-hidden="true"><i class="fa-solid fa-arrow-right-long"></i><small>AI model</small></div>
+        <div style="overflow-x:auto">
+          <table class="rows" aria-label="Example rows read from a roster">
+            <thead><tr><th>Date</th><th>Duty</th><th>Dep</th><th>Arr</th><th>Begin</th><th>End</th><th class="opt">Night</th></tr></thead>
+            <tbody>
+              <tr><td>03 Nov</td><td class="duty">C/I</td><td>SGN</td><td></td><td>21:05 Z</td><td></td><td class="opt"></td></tr>
+              <tr><td>03 Nov</td><td class="duty">RP 101</td><td>SGN</td><td>NRT</td><td>22:05 Z</td><td>03:55 Z</td><td class="opt"><span class="tag d">0:07</span></td></tr>
+              <tr><td>04 Nov</td><td class="duty">C/O</td><td></td><td>NRT</td><td></td><td>04:25 Z</td><td class="opt"></td></tr>
+              <tr><td>04 Nov</td><td class="duty">H1*</td><td>NRT</td><td></td><td></td><td></td><td class="opt"></td></tr>
+              <tr><td>05 Nov</td><td class="duty">RP 102</td><td>NRT</td><td>SGN</td><td>06:40 Z</td><td>13:05 Z</td><td class="opt"><span class="tag n">3:41</span></td></tr>
+              <tr><td>06 Nov</td><td class="duty">OFF</td><td></td><td></td><td></td><td></td><td class="opt"></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="steps">
+        <div class="step"><span class="n">1</span><div><h3>Upload</h3><p>A screenshot, a PDF, a spreadsheet or a text export: drop it on the page or send it to the API.</p></div></div>
+        <div class="step"><span class="n">2</span><div><h3>The AI model reads it</h3><p>Duties, flights, check-in and check-out, hotels and crew, as Published and Planned rows you can check and correct.</p></div></div>
+        <div class="step"><span class="n">3</span><div><h3>Use it</h3><p>Export to Google Calendar, Outlook or Apple Calendar, see your routes on a map and the night time of each flight.</p></div></div>
+      </div>
+    </section>
 
-  <footer><span data-i18n>Building on RosterParser? See the <a href="/api-docs">API documentation</a> (<a href="/api/openapi.json">OpenAPI JSON</a>) and <a href="/signup">sign up</a> for an API key.</span></footer>
+    <!-- Tools -->
+    <section class="reveal">
+      <div class="section-head">
+        <span class="eyebrow"><i class="fa-solid fa-toolbox" aria-hidden="true"></i> <span>Tools</span></span>
+        <h2>Everything around your roster</h2>
+        <p>Free to use in the browser, and the same tools as a public API for other apps.</p>
+      </div>
+      <div class="tools">
+        <a class="card tool" href="/roster">
+          <span class="ic c1"><i class="fa-solid fa-file-lines" aria-hidden="true"></i></span>
+          <h3>Roster</h3>
+          <p>Upload roster images, PDFs, CSV or Excel files and get the Published / Planned rows, ready to export.</p>
+          <span class="go"><span>Read a roster</span> <i class="fa-solid fa-arrow-right" aria-hidden="true"></i></span>
+        </a>
+        <a class="card tool" href="/acars">
+          <span class="ic c2"><i class="fa-solid fa-satellite-dish" aria-hidden="true"></i></span>
+          <h3>ACARS</h3>
+          <p>A photo of the cockpit's OOOI page becomes flight number, airports, OUT, OFF, ON, IN, block and flight time.</p>
+          <span class="go"><span>Scan ACARS</span> <i class="fa-solid fa-arrow-right" aria-hidden="true"></i></span>
+        </a>
+        <a class="card tool" href="/calendar">
+          <span class="ic c3"><i class="fa-solid fa-calendar-days" aria-hidden="true"></i></span>
+          <h3>Calendar</h3>
+          <p>Open .ics files as a month or list: duties from check-in to check-out with their flights, sims and hotels.</p>
+          <span class="go"><span>Open the calendar</span> <i class="fa-solid fa-arrow-right" aria-hidden="true"></i></span>
+        </a>
+        <a class="card tool" href="/route-map">
+          <span class="ic c6"><i class="fa-solid fa-route" aria-hidden="true"></i></span>
+          <h3>Route Map</h3>
+          <p>Every flight of your rosters on a world map or a globe, along the great circle, one colour per roster.</p>
+          <span class="go"><span>See your routes</span> <i class="fa-solid fa-arrow-right" aria-hidden="true"></i></span>
+        </a>
+        <a class="card tool" href="/night-time">
+          <span class="ic c5"><i class="fa-solid fa-moon" aria-hidden="true"></i></span>
+          <h3>Night Time</h3>
+          <p>Night time of a flight from the sun's altitude at the aircraft, take-off to landing, played on a map and a globe.</p>
+          <span class="go"><span>Work out night time</span> <i class="fa-solid fa-arrow-right" aria-hidden="true"></i></span>
+        </a>
+        <a class="card tool" href="/airport">
+          <span class="ic c4"><i class="fa-solid fa-plane-departure" aria-hidden="true"></i></span>
+          <h3>Airport</h3>
+          <p>Any airport by IATA, ICAO, FAA or WMO code or by name: codes, coordinates, map and 7-day weather.</p>
+          <span class="go"><span>Find an airport</span> <i class="fa-solid fa-arrow-right" aria-hidden="true"></i></span>
+        </a>
+      </div>
+    </section>
+
+    <!-- API -->
+    <section class="reveal">
+      <div class="card api">
+        <div>
+          <span class="eyebrow"><i class="fa-solid fa-code" aria-hidden="true"></i> <span>For developers</span></span>
+          <h2>A public API for your crew app</h2>
+          <p>Send a roster file, get its rows back as JSON. Export .ics, look up airports and weather, work out night time: the same code as these pages.</p>
+          <ul>
+            <li><i class="fa-solid fa-check" aria-hidden="true"></i><span>OpenAPI documentation with examples</span></li>
+            <li><i class="fa-solid fa-check" aria-hidden="true"></i><span>A free API key to start, more calls on Pro</span></li>
+            <li><i class="fa-solid fa-check" aria-hidden="true"></i><span>Images, PDFs, CSV, Excel and TXT in one endpoint</span></li>
+          </ul>
+          <div class="cta" style="margin:0">
+            <a class="primary" href="/api-docs"><i class="fa-solid fa-book" aria-hidden="true"></i> <span>API Docs</span></a>
+            <a class="ghost" href="/pricing"><i class="fa-solid fa-tags" aria-hidden="true"></i> <span>Pricing</span></a>
+          </div>
+        </div>
+        <pre class="code" aria-label="Example API call"><span class="c"># read a roster</span>
+curl -X POST https://&lt;host&gt;/api/roster/upload \
+  -H <span class="s">"Authorization: Bearer rp_…"</span> \
+  -F <span class="s">"file=@roster.pdf"</span>
+
+<span class="c"># → the rows, as JSON</span>
+{
+  <span class="k">"published"</span>: [
+    { <span class="k">"date"</span>: <span class="s">"03 Nov 26"</span>, <span class="k">"duty"</span>: <span class="s">"RP 101"</span>,
+      <span class="k">"dep"</span>: <span class="s">"SGN"</span>, <span class="k">"arr"</span>: <span class="s">"NRT"</span>,
+      <span class="k">"begin"</span>: <span class="s">"22:05 Z"</span>, <span class="k">"end"</span>: <span class="s">"03:55 Z"</span> },
+    <span class="v">…</span>
+  ],
+  <span class="k">"planned"</span>: [ <span class="v">…</span> ]
+}</pre>
+      </div>
+    </section>
+
+    <section class="reveal">
+      <div class="card final">
+        <h2>Try it with your own roster</h2>
+        <p>Files you upload are read and given back to you, not kept.</p>
+        <div class="cta">
+          <a class="primary" href="/roster"><i class="fa-solid fa-cloud-arrow-up" aria-hidden="true"></i> <span>Read a roster</span></a>
+          <a class="ghost" href="/signup"><i class="fa-solid fa-key" aria-hidden="true"></i> <span>Get an API key</span></a>
+        </div>
+      </div>
+    </section>
+
+    <footer><span data-i18n>RosterParser · <a href="/api-docs">API documentation</a> · <a href="/api/openapi.json">OpenAPI JSON</a> · <a href="/pricing">Pricing</a></span></footer>
   </main>
+
+  <script src="/assets/suncalc/suncalc.js"></script>
+  <script src="/assets/night.js"></script>
+  <script src="/assets/route-map.js"></script>
   <script>
-    // the administration cards: for admins (or this machine with login off) only
-    fetch('/api/auth/me').then(r => r.json()).then((me) => { document.getElementById('adminGroup').hidden = !(me.user?.role === 'admin' || me.local); }).catch(() => {});
+    (function () {
+      const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+      // ---- sections fade in as they scroll into view ----
+      const io = 'IntersectionObserver' in window ? new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } }), { threshold: 0.12 }) : null;
+      document.querySelectorAll('.reveal').forEach(el => (io ? io.observe(el) : el.classList.add('in')));
+
+      // ---- the UTC clock under the globe ----
+      const pad = (n) => String(n).padStart(2, '0');
+      const tick = () => { const d = new Date(); document.getElementById('utcNow').textContent = `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}Z`; };
+      tick(); setInterval(tick, 15000);
+
+      // ---- the globe: today's day and night (NightTime.nightPolygon), flights along great circles ----
+      const HUBS = {
+        SGN: [10.82, 106.66], HAN: [21.22, 105.81], SIN: [1.36, 103.99], BKK: [13.69, 100.75], NRT: [35.77, 140.39], ICN: [37.46, 126.44],
+        SYD: [-33.95, 151.18], DXB: [25.25, 55.36], DOH: [25.27, 51.61], IST: [41.26, 28.74], VIE: [48.11, 16.57], FRA: [50.03, 8.56],
+        LHR: [51.47, -0.45], JFK: [40.64, -73.78], LAX: [33.94, -118.41], GRU: [-23.43, -46.47], JNB: [-26.14, 28.24], AKL: [-37.01, 174.79],
+      };
+      const PAIRS = [['SGN', 'NRT'], ['HAN', 'VIE'], ['SIN', 'LHR'], ['DXB', 'JFK'], ['FRA', 'GRU'], ['DOH', 'SYD'], ['IST', 'ICN'], ['LAX', 'NRT'],
+        ['BKK', 'FRA'], ['LHR', 'JFK'], ['SGN', 'SYD'], ['HAN', 'ICN'], ['DXB', 'JNB'], ['SIN', 'AKL'], ['JFK', 'GRU'], ['DOH', 'BKK']];
+      const NIGHT = '#3d5afe', DAY = '#f39c12';
+      const BANDS = [0, -6, -12, -18];
+
+      const wrap = document.getElementById('globeWrap');
+      const box = document.getElementById('globe');
+      const zoomFor = () => Math.log2((0.92 * Math.min(box.clientWidth || 460, box.clientHeight || 460) * Math.PI) / 512);
+      const webgl = (() => { try { const c = document.createElement('canvas'); return !!(c.getContext('webgl2') || c.getContext('webgl')); } catch { return false; } })();
+      if (!webgl || !window.NightTime || !window.RouteMap) return; // the drawn globe (CSS) stays
+
+      const load = (tag, attrs) => new Promise((resolve, reject) => {
+        const el = Object.assign(document.createElement(tag), attrs);
+        el.onload = resolve; el.onerror = reject;
+        document.head.appendChild(el);
+      });
+
+      async function start() {
+        await load('link', { rel: 'stylesheet', href: '/assets/maplibre/maplibre-gl.css' });
+        let ml;
+        try { ml = await import('/assets/maplibre/maplibre-gl.mjs'); } catch { await load('script', { src: '/assets/maplibre/maplibre-gl.js' }); ml = window.maplibregl; }
+        const routes = PAIRS.map(([a, b], i) => {
+          const pts = RouteMap.greatCircle({ lat: HUBS[a][0], lon: HUBS[a][1] }, { lat: HUBS[b][0], lon: HUBS[b][1] }, 96).map(([lat, lon]) => [lon, lat]);
+          return { pts, phase: (i * 0.137) % 1, period: 26000 + (i % 5) * 5200, back: i % 2 === 1 };
+        });
+        let lon = 100; // start over Asia
+        const gl = new ml.Map({
+          container: box,
+          style: {
+            version: 8,
+            projection: { type: 'globe' },
+            sky: { 'atmosphere-blend': 0 }, // MapLibre lights the atmosphere from a fixed light, not the sun
+            sources: { osm: { type: 'raster', tileSize: 256, maxzoom: 6, tiles: ['https://a.tile.openstreetmap.org/{z}/{x}/{y}.png', 'https://b.tile.openstreetmap.org/{z}/{x}/{y}.png', 'https://c.tile.openstreetmap.org/{z}/{x}/{y}.png'], attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' } },
+            layers: [{ id: 'osm', type: 'raster', source: 'osm', paint: { 'raster-saturation': -0.25 } }],
+          },
+          center: [lon, 18], zoom: zoomFor(), attributionControl: { compact: true },
+          scrollZoom: false, doubleClickZoom: false, boxZoom: false, keyboard: false, pitchWithRotate: false, touchZoomRotate: false, dragRotate: false,
+        });
+        await new Promise(res => gl.once('load', res));
+        const fc = (features) => ({ type: 'FeatureCollection', features });
+        gl.addSource('night', { type: 'geojson', data: fc([]) });
+        gl.addSource('routes', { type: 'geojson', data: fc(routes.map(r => ({ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: r.pts } }))) });
+        gl.addSource('trails', { type: 'geojson', data: fc([]) });
+        gl.addSource('planes', { type: 'geojson', data: fc([]) });
+        gl.addSource('hubs', { type: 'geojson', data: fc(Object.values(HUBS).map(([lat, lo]) => ({ type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [lo, lat] } }))) });
+        gl.addLayer({ id: 'night', type: 'fill', source: 'night', paint: { 'fill-color': '#06103a', 'fill-opacity': ['get', 'a'], 'fill-antialias': false } });
+        gl.addLayer({ id: 'routes', type: 'line', source: 'routes', layout: { 'line-cap': 'round' }, paint: { 'line-color': '#ffffff', 'line-width': 1.4, 'line-opacity': 0.55, 'line-dasharray': [2, 2] } });
+        gl.addLayer({ id: 'trails', type: 'line', source: 'trails', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': ['get', 'color'], 'line-width': 3, 'line-opacity': 0.9 } });
+        gl.addLayer({ id: 'hubs', type: 'circle', source: 'hubs', paint: { 'circle-radius': 3, 'circle-color': '#ffffff', 'circle-stroke-color': '#2b3a55', 'circle-stroke-width': 1.5 } });
+        gl.addLayer({ id: 'planes', type: 'circle', source: 'planes', paint: { 'circle-radius': 5, 'circle-color': ['get', 'color'], 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 } });
+        wrap.classList.add('ready');
+
+        // night: four bands, darker each (sun below 0°, -6°, -12°, -18°), moved once a minute
+        const drawNight = () => gl.getSource('night').setData(fc(BANDS.map(h => ({ type: 'Feature', properties: { a: 0.16 }, geometry: NightTime.nightPolygon(new Date(), h, 144) }))));
+        drawNight(); setInterval(drawNight, 60000);
+
+        // planes: each flies its route back and forth, orange by day and blue by night at its position (sun below -6°)
+        const at = (pts, f) => { const x = f * (pts.length - 1), i = Math.min(pts.length - 2, Math.floor(x)), k = x - i; return [pts[i][0] + (pts[i + 1][0] - pts[i][0]) * k, pts[i][1] + (pts[i + 1][1] - pts[i][1]) * k]; };
+        function drawPlanes(now) {
+          const planes = [], trails = [];
+          const sunT = new Date();
+          for (const r of routes) {
+            const cyc = ((now / r.period) + r.phase) % 1;
+            const f = cyc < 0.5 ? cyc * 2 : 2 - cyc * 2; // there and back
+            const pts = r.back ? [...r.pts].reverse() : r.pts;
+            const p = at(pts, f);
+            const night = NightTime.sunAltitude(sunT, { lat: p[1], lon: p[0] }) < -6;
+            const color = night ? NIGHT : DAY;
+            planes.push({ type: 'Feature', properties: { color }, geometry: { type: 'Point', coordinates: p } });
+            // the last stretch behind the aircraft
+            const dir = cyc < 0.5 ? 1 : -1, from = Math.max(0, Math.min(1, f - dir * 0.12));
+            const n = 12, line = Array.from({ length: n + 1 }, (_, i) => at(pts, from + ((f - from) * i) / n));
+            trails.push({ type: 'Feature', properties: { color }, geometry: { type: 'LineString', coordinates: line } });
+          }
+          gl.getSource('planes').setData(fc(planes));
+          gl.getSource('trails').setData(fc(trails));
+        }
+
+        // spin slowly; a drag stops it for a while; nothing runs while the globe is off screen or the tab hidden
+        let held = 0, visible = true, last = performance.now(), lastPlanes = 0;
+        gl.on('mousedown', () => { held = performance.now() + 5000; });
+        gl.on('touchstart', () => { held = performance.now() + 5000; });
+        gl.on('moveend', () => { lon = gl.getCenter().lng; });
+        if ('IntersectionObserver' in window) new IntersectionObserver(([e]) => { visible = e.isIntersecting; }).observe(wrap);
+        drawPlanes(performance.now());
+        if (reduced) return; // still: today's night and the routes, no motion
+        function frame(t) {
+          requestAnimationFrame(frame);
+          const dt = Math.min(100, t - last); last = t;
+          if (!visible || document.hidden) return;
+          if (t > held && !gl.isMoving()) { lon = (lon + dt * 0.004 + 540) % 360 - 180; gl.setCenter([lon, gl.getCenter().lat]); }
+          if (t - lastPlanes > 40) { lastPlanes = t; drawPlanes(t); }
+        }
+        requestAnimationFrame(frame);
+        addEventListener('resize', () => gl.setZoom(zoomFor()));
+      }
+      // after the page has shown: the globe library is big
+      const go = () => start().catch(() => {});
+      if (document.readyState === 'complete') setTimeout(go, 50); else addEventListener('load', () => setTimeout(go, 50));
+    })();
   </script>
 </body>
 </html>

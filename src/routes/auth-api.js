@@ -19,7 +19,7 @@ import { authConfig, isAdmin, isLocal, sessionCookieOf, verifySession, forgetSes
 import { accounts as appAccounts, looksLikeKey } from '../services/accounts.js';
 import { limitsOf, ANONYMOUS } from '../services/plans.js';
 
-export const ADMIN_PAGES = ['/label', '/benchmark', '/models', '/media', '/helpdesk', '/users', '/billing'];
+export const ADMIN_PAGES = ['/dashboard', '/label', '/benchmark', '/models', '/media', '/helpdesk', '/users', '/billing'];
 export const ACCOUNT_PAGES = ['/account', '/invoice'];
 // an account's own API: its keys and usage (account-api.js), its plan, subscriptions and invoices (billing-api.js);
 // /api/billing/admin/* is admin

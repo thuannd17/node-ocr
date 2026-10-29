@@ -125,8 +125,19 @@ export function headerLines(lines, words = HEADER_WORDS) {
   const headers = lines.filter((l, k) => {
     const hit = l.tokens.filter(t => known(t.t.toLowerCase()) && (!t.field || t.field === 'O'));
     const hits = hit.length;
+    const kinds = new Set(hit.map(t => t.t.toLowerCase())).size;
     // (3 different words: not a line of day codes, "FlD Off Off Vac Vac Vac")
-    if (new Set(hit.map(t => t.t.toLowerCase())).size < 3) return false;
+    if (kinds < 3) return false;
+    // (not a strip of weekdays over a month, "CRM Sat Sun Mon ... Mon" of a NetLine plan: a weekday twice; a week's
+    // columns "Monday Tuesday ..." name each day once; a month's calendar has its dates right under them, "1 2 3 ...")
+    const weekdays = hit.filter(t => WEEKDAY_WORD_RE.test(t.t)).map(t => t.t.toLowerCase().replace(/\.$/, ''));
+    const datesUnder = lines[k + 1]?.tokens.some(t => t.field === 'date');
+    if (weekdays.length > hits / 2 && new Set(weekdays).size < weekdays.length && !datesUnder) return false;
+    // (nor a strip of day codes, "Sby FlD FlD Off Off Vac Vac Vac ...": a few words over and over, side by side; a header
+    // repeats some among many others, "TIJD TIJD", "FDP FDP FDP duty work rest rest rest rest", or whole blocks,
+    // "Code Descr. Flight ... Crew Code Descr. Flight ...")
+    const twice = l.tokens.some((t, i) => i && t.t.toLowerCase() === l.tokens[i - 1].t.toLowerCase() && known(t.t.toLowerCase()));
+    if (kinds * 3 < hits && twice) return false;
     // (not a line of totals, "Total Stick Time: 596: 51")
     const numbers = l.tokens.filter(t => /\d/.test(t.t)).length;
     // (not a title naming the crew member, "Individual duty plan for VOGELS, MAX", "BRUINESSEN,van, MAX"; "Make, Model, Var." is a header)
@@ -546,7 +557,36 @@ function fileLayoutOf(tagPages, words) {
   return '';
 }
 
-export function assembleRows(tagPages, pdfPages = [], conventions = {}) {
+/**
+ * Tagger slips that would break many rows, put right before the rows are made:
+ *  - a lone number tagged date where the document's dates are written with letters ("Mon27", "27Jan25"):
+ *    "Route Qualification Session 2", not a date; it would move every row after it to another day.
+ *    It takes the field of the word before it on its line (else O).
+ *  - in OCR text (a roster picture), a time zone letter tagged duty right after a time ("10:35 Z"): it would
+ *    start a row (a PDF's duty may be "L", activity-calendar).
+ */
+function repairSlips(tagPages, ocr) {
+  const dates = tagPages.flatMap(p => p.tokens.filter(t => t.field === 'date'));
+  const bare = (t) => /^\d{1,2}$/.test(t.t);
+  const lettered = dates.length >= 5 && dates.filter(t => /\p{L}/u.test(t.t)).length >= 0.9 * dates.length;
+  const isTime = (t) => /^\d{1,2}:?\d{2}$/.test(t?.t || '');
+  return tagPages.map(p => {
+    const zone = (t) => ocr && t.field === 'duty' && /^[ZL]$/.test(t.t);
+    if (!p.tokens.some(t => (lettered && t.field === 'date' && bare(t)) || zone(t))) return p;
+    const tokens = p.tokens.map(t => ({ ...t }));
+    const before = (t) => tokens.filter(u => u !== t && Math.abs(u.y - t.y) <= 1.5 && u.x < t.x).sort((a, b) => b.x - a.x)[0];
+    for (const t of tokens) {
+      if (lettered && t.field === 'date' && bare(t)) {
+        const b = before(t);
+        t.field = b && b.field !== 'date' ? b.field : 'O';
+      } else if (zone(t) && isTime(before(t))) t.field = 'O';
+    }
+    return { ...p, tokens };
+  });
+}
+
+export function assembleRows(tagPages0, pdfPages = [], conventions = {}) {
+  const tagPages = repairSlips(tagPages0, !!conventions.ocr);
   const period = pdfPages.length ? (findPeriod(pdfPages) || documentPeriod(pdfPages)) : null;
   const words = headerWordsOf(conventions);
   const plain = plainZone(pdfPages.length ? findNotices(pdfPages) : [], conventions, fileLayoutOf(tagPages, words));

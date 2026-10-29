@@ -12,7 +12,7 @@ import '../views/assets/route-map.js';
 
 globalThis.SunCalc = globalThis.SunCalc || createRequire(import.meta.url)('suncalc');
 await import('../views/assets/night.js');
-const { compute, RULES } = globalThis.NightTime;
+const { compute, airborne, RULES } = globalThis.NightTime;
 const { rowsToIcs } = globalThis.RosterIcs;
 
 const router = Router();
@@ -38,15 +38,17 @@ const hm = (min) => `${Math.floor(min / 60)}:${String(min % 60).padStart(2, '0')
 
 /**
  * POST /api/night-time/calc  { dep: "VIE", arr: "HAN", off: "2025-03-11T13:00Z", on: "2025-03-11T23:50Z", rule?: "civil"|"nautical"|"sunset"|"fixed",
- *   sunrise?: "06:00", sunset?: "18:00" (rule fixed: local time at the aircraft), track?: true }
- * dep / arr: an airport code (IATA, ICAO, FAA, ...) or "lat,lon"; off / on: ISO 8601 times (UTC with Z).
+ *   takeoff?: "2025-03-11T13:12Z", landing?: "2025-03-11T23:41Z", sunrise?: "06:00", sunset?: "18:00" (rule fixed: local time
+ *   at the aircraft), track?: true }
+ * dep / arr: an airport code (IATA, ICAO, FAA, ...) or "lat,lon"; off / on / takeoff / landing: ISO 8601 times (UTC with Z).
+ * The night time is counted from take-off to landing; without them off-block + 10 min / on-block - 5 min (taxi).
  */
 // the routes that look up airports load them first (from the site data bucket)
 const withAirports = (req, res, next) => loadAirports().then(() => next(), (e) => res.status(e.status || 500).json({ error: e.message }));
 
 router.post('/night-time/calc', withAirports, (req, res) => {
   const body = req.body || {};
-  const { dep, arr, off, on, rule = 'civil', sunrise = '06:00', sunset = '18:00' } = body;
+  const { dep, arr, off, on, takeoff, landing, rule = 'civil', sunrise = '06:00', sunset = '18:00' } = body;
   if (!dep || !arr || !off || !on) return bad(res, 'dep, arr, off and on are required');
   if (!RULES[rule]) return bad(res, `rule must be one of: ${Object.keys(RULES).join(', ')}`);
   const from = placeOf(dep), to = placeOf(arr);
@@ -56,17 +58,24 @@ router.post('/night-time/calc', withAirports, (req, res) => {
   if (Number.isNaN(+t0) || Number.isNaN(+t1)) return bad(res, 'off and on must be ISO 8601 times, e.g. 2025-03-11T13:00Z');
   if (t1 <= t0) return bad(res, 'On-block must be after off-block.');
   if (t1 - t0 > 24 * 3600000) return bad(res, 'Block time over 24 hours.');
+  for (const [k, v] of [['takeoff', takeoff], ['landing', landing]]) {
+    if (v != null && v !== '' && Number.isNaN(+new Date(v))) return bad(res, `${k} must be an ISO 8601 time, e.g. 2025-03-11T13:12Z`);
+  }
+  const air = airborne({ off: t0, on: t1, takeoff, landing });
+  if (air.takeoff < t0 || air.landing > t1) return bad(res, 'Take-off and landing must be within the block time.');
+  if (!(air.landing > air.takeoff)) return bad(res, 'Landing must be after take-off.');
   if (rule === 'fixed' && (!/^\d{1,2}:\d{2}$/.test(String(sunrise)) || !/^\d{1,2}:\d{2}$/.test(String(sunset)))) return bad(res, 'sunrise and sunset must be times HH:MM, e.g. 06:00 and 18:00');
   let r;
-  try { r = compute({ from, to, off: t0, on: t1, rule, sunrise, sunset }); } catch (e) { return bad(res, e.message); }
+  try { r = compute({ from, to, off: air.takeoff, on: air.landing, rule, sunrise, sunset }); } catch (e) { return bad(res, e.message); }
   const pos = (p) => ({ lat: round(p.lat, 5), lon: round(((p.lon + 540) % 360) - 180, 5) });
-  const block = minutes(r.totalMs), night = minutes(r.nightMs);
+  const block = minutes(t1 - t0), flight = minutes(r.totalMs), night = minutes(r.nightMs);
   res.json({
     rule, sunAltitudeLimit: r.limit, ...(rule === 'fixed' ? { sunrise: r.sunrise, sunset: r.sunset } : {}),
     departure: from, arrival: to,
     offBlock: t0.toISOString(), onBlock: t1.toISOString(),
-    blockMinutes: block, nightMinutes: night, dayMinutes: block - night,
-    block: hm(block), night: hm(night), day: hm(block - night),
+    takeoff: air.takeoff.toISOString(), landing: air.landing.toISOString(), estimated: air.estimated,
+    blockMinutes: block, flightMinutes: flight, nightMinutes: night, dayMinutes: flight - night,
+    block: hm(block), flight: hm(flight), night: hm(night), day: hm(flight - night),
     takeoffAtNight: r.takeoffNight, landingAtNight: r.landingNight,
     distanceKm: round(r.distanceKm, 1), distanceNm: round(r.distanceKm / 1.852, 1), initialCourseDeg: round(r.courseDeg, 1),
     segments: r.segments.map(s => ({

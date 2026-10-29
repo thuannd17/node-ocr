@@ -15,6 +15,8 @@ services:
   app:
     build: .
     image: roster-ocr-app:latest
+    # a small init as PID 1: it reaps the processes a stopped training run leaves (Python, an OCR server)
+    init: true
     env_file: .env
     environment:
       HOST: 0.0.0.0
@@ -26,6 +28,8 @@ services:
       GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/firebase-admin.json
       # MongoDB on the host (the mongo-docker container's port 27017): API keys, plans, calls (services/accounts.js)
       MONGODB_URI: ${MONGODB_URI_DOCKER:-mongodb://host.docker.internal:27017/rosterparser}
+      # Redis on the host (the redis container's port 6379): the cache (services/cache.js)
+      REDIS_URL: ${REDIS_URL_DOCKER:-redis://host.docker.internal:6379}
     ports:
       - "${APP_PORT:-3000}:3000"
     volumes:

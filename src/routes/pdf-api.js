@@ -151,9 +151,9 @@ router.post('/upload', uploadFile, async (req, res) => {
 router.get('/files', async (req, res) => {
   try {
     const { index } = await syncMedia({ maxAgeMs: 2000 });
-    const labeled = new Set(index.labels.map(l => l.name));
+    const labeled = new Map(index.labels.map(l => [l.name, l.md5]));
     const items = index.files.filter(f => PDF_EXTS.includes(extOf(f.name))).map(f => f.name).sort()
-      .map(name => ({ name, labeled: labeled.has(name), review: labeled.has(name) ? reviewState(LABELS_ROOT, name) : null }));
+      .map(name => ({ name, labeled: labeled.has(name), review: labeled.has(name) ? reviewState(LABELS_ROOT, name, labeled.get(name)) : null }));
     res.json({ items, counts: { files: items.length, labeled: items.filter(i => i.labeled).length } });
   } catch (e) {
     fail(res, e, 'GET /api/pdf/files');

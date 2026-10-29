@@ -10,7 +10,7 @@
  * /models and for ocr:train / ocr:kfold, which run OCR servers on a version's folder.
  *
  *   syncRecModels({ force }) -> brings REC_DIR up to date
- *   listRecModels() -> [{ id, active, name, createdAt, status, trainedOn, testedOn, comparison, notes, sizeBytes }]
+ *   listRecModels() -> [{ id, active, name, createdAt, seconds, status, trainedOn, testedOn, comparison, notes, sizeBytes }]
  *   activeRecId(), activateRec(id), deleteRec(id), publishRec(id, { withCheckpoint })
  * OCR_REC_VERSION in .env pins a version on this machine (instead of active.json).
  * Training a new version: scripts/ocr-train.mjs (npm run ocr:train).
@@ -53,7 +53,7 @@ export function listRecModels() {
     .map((id) => {
       const m = readJson(path.join(REC_DIR, id, 'model.json'));
       return {
-        id, active: id === active, name: m.name || '', createdAt: m.createdAt || null, status: m.status || '',
+        id, active: id === active, name: m.name || '', createdAt: m.createdAt || null, seconds: m.seconds ?? null, status: m.status || '',
         trainedOn: m.trainedOn?.length ?? null, testedOn: m.testedOn?.length ?? null,
         comparison: m.comparison ? { against: m.comparison.against, rosters: m.comparison.rosters, verdict: m.comparison.verdict,
           mine: m.comparison[id], theirs: m.comparison[m.comparison.against] } : null,

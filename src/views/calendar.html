@@ -446,6 +446,17 @@
       if (e.kind === 'flight' && route && e.start?.utc && e.end?.utc && airportCache.get(route[1]) && airportCache.get(route[2])) {
         const iso = (t) => `${t.y}-${pad(t.mo)}-${pad(t.d)}T${pad(t.h)}:${pad(t.mi)}Z`;
         const q = new URLSearchParams({ dep: route[1], arr: route[2], off: iso(e.start), on: iso(e.end) });
+        // its take-off / landing ("Takeoff: 06:52 Z" in the description) when the roster has them; without them
+        // /night-time takes the taxi off the block time
+        const off = Date.parse(iso(e.start)), on = Date.parse(iso(e.end));
+        for (const [field, label] of [['takeoff', 'Takeoff'], ['landing', 'Landing']]) {
+          const m = new RegExp(`^${label}:\\s*[AE]?\\s*(\\d{1,2}):(\\d{2})\\s*Z?\\b(?!\\s*(?:L|LB|B)\\b)`, 'im').exec(e.description || '');
+          if (!m) continue;
+          // that clock time on the off-block day, or the next one (over midnight)
+          let t = Date.UTC(e.start.y, e.start.mo - 1, e.start.d, Number(m[1]), Number(m[2]));
+          if (t < off) t += 86400000;
+          if (t <= on) q.set(field, new Date(t).toISOString().slice(0, 16) + 'Z');
+        }
         box.insertAdjacentHTML('beforeend', ` · <a href="/night-time?${q}" target="_blank" rel="noopener"><i class="fa-solid fa-moon" aria-hidden="true"></i> Night time</a>`);
       }
     }

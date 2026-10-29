@@ -9,6 +9,11 @@
 //        takeoffNight, landingNight, samples: [{ t, lat, lon, alt }] }
 //   Segment edges are found to the second. Longitudes in `samples` / positions are unwrapped
 //   (may pass ±180) so a line drawn through them does not jump across the map.
+//   The night time is that of the flight itself: call it with off = take-off, on = landing (NightTime.airborne).
+//
+// NightTime.airborne({ off, on, takeoff?, landing? }) -> { takeoff: Date, landing: Date, estimated: { takeoff, landing } }
+//   A take-off / landing time of the roster is used as it is; without one the taxi is taken off the block
+//   time: take-off = off-block + 10 min (taxi-out), landing = on-block - 5 min (taxi-in).
 (function (root) {
   const RULES = {
     // ICAO Annex 1 / EASA FCL / FAA 14 CFR 1.1: from the end of evening civil twilight to the
@@ -142,6 +147,23 @@
     };
   }
 
+  // taxi-out / taxi-in of a flight without take-off / landing times
+  const TAXI_OUT_MS = 10 * 60000, TAXI_IN_MS = 5 * 60000;
+  function airborne({ off, on, takeoff, landing }) {
+    const t = (v) => { const d = v == null || v === '' ? null : new Date(v); return d && !Number.isNaN(+d) ? d : null; };
+    const offT = t(off), onT = t(on);
+    let up = t(takeoff), down = t(landing);
+    const estimated = { takeoff: !up, landing: !down };
+    if (!up && offT) up = new Date(+offT + TAXI_OUT_MS);
+    if (!down && onT) down = new Date(+onT - TAXI_IN_MS);
+    // a block too short for the taxi times: the whole block time
+    if (up && down && !(down > up) && (estimated.takeoff || estimated.landing)) {
+      if (estimated.takeoff) up = offT;
+      if (estimated.landing) down = onT;
+    }
+    return { takeoff: up, landing: down, estimated };
+  }
+
   const hhmm = (min) => `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
 
   /**
@@ -226,5 +248,5 @@
     return { type: 'Polygon', coordinates: [band] };
   }
 
-  root.NightTime = { RULES, compute, distanceKm, pointAt, courseDeg, sunAltitude, hmm, subsolarPoint, nightPolygon, fixedNightPolygon, localMinutes, clockMinutes };
+  root.NightTime = { RULES, compute, airborne, TAXI_OUT_MS, TAXI_IN_MS, distanceKm, pointAt, courseDeg, sunAltitude, hmm, subsolarPoint, nightPolygon, fixedNightPolygon, localMinutes, clockMinutes };
 })(typeof window !== 'undefined' ? window : globalThis);

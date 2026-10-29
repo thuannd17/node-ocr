@@ -1,12 +1,13 @@
 // /routes/media-api.js
-// Admin API of the /media page: the roster files MinIO holds (services/storage/, services/media-client.js).
+// Admin API of the files on /label (was the /media page): the roster files MinIO holds (services/storage/, services/media-client.js).
 // Not part of the public API (docs/openapi.json): roster files are personal data.
 //
 //   GET  /api/media/status          MinIO (or the fs store), the mirror, counts
 //   GET  /api/media/items           every roster file with its label state
 //   GET  /api/media/file?name=      the file, read from MinIO (CSV / Excel / TXT as an HTML table)
 //   DELETE /api/media/file?name=    move the file (and its label) to trash/<date>/ in MinIO
-//   POST /api/media/delete-unlabeled  { kind?: 'image'|'pdf' } move every file without a label to the trash
+//   POST /api/media/delete-unlabeled  { target?: 'roster'|'acars', kind?: 'image'|'pdf', ext? } move every file
+//                                   without a label (of that kind / extension) to the trash -> { deleted, failed }
 //   POST /api/media/upload          multipart files (up to 20) + target: roster (default) | acars -> stored as
 //                                   <uuid>.<ext>, or the file already there with the same content; label them on /label
 import { Router } from 'express';
@@ -91,15 +92,17 @@ router.delete('/media/file', async (req, res) => {
 
 // The label state is read fresh from MinIO here, so a file labeled meanwhile on /label is never deleted.
 router.post('/media/delete-unlabeled', async (req, res) => {
-  const kind = String(req.body?.kind || '');
+  const target = String(req.body?.target || 'roster'), kind = String(req.body?.kind || ''), ext = String(req.body?.ext || '').toLowerCase();
+  if (!['roster', 'acars'].includes(target)) return res.status(400).json({ error: 'target must be roster or acars' });
   if (kind && !['image', 'pdf'].includes(kind)) return res.status(400).json({ error: 'Invalid kind' });
+  if (ext && !isDataName(`x.${ext}`)) return res.status(400).json({ error: 'Invalid ext' });
   try {
-    const index = await mediaIndex(true);
+    const index = target === 'acars' ? await acars.mediaIndex(true) : await mediaIndex(true);
     const labeled = new Set(index.labels.map(l => l.name));
-    const names = index.files.map(f => f.name).filter(n => !labeled.has(n) && (!kind || kindOf(n) === kind));
+    const names = index.files.map(f => f.name).filter(n => !labeled.has(n) && (!kind || kindOf(n) === kind) && (!ext || extOf(n) === ext));
     const failed = [];
     for (const name of names) {
-      try { await trash(name); } catch (e) { failed.push({ name, error: e.message }); }
+      try { if (target === 'acars') await acars.deleteFile(name); else await trash(name); } catch (e) { failed.push({ name, error: e.message }); }
     }
     res.json({ ok: true, deleted: names.length - failed.length, failed });
   } catch (e) { fail(res, e); }

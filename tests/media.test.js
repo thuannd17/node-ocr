@@ -205,35 +205,74 @@ test('/media upload: an admin adds roster files or ACARS pictures (deduplicated)
   }
 });
 
-test('delete duplicates: one copy of each content stays (the labeled one first), the others and their labels go to the trash', async () => {
+test('/label delete all unlabeled: of one extension, or the ACARS pictures; labeled files stay', async () => {
   const { default: express } = await import('express');
-  const { default: api } = await import('../src/routes/api.js');
-  const server = express().use(express.json()).use('/api', api).listen(0);
+  const { default: mediaApi } = await import('../src/routes/media-api.js');
+  const server = express().use(express.json()).use('/api', mediaApi).listen(0);
   const base = `http://localhost:${server.address().port}/api`;
+  const del = (body) => fetch(`${base}/media/delete-unlabeled`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   try {
-    const img = crypto.randomBytes(600);
-    for (const n of ['dup-a.jpg', 'dup-b.jpg', 'dup-c.jpg']) await media.importFile(n, img); // three copies
-    await media.importLabel('dup-b.jpg', Buffer.from(JSON.stringify({ published: [], planned: [] }))); // the labeled one stays
-    const pic = crypto.randomBytes(300);
-    for (const n of ['ac-1.png', 'ac-2.png']) await media.acars.importFile(n, pic);
+    const png = (await media.storeFile(crypto.randomBytes(200), 'a.png')).name;
+    const csv = (await media.storeFile(crypto.randomBytes(210), 'b.csv')).name;
+    const kept = (await media.storeFile(crypto.randomBytes(220), 'c.png')).name;
+    await media.saveLabel(kept, { published: [], planned: [] });
+    const pic = (await media.acars.storeFile(crypto.randomBytes(230), 'cockpit.jpg')).name;
 
-    const plan = await (await fetch(`${base}/files/duplicates`)).json();
-    assert.deepEqual(plan.roster.filter(x => x.name.startsWith('dup-')).map(x => [x.name, x.keep]).sort(), [['dup-a.jpg', 'dup-b.jpg'], ['dup-c.jpg', 'dup-b.jpg']]);
-    assert.deepEqual(plan.acars.map(x => [x.name, x.keep]), [['ac-2.png', 'ac-1.png']]);
+    const r = await (await del({ ext: 'png' })).json();
+    assert.deepEqual([r.deleted, r.failed], [1, []]);
+    assert.equal(await media.fileBytes(png), null);
+    assert.ok(await media.fileBytes(kept)); // labeled
+    assert.ok(await media.fileBytes(csv)); // another extension
+    assert.ok(await media.acars.fileBytes(pic)); // the ACARS pictures only when asked
 
-    const dry = await (await fetch(`${base}/files/delete-duplicates`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"dry":true}' })).json();
-    assert.equal(dry.deleted, 0);
-    const r = await (await fetch(`${base}/files/delete-duplicates`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).json();
-    assert.ok(r.deleted >= 3);
-    assert.deepEqual(r.failed, []);
-    assert.equal(await media.fileBytes('dup-a.jpg'), null);
-    assert.equal(await media.fileBytes('dup-c.jpg'), null);
-    assert.deepEqual(await media.fileBytes('dup-b.jpg'), img);
-    assert.equal(await media.acars.fileBytes('ac-2.png'), null);
-    assert.deepEqual(await media.acars.fileBytes('ac-1.png'), pic);
-    assert.deepEqual((await (await fetch(`${base}/files/duplicates`)).json()).roster, []);
+    assert.ok((await (await del({ target: 'acars' })).json()).deleted >= 1); // with the upload test's picture
+    assert.equal(await media.acars.fileBytes(pic), null);
+    assert.ok(await media.fileBytes(csv));
+
+    assert.equal((await del({ ext: 'exe' })).status, 400);
+    assert.equal((await del({ target: 'nope' })).status, 400);
   } finally {
     server.close();
+  }
+});
+
+test('/api/dashboard: health of each server, label counts by kind, tickets, active models; a section that fails gives { error }', async () => {
+  const { default: express } = await import('express');
+  const { default: dashboardApi } = await import('../src/routes/dashboard-api.js');
+  const { default: i18n } = await import('../src/utils/i18n.js');
+  const saved = { ACCOUNTS_STORE: process.env.ACCOUNTS_STORE, REDIS_URL: process.env.REDIS_URL };
+  process.env.ACCOUNTS_STORE = 'memory';
+  delete process.env.REDIS_URL; // the cache in memory: never the real Redis
+  const server = express().use(i18n).use('/api', dashboardApi).listen(0);
+  const url = `http://localhost:${server.address().port}/api/dashboard`;
+  try {
+    const img = (await media.storeFile(crypto.randomBytes(240), 'dash.png')).name;
+    await media.storeFile(crypto.randomBytes(250), 'dash.pdf');
+    await media.saveLabel(img, { published: [], planned: [], _review: { by: 'user' } });
+
+    const d = await (await fetch(`${url}?fresh=1`)).json();
+    assert.equal(d.cached, false);
+    assert.deepEqual(d.health.map(h => h.id), ['minio', 'acars', 'ocr', 'mongo', 'redis']);
+    assert.equal(d.health[0].ok, true); // the folder store
+    assert.equal(d.health[3].ok, true); // accounts in memory
+    assert.equal(d.health[4].ok, false); // no REDIS_URL: the cache is in memory
+    for (const h of d.health) assert.equal(typeof h.ms, 'number');
+    const { image, text } = d.labels.roster;
+    assert.ok(image.labeled >= 1 && image.toReview >= 1 && text.unlabeled >= 1);
+    assert.equal(image.files, image.labeled + image.unlabeled);
+    assert.equal(typeof d.helpdesk.open, 'number');
+    assert.deepEqual(d.models.map(m => m.id), ['roster', 'rec', 'detect']);
+    assert.ok(d.users.error); // no Firebase in the tests: only that section fails
+
+    // within the minute: the same answer from the cache; ?fresh=1 makes a new one
+    await media.storeFile(crypto.randomBytes(260), 'dash2.pdf');
+    const again = await (await fetch(url)).json();
+    assert.deepEqual([again.cached, again.at, again.labels.roster.text.files], [true, d.at, text.files]);
+    const fresh = await (await fetch(`${url}?fresh=1`)).json();
+    assert.deepEqual([fresh.cached, fresh.labels.roster.text.files], [false, text.files + 1]);
+  } finally {
+    server.close();
+    for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
   }
 });
 

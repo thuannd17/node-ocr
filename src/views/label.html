@@ -29,7 +29,7 @@
     .tree-tools { display: flex; gap: 8px 16px; align-items: center; flex-wrap: wrap; }
     .toolbar { padding: 12px 14px; margin-bottom: 16px; }
     .toolbar .right { margin-left: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-    /* toolbar buttons as on /media: outlined; a red outline for deleting */
+    /* toolbar buttons: outlined; a red outline for deleting */
     button.tb { display: inline-flex; gap: 6px; align-items: center; padding: 7px 12px; font-size: 13px; white-space: nowrap; }
     button.tb.outline { background: #fff; color: var(--primary); border: 1px solid var(--primary); }
     button.tb.outline:hover:not(:disabled) { background: #eef4ff; }
@@ -38,6 +38,33 @@
     @media (max-width: 700px) { .toolbar .right { margin-left: 0; } .tree-tools input[type=search] { width: 100%; } }
     .tree-tools input[type=search] { padding: 6px 8px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px; width: 260px; max-width: 100%; }
     .tree-tools label { font-size: 12px; color: var(--muted); display: flex; gap: 6px; align-items: center; }
+    .tree-tools select { padding: 6px 8px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px; background: #fff; }
+    body.dragover .tree-tools { outline: 2px dashed var(--primary); outline-offset: 2px; }
+    /* upload progress (files added to the data): overall bar + one line per file */
+    .uploaded { display: none; margin: 0 0 16px; padding: 10px 14px; border-radius: 6px; font-size: 14px; background: #e8f5e9; color: #1b5e20; }
+    .uploaded.visible { display: block; }
+    .uploaded.busy { background: #e3f2fd; color: #0d47a1; }
+    .uploaded.partial { background: #fff8e1; color: #6d4c00; }
+    .uploaded.err { background: #fdecea; color: #b71c1c; }
+    .uploaded .close { float: right; background: none; border: none; cursor: pointer; color: inherit; font-size: 16px; padding: 0 4px; }
+    .up-head { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; font-weight: 600; }
+    .up-head .pct { margin-left: auto; font-variant-numeric: tabular-nums; }
+    .bar { height: 8px; border-radius: 4px; background: rgba(0, 0, 0, 0.08); overflow: hidden; margin: 8px 0 10px; }
+    .bar > span { display: block; height: 100%; width: 0; background: var(--primary); border-radius: 4px; transition: width 0.15s; }
+    .uploaded:not(.busy) .bar > span { background: #2e7d32; }
+    .up-files { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-height: 260px; overflow-y: auto; }
+    .up-files li { display: grid; grid-template-columns: 18px minmax(0, 1fr) 110px 44px; gap: 8px; align-items: center; font-size: 13px; margin: 0; }
+    .up-files .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .up-files .nm small { color: var(--muted); }
+    .up-files .mini { height: 5px; margin: 0; }
+    .up-files .p { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+    .up-files .done { color: #2e7d32; }
+    .up-files .err { color: #b71c1c; }
+    .up-files .res { grid-column: 2 / -1; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; margin-top: -3px; }
+    .up-files .res.bad { color: #b71c1c; }
+    .up-files .res a { cursor: pointer; }
+    .up-files li.failed .mini > span, .uploaded:not(.busy) .up-files li.failed .mini > span { background: #c62828; }
+    @media (max-width: 600px) { .up-files li { grid-template-columns: 18px minmax(0, 1fr) 60px 40px; } }
     .tree-tools .spacer { flex: 1; }
     .tree-tools .status { padding: 0; }
     .tree { font-size: 13px; margin: 0; padding: 0; list-style: none; }
@@ -51,7 +78,6 @@
     .tree .file:hover { background: #f0f3f8; }
     .tree .file.active { background: #dce9fb; }
     .tree .file .fname { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; }
-    .tree .file.dup .fname { color: #999; }
     .tree .file .dirty-dot { color: #e08a00; font-weight: 700; }
     .tree .file .del-file { margin-left: auto; visibility: hidden; background: transparent; color: #c33; padding: 0 6px; font-size: 13px; line-height: 18px; }
     .tree .file:hover .del-file, .tree .file .del-file:focus-visible { visibility: visible; }
@@ -180,20 +206,27 @@
   <div class="page-header">
     <h1><i class="fa-solid fa-tags" aria-hidden="true"></i> Label Tool</h1>
     <span class="todo" id="todoCount"></span>
-    <p class="subtitle" data-i18n>Ground truth labels, used to measure accuracy and to train the models. Files and labels are kept in MinIO (see <a href="/media">Media</a>).</p>
+    <p class="subtitle" data-i18n>Ground truth labels, used to measure accuracy and to train the models. Files and labels are kept in MinIO; a deleted file goes to the trash there, so a wrong delete can be undone.</p>
   </div>
 
-  <!-- Toolbar (as on /media, /helpdesk): find and filter the files, tidy the data -->
+  <!-- Toolbar (as on /helpdesk): find and filter the files, add files, tidy the data -->
   <div class="card toolbar tree-tools">
     <input type="search" id="treeSearch" placeholder="Search by file name…" aria-label="Search by file name" />
+    <select id="typeFilter" aria-label="File type" title="File type"><option value="">All types</option></select>
     <label><input type="checkbox" id="onlyTodo" /> Only files without a label</label>
     <label title="Labels a user submitted on /roster or /acars, or that Claude changed: check them, then Save"><input type="checkbox" id="onlyReview" /> Only files to review</label>
-    <label><input type="checkbox" id="showDups" /> Show duplicate images</label>
     <div class="right">
-      <button class="tb danger" id="delDups" hidden title="Remove every copy of a file whose content is already in the data, with its label (one of each stays: the one whose label was saved last). They go to trash/&lt;date&gt;/ in MinIO."><i class="fa-solid fa-clone" aria-hidden="true"></i> <span>Delete duplicates</span></button>
+      <select id="uploadTarget" aria-label="Upload to" title="Where the uploaded files go">
+        <option value="roster">Roster files</option>
+        <option value="acars">ACARS pictures</option>
+      </select>
+      <button class="tb" id="uploadBtn" title="Add files to the data (or drop them on the page), then label them here"><i class="fa-solid fa-upload" aria-hidden="true"></i> <span>Upload</span></button>
+      <input type="file" id="uploadInput" multiple hidden accept=".jpg,.jpeg,.png,.bmp,.jfif,.pdf,.csv,.xls,.xlsx,.txt">
+      <button class="tb danger" id="delUnlabeled" disabled title="Move every file without a label (of the type chosen) to the trash in MinIO"><i class="fa-solid fa-trash-can" aria-hidden="true"></i> <span>Delete all unlabeled</span></button>
       <button class="tb outline" id="treeRefresh" title="Refresh" aria-label="Refresh"><i class="fa-solid fa-rotate" aria-hidden="true"></i></button>
     </div>
   </div>
+  <div id="uploaded" class="uploaded" role="status"></div>
 
   <!-- File tree: click a file to open it in the viewer -->
   <div class="panel">
@@ -316,9 +349,10 @@
     // Table rows of the label itself; review hint rows (OCR values) are not part of it.
     const labelRows = (sec) => [...$(sec + 'Body').rows].filter(tr => !tr.classList.contains('ocr-hint'));
 
-    let files = [];        // { name, ext, kind: 'image'|'pdf', labeled, duplicateOf }
+    let files = [];        // { name, ext, kind: 'image'|'pdf'|'acars', labeled, done, review }
     let current = null;    // the selected file entry
     let dirty = false;     // table edited since load/save
+    let busy = false;      // uploading files / deleting the unlabeled ones
     const openFolders = new Set(JSON.parse(safeGet('label.openFolders') || '[]'));
 
     function safeGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
@@ -339,8 +373,8 @@
     // ---------- Tree ----------
     function visibleFiles() {
       const q = $('treeSearch').value.trim().toLowerCase();
-      const onlyTodo = $('onlyTodo').checked, onlyReview = $('onlyReview').checked, showDups = $('showDups').checked;
-      return files.filter(f => (showDups || !f.duplicateOf) && (!onlyTodo || !f.done) && (!onlyReview || f.review) && (!q || f.name.toLowerCase().includes(q)));
+      const onlyTodo = $('onlyTodo').checked, onlyReview = $('onlyReview').checked, type = $('typeFilter').value;
+      return files.filter(f => (!type || folderOf(f) === type) && (!onlyTodo || !f.done) && (!onlyReview || f.review) && (!q || f.name.toLowerCase().includes(q)));
     }
 
     function renderTree() {
@@ -366,30 +400,18 @@
         const li = document.createElement('li');
         const d = document.createElement('details');
         // a folder stays as the user left it; the one holding the selected file opens
-        d.open = searching || openFolders.has(ext) || (current && folderOf(current) === ext);
+        d.open = searching || !!$('typeFilter').value || openFolders.has(ext) || (current && folderOf(current) === ext);
         const done = list.filter(f => f.done).length, toReview = list.filter(f => f.review).length;
         const icon = { pdf: 'fa-file-pdf', csv: 'fa-file-csv', xls: 'fa-file-excel', xlsx: 'fa-file-excel', txt: 'fa-file-lines', acars: 'fa-satellite-dish' }[ext] || 'fa-image';
         d.innerHTML = `<summary><i class="fa-solid ${icon}" aria-hidden="true"></i> ${ext === 'acars' ? __('ACARS pictures') : ext}<span class="count">${__('{done}/{total} labeled', { done, total: list.length })}${toReview ? ` · ${__('{n} to review', { n: toReview })}` : ''}</span></summary>`;
+        // a folder's files are built the first time it is open (hundreds of items each)
+        let built = false;
+        const build = () => { if (!built) { built = true; d.appendChild(fileList(list)); } };
         d.addEventListener('toggle', () => {
-          if (d.open) openFolders.add(ext); else openFolders.delete(ext);
+          if (d.open) { openFolders.add(ext); build(); } else openFolders.delete(ext);
           safeSet('label.openFolders', JSON.stringify([...openFolders]));
         });
-        const fl = document.createElement('ul');
-        fl.className = 'files';
-        for (const f of list) {
-          const item = document.createElement('li');
-          item.className = 'file' + (current && current.name === f.name ? ' active' : '') + (f.duplicateOf ? ' dup' : '');
-          item.title = f.name + (f.duplicateOf ? `\n${__('Same content as {name}', { name: f.duplicateOf })}` : '');
-          item.innerHTML = `<span>${fileIcon(f)}</span><span class="fname"></span><span class="dirty-dot"></span>`
-            + `<button class="del-file" title="${__('Remove this file from the data (with its label)')}" aria-label="${__('Remove file')}"><i class="fa-solid fa-trash-can" aria-hidden="true"></i></button>`;
-          item.querySelector('.fname').textContent = f.name;
-          item.querySelector('.del-file').addEventListener('click', (e) => { e.stopPropagation(); deleteFile(f); });
-          if (current && current.name === f.name && dirty) item.querySelector('.dirty-dot').textContent = '●';
-          item.addEventListener('click', () => selectFile(f));
-          f._el = item;
-          fl.appendChild(item);
-        }
-        d.appendChild(fl);
+        if (d.open) build();
         li.appendChild(d);
         ul.appendChild(li);
       }
@@ -400,8 +422,28 @@
       if (!vis.length) tree.innerHTML = `<li class="empty">${__('No files match the filter.')}</li>`;
     }
 
+    // The items of one folder's files
+    function fileList(list) {
+      const fl = document.createElement('ul');
+      fl.className = 'files';
+      for (const f of list) {
+        const item = document.createElement('li');
+        item.className = 'file' + (current && current.name === f.name ? ' active' : '');
+        item.title = f.name;
+        item.innerHTML = `<span>${fileIcon(f)}</span><span class="fname"></span><span class="dirty-dot"></span>`
+          + `<button class="del-file" title="${__('Remove this file from the data (with its label)')}" aria-label="${__('Remove file')}"><i class="fa-solid fa-trash-can" aria-hidden="true"></i></button>`;
+        item.querySelector('.fname').textContent = f.name;
+        item.querySelector('.del-file').addEventListener('click', (e) => { e.stopPropagation(); deleteFile(f); });
+        if (current && current.name === f.name && dirty) item.querySelector('.dirty-dot').textContent = '●';
+        item.addEventListener('click', () => selectFile(f));
+        f._el = item;
+        fl.appendChild(item);
+      }
+      return fl;
+    }
+
     function updateTodo() {
-      const todo = files.filter(f => !f.duplicateOf && !f.done);
+      const todo = files.filter(f => !f.done);
       const pdf = todo.filter(f => f.kind === 'pdf').length, ac = todo.filter(f => f.kind === 'acars').length;
       const review = files.filter(f => f.review).length;
       $('todoCount').textContent = todo.length
@@ -735,9 +777,9 @@
       current = f;
       openViewer();
       document.querySelectorAll('.tree .file.active').forEach(el => el.classList.remove('active'));
+      // its folder's files are not built yet (closed folder): open it
+      if (!f._el?.isConnected && visibleFiles().includes(f)) { openFolders.add(folderOf(f)); renderTree(); }
       f._el?.classList.add('active');
-      const folder = f._el?.closest('details');
-      if (folder && !folder.open) folder.open = true;
       f._el?.scrollIntoView({ block: 'nearest' });
       const vis = visibleFiles(), at = vis.indexOf(f);
       showPos(at, vis.length);
@@ -747,7 +789,7 @@
       if (!EMBED) history.replaceState(null, '', `/label?name=${encodeURIComponent(f.name)}`);
       const pdf = f.kind === 'pdf';
       $('fileKind').textContent = f.kind === 'acars' ? __('ACARS picture') : !pdf ? __('Roster image') : f.ext === 'pdf' ? 'PDF duty plan' : __('{ext} roster (read like a PDF)', { ext: f.ext.toUpperCase() });
-      $('filePath').textContent = `${folderOf(f)}/${f.name}` + (f.duplicateOf ? `  (${__('same content as {name}', { name: f.duplicateOf })})` : '');
+      $('filePath').textContent = `${folderOf(f)}/${f.name}`;
       $('filePath').title = $('filePath').textContent;
       $('rosterImg').style.display = pdf ? 'none' : '';
       $('rosterPdf').style.display = pdf ? 'block' : 'none';
@@ -966,40 +1008,6 @@
       }
     }
 
-    // ---------- Delete every duplicate (byte-identical copies) and its label: /api/files/delete-duplicates ----------
-    function updateDupButton() {
-      const n = files.filter(f => f.duplicateOf).length;
-      $('delDups').hidden = !n;
-      $('delDups').querySelector('span').textContent = __('Delete duplicates ({n})', { n });
-    }
-    $('delDups').addEventListener('click', async () => {
-      try {
-        const plan = await (await fetch('/api/files/duplicates')).json();
-        if (plan.error) throw new Error(plan.error);
-        const all = [...plan.roster, ...plan.acars];
-        if (!all.length) { await loadFiles(); renderTree(); return; }
-        const labeled = all.filter(x => x.labeled).length;
-        let question = __('Delete {n} duplicate files ({l} of them labeled)? One copy of each stays (the one whose label was saved last).', { n: all.length, l: labeled });
-        if (plan.labelsDiffer) question += `\n\n${__('{n} group(s) have copies with different labels: the kept copy\'s label stays, the others go to the trash too.', { n: plan.labelsDiffer })}`;
-        question += `\n\n${__('They are moved to trash/<date>/ in MinIO (move them back there to restore them).')}`;
-        if (!confirm(question)) return;
-        if (viewerOpen() && current && all.some(x => x.name === current.name)) { if (!confirmLeave()) return; setDirty(false); closeViewer(); current = null; }
-        $('delDups').disabled = true;
-        const res = await fetch('/api/files/delete-duplicates', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-        const r = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(r.error || 'HTTP ' + res.status);
-        await loadFiles();
-        renderTree();
-        alert(r.failed.length
-          ? __('Deleted {n} duplicate files; {f} failed: {list}', { n: r.deleted, f: r.failed.length, list: r.failed.map(x => x.name).join(', ') })
-          : __('Deleted {n} duplicate files (moved to the trash in MinIO).', { n: r.deleted }));
-      } catch (e) {
-        alert(__('Could not remove it: {error}', { error: e.message }));
-      } finally {
-        $('delDups').disabled = false;
-      }
-    });
-
     // ---------- Init ----------
     async function loadFiles() {
       const [img, pdf, ac] = await Promise.all([
@@ -1007,19 +1015,192 @@
         fetch('/api/pdf/files').then(r => r.json()).catch(() => ({ items: [] })),
         fetch('/api/acars/files').then(r => r.json()).catch(() => ({ items: [] })),
       ]);
-      const acarsCopy = new Set((ac.items || []).filter(i => i.duplicateOf && i.labeled).map(i => i.duplicateOf));
-      const labeledCopy = new Set((img.items || []).filter(i => i.duplicateOf && i.labeled).map(i => i.duplicateOf));
-      files = [
-        ...(img.items || []).map(i => ({ name: i.name, kind: 'image', labeled: i.labeled, review: i.review || null, duplicateOf: i.duplicateOf, done: i.labeled || labeledCopy.has(i.name) })),
-        ...(pdf.items || []).map(p => ({ name: p.name, kind: 'pdf', labeled: p.labeled, review: p.review || null, duplicateOf: null, done: p.labeled })),
-        ...(ac.items || []).map(i => ({ name: i.name, kind: 'acars', labeled: i.labeled, review: i.review || null, duplicateOf: i.duplicateOf, done: i.labeled || acarsCopy.has(i.name) })),
-      ].map(f => ({ ...f, ext: extOf(f.name) }));
+      const entry = (kind) => (i) => ({ name: i.name, kind, labeled: i.labeled, review: i.review || null, done: i.labeled });
+      files = [...(img.items || []).map(entry('image')), ...(pdf.items || []).map(entry('pdf')), ...(ac.items || []).map(entry('acars'))].map(f => ({ ...f, ext: extOf(f.name) }));
       // roster files, then ACARS; inside each folder the labels to review first, then the unlabeled ones (new uploads), then the rest
       const rank = (f) => (f.review ? 0 : f.done ? 2 : 1);
       files.sort((a, b) => (a.kind === 'acars') - (b.kind === 'acars') || folderOf(a).localeCompare(folderOf(b)) || (rank(a) - rank(b)) || a.name.localeCompare(b.name));
       updateTodo();
-      updateDupButton();
+      updateTypeFilter();
+      updateDelUnlabeled();
     }
+
+    // ---------- Filter by type: one entry per folder of the tree (extension, ACARS pictures), with its count ----------
+    function updateTypeFilter() {
+      const sel = $('typeFilter'), want = sel.value || safeGet('label.type') || '';
+      const count = new Map();
+      for (const f of files) count.set(folderOf(f), (count.get(folderOf(f)) || 0) + 1);
+      const types = [...count.keys()].sort((a, b) => (a === 'acars') - (b === 'acars') || a.localeCompare(b));
+      sel.innerHTML = `<option value="">${__('All types')} (${files.length})</option>`
+        + types.map(t => `<option value="${t}">${t === 'acars' ? __('ACARS pictures') : t.toUpperCase()} (${count.get(t)})</option>`).join('');
+      sel.value = count.has(want) ? want : '';
+    }
+    $('typeFilter').addEventListener('change', () => { safeSet('label.type', $('typeFilter').value); renderTree(); updateDelUnlabeled(); });
+
+    // ---------- Delete all unlabeled (of the type chosen): /api/media/delete-unlabeled, files go to trash/<date>/ ----------
+    const unlabeledOfType = () => files.filter(f => !f.labeled && (!$('typeFilter').value || folderOf(f) === $('typeFilter').value));
+    function updateDelUnlabeled() {
+      const n = unlabeledOfType().length;
+      $('delUnlabeled').disabled = !n || busy;
+      $('delUnlabeled').querySelector('span').textContent = __('Delete all unlabeled ({n})', { n });
+    }
+    $('delUnlabeled').addEventListener('click', async () => {
+      const list = unlabeledOfType(), type = $('typeFilter').value;
+      if (!list.length || busy) return;
+      if (!confirm(`${__('Delete {n} files without a label?', { n: list.length })}\n\n${__('They are moved to trash/<date>/ in MinIO (move them back there to restore them).')}`)) return;
+      busy = true;
+      updateDelUnlabeled();
+      showUploaded('busy', __('Deleting the unlabeled files…'));
+      try {
+        // the server reads the label state fresh, so a file labeled meanwhile stays
+        const calls = type === 'acars' ? [{ target: 'acars' }] : type ? [{ target: 'roster', ext: type }]
+          : [list.some(f => f.kind !== 'acars') && { target: 'roster' }, list.some(f => f.kind === 'acars') && { target: 'acars' }].filter(Boolean);
+        let deleted = 0;
+        const failed = [];
+        for (const body of calls) {
+          const res = await fetch('/api/media/delete-unlabeled', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+          const r = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(r.error || 'HTTP ' + res.status);
+          deleted += r.deleted;
+          failed.push(...r.failed);
+        }
+        if (failed.length) showUploaded('err', __('{n} failed: {list}', { n: failed.length, list: failed.map(f => f.name).join(', ') }));
+        else showUploaded('', __('Deleted {n} unlabeled files (moved to the trash in MinIO).', { n: deleted }));
+      } catch (e) {
+        showUploaded('err', e.message);
+      } finally {
+        busy = false;
+        if (current && !current.labeled && list.some(f => f.name === current.name) && viewerOpen()) { setDirty(false); closeViewer(); current = null; }
+        await loadFiles();
+        renderTree();
+      }
+    });
+
+    // ---------- Upload: add files to the data (stored as <uuid>.<ext>, the same content only once), then label them here ----------
+    function showUploaded(kind, text) {
+      const box = $('uploaded');
+      box.className = `uploaded visible ${kind}`;
+      box.textContent = text;
+      if (kind !== 'busy') addClose(box);
+    }
+    function addClose(box) {
+      box.insertAdjacentHTML('afterbegin', `<button class="close" title="${__('Close')}" aria-label="${__('Close')}">×</button>`);
+      box.querySelector('.close').addEventListener('click', () => box.classList.remove('visible'));
+    }
+    const UPLOAD_ACCEPT = { roster: '.jpg,.jpeg,.png,.bmp,.jfif,.pdf,.csv,.xls,.xlsx,.txt', acars: '.jpg,.jpeg,.png,.bmp,.jfif' };
+    $('uploadTarget').addEventListener('change', () => { $('uploadInput').accept = UPLOAD_ACCEPT[$('uploadTarget').value]; });
+    $('uploadBtn').addEventListener('click', () => { if (!busy) $('uploadInput').click(); });
+    $('uploadInput').addEventListener('change', (e) => { uploadFiles([...e.target.files]); e.target.value = ''; });
+    const dragsFiles = (e) => e.dataTransfer?.types?.includes('Files') && $('viewer').hidden;
+    document.addEventListener('dragover', (e) => { if (dragsFiles(e)) { e.preventDefault(); document.body.classList.add('dragover'); } });
+    document.addEventListener('dragleave', (e) => { if (!e.relatedTarget) document.body.classList.remove('dragover'); });
+    document.addEventListener('drop', (e) => {
+      document.body.classList.remove('dragover');
+      if (!dragsFiles(e) || !e.dataTransfer.files?.length) return;
+      e.preventDefault();
+      uploadFiles([...e.dataTransfer.files]);
+    });
+    // One request per file (XMLHttpRequest: its upload reports progress): an overall bar by bytes, one line per file.
+    function sendOne(file, target, onProgress) {
+      return new Promise((resolve, reject) => {
+        const body = new FormData();
+        body.append('target', target);
+        body.append('files', file, file.name);
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', '/api/media/upload');
+        xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(e.loaded / e.total); };
+        xhr.onload = () => {
+          let data = {};
+          try { data = JSON.parse(xhr.responseText); } catch { /* not JSON */ }
+          if (xhr.status >= 200 && xhr.status < 300 && data.items?.[0]) resolve(data.items[0]);
+          else reject(new Error(data.error || `HTTP ${xhr.status}`));
+        };
+        xhr.onerror = () => reject(new Error(__('The connection was lost')));
+        xhr.send(body);
+      });
+    }
+    const fmtSize = (b) => (b == null ? '' : b >= 1048576 ? `${(b / 1048576).toFixed(1)} MB` : `${Math.round(b / 1024)} KB`);
+    async function uploadFiles(list) {
+      if (!list.length || busy) return;
+      if (list.length > 100) { showUploaded('err', __('At most {n} files at a time', { n: 100 })); return; }
+      const target = $('uploadTarget').value;
+      busy = true;
+      $('uploadBtn').disabled = true;
+      updateDelUnlabeled();
+      const box = $('uploaded');
+      const total = list.reduce((a, f) => a + (f.size || 1), 0);
+      const state = list.map(f => ({ file: f, frac: 0, status: 'wait', result: null }));
+      const icon = { wait: '<i class="fa-regular fa-clock" aria-hidden="true"></i>', send: '<i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i>',
+        done: '<i class="fa-solid fa-circle-check done" aria-hidden="true"></i>', err: '<i class="fa-solid fa-circle-xmark err" aria-hidden="true"></i>' };
+      box.className = 'uploaded visible busy';
+      box.innerHTML = `<div class="up-head"><span id="upTitle"></span><span class="pct" id="upPct">0%</span></div>
+        <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" id="upBar"><span></span></div>
+        <ul class="up-files">${state.map((x, i) => `<li id="up${i}">
+          <span class="ic">${icon.wait}</span>
+          <span class="nm"></span>
+          <div class="bar mini"><span></span></div><span class="p">0%</span></li>`).join('')}</ul>`;
+      state.forEach((x, i) => {
+        const nm = $(`up${i}`).querySelector('.nm');
+        nm.title = x.file.name;
+        nm.textContent = x.file.name + ' ';
+        nm.insertAdjacentHTML('beforeend', `<small>${fmtSize(x.file.size)}</small>`);
+      });
+      const draw = (i) => {
+        const done = state.filter(x => x.status === 'done' || x.status === 'err').length;
+        const sent = state.reduce((a, x) => a + (x.file.size || 1) * (x.status === 'done' || x.status === 'err' ? 1 : x.frac), 0);
+        const pct = Math.min(100, Math.round((100 * sent) / total));
+        $('upTitle').textContent = __('Uploading {done} / {n} files…', { done: Math.min(done + 1, list.length), n: list.length });
+        $('upPct').textContent = `${pct}%`;
+        $('upBar').querySelector('span').style.width = `${pct}%`;
+        $('upBar').setAttribute('aria-valuenow', String(pct));
+        if (i == null) return;
+        const x = state[i], li = $(`up${i}`), p = Math.round(100 * (x.status === 'done' ? 1 : x.frac));
+        li.querySelector('.ic').innerHTML = icon[x.status];
+        li.classList.toggle('failed', x.status === 'err');
+        li.querySelector('.mini span').style.width = `${p}%`;
+        li.querySelector('.p').textContent = x.status === 'err' ? '—' : `${p}%`;
+      };
+      draw();
+      for (const [i, x] of state.entries()) {
+        x.status = 'send';
+        draw(i);
+        try {
+          x.result = await sendOne(x.file, target, (frac) => { x.frac = Math.min(frac, 0.99); draw(i); }); // 100% once the server kept it
+          x.status = x.result.error ? 'err' : 'done';
+        } catch (err) {
+          x.result = { original: x.file.name, error: err.message };
+          x.status = 'err';
+        }
+        draw(i);
+        const r = x.result, li = $(`up${i}`), res = document.createElement('span');
+        res.className = 'res' + (r.error ? ' bad' : '');
+        if (r.error) res.textContent = __(r.error);
+        else {
+          res.innerHTML = `<code></code>${r.isNew ? '' : ` (${__('already in the data')})`} · <a data-open="${encodeURIComponent(r.name)}">${__('Label it')}</a>`;
+          res.querySelector('code').textContent = r.name;
+        }
+        li.appendChild(res);
+        li.scrollIntoView({ block: 'nearest' });
+      }
+      const ok = state.filter(x => x.status === 'done').length;
+      box.className = `uploaded visible${ok < list.length ? ' partial' : ''}`;
+      $('upTitle').textContent = __('{n} file(s) added to {where}.', { n: ok, where: target === 'acars' ? __('the ACARS pictures') : __('the roster files') })
+        + (ok < list.length ? ` ${__('{n} failed.', { n: list.length - ok })}` : '');
+      $('upPct').textContent = '100%';
+      $('upBar').querySelector('span').style.width = '100%';
+      addClose(box);
+      busy = false;
+      $('uploadBtn').disabled = false;
+      await loadFiles();
+      renderTree();
+    }
+    // "Label it" on an uploaded file: open it here
+    $('uploaded').addEventListener('click', (e) => {
+      const a = e.target.closest('a[data-open]');
+      if (!a) return;
+      const f = files.find(x => x.name === decodeURIComponent(a.dataset.open));
+      if (f) selectFile(f);
+    });
 
     // Remove a file that is wrong or not wanted for training. The server moves the
     // file and its label to trash/<date>/ in MinIO (not erased); its cached OCR result is dropped.
@@ -1033,7 +1214,7 @@
         if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
         // deleted from the viewer: go on with the next file (the previous one at the end of the list)
         const after = open && !EMBED ? (neighbour(1) !== current ? neighbour(1) : neighbour(-1)) : null;
-        await loadFiles(); // duplicates of this file are recomputed
+        await loadFiles();
         if (open) setDirty(false);
         const next = after && after.name !== f.name ? files.find(x => x.name === after.name) : null;
         if (current && current.name === f.name) current = null;
@@ -1059,9 +1240,8 @@
       await loadFiles();
       let start = files.find(f => f.name === wanted);
       if (!start && EMBED && wanted) {
-        start = { name: wanted, ext: extOf(wanted), kind: ['pdf', 'csv', 'xls', 'xlsx', 'txt'].includes(extOf(wanted)) ? 'pdf' : 'image', labeled: true, done: true, duplicateOf: null };
+        start = { name: wanted, ext: extOf(wanted), kind: ['pdf', 'csv', 'xls', 'xlsx', 'txt'].includes(extOf(wanted)) ? 'pdf' : 'image', labeled: true, done: true };
       }
-      if (start && start.duplicateOf) $('showDups').checked = true;
       renderTree();
       if (start) selectFile(start, { force: true });
     }
@@ -1069,7 +1249,6 @@
     $('treeSearch').addEventListener('input', renderTree);
     $('onlyTodo').addEventListener('change', renderTree);
     $('onlyReview').addEventListener('change', renderTree);
-    $('showDups').addEventListener('change', renderTree);
     $('treeRefresh').addEventListener('click', async () => {
       $('treeRefresh').disabled = true;
       try { await loadFiles(); renderTree(); } catch (e) { alert(__('Could not do it: {error}', { error: e.message })); } finally { $('treeRefresh').disabled = false; }

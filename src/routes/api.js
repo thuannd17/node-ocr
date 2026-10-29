@@ -11,10 +11,11 @@ import { runModelBenchmark, labeledCounts, FILE_TYPES } from '../services/model-
 import { runOcrBenchmark } from '../services/ocr-benchmark.js';
 import { runAcarsBenchmark, labeledAcars } from '../services/acars-benchmark.js';
 import * as history from '../services/benchmark-history.js';
+import { startBenchJob, benchJob, follow, stopBenchJob } from '../services/bench-jobs.js';
 import { ocrLines, extractWithPaddleOCR, ocrServerHealth, deviceOf, OCR_SERVER_URL } from '../services/paddle-ocr.js';
 import { extractImageWithModel, modelInfo } from '../services/pdf-ai-extract.js';
 import { saveLabelResult, savePredictedResult } from '../services/result-cache.js';
-import { syncMedia, localFile, readLabel, saveLabel, deleteFile, mediaIndex, mediaErrorStatus, acars } from '../services/media-client.js';
+import { syncMedia, localFile, readLabel, saveLabel, deleteFile, mediaErrorStatus, acars } from '../services/media-client.js';
 import sharp from 'sharp';
 import { isDataName, kindOf, extOf, reviewState, LABELS_ROOT } from '../utils/data-files.js';
 import { UPLOADS_DIR, CACHE_DIR } from '../utils/paths.js';
@@ -55,7 +56,6 @@ function scoreVsLabel(label, result) {
   return score;
 }
 
-const activeBenchmarks = new Map();
 
 // Multipart upload parsing
 const upload = multer({
@@ -202,26 +202,15 @@ router.post('/ocr/upload', upload.single('image'), async (req, res) => {
 });
 
 // List the roster images of MinIO (JSON). `files` = names (as before); `items`
-// adds whether each has a label and, for byte-identical copies, which file it
-// duplicates (the first copy by name). New rosters to label = unlabeled, not duplicate.
+// adds whether each has a label. Uploads are stored once per content (storage storeFile), so no copies to hide.
 // `review`: the label waits for a person's review (a user's submitted correction, ...: utils/data-files.js reviewState).
 router.get('/files', async (req, res) => {
   try {
     const { index } = await syncMedia({ maxAgeMs: 2000 });
-    const labeled = new Set(index.labels.map(l => l.name));
+    const labeled = new Map(index.labels.map(l => [l.name, l.md5]));
     const files = index.files.filter(f => kindOf(f.name) === 'image').sort((a, b) => a.name.localeCompare(b.name));
-    const firstByHash = new Map();
-    for (const f of files) if (!firstByHash.has(f.md5)) firstByHash.set(f.md5, f.name);
-    const items = files.map(f => {
-      const first = firstByHash.get(f.md5);
-      return { name: f.name, labeled: labeled.has(f.name), review: labeled.has(f.name) ? reviewState(LABELS_ROOT, f.name) : null, duplicateOf: first === f.name ? null : first };
-    });
-    const unique = items.filter(i => !i.duplicateOf);
-    res.json({
-      files: items.map(i => i.name),
-      items,
-      counts: { files: items.length, unique: unique.length, uniqueUnlabeled: unique.filter(i => !i.labeled && !items.some(o => o.duplicateOf === i.name && o.labeled)).length },
-    });
+    const items = files.map(f => ({ name: f.name, labeled: labeled.has(f.name), review: labeled.has(f.name) ? reviewState(LABELS_ROOT, f.name, labeled.get(f.name)) : null }));
+    res.json({ files: items.map(i => i.name), items, counts: { files: items.length, labeled: items.filter(i => i.labeled).length } });
   } catch (e) {
     mediaFail(res, e, 'GET /api/files');
   }
@@ -240,59 +229,6 @@ router.delete('/files', async (req, res) => {
   } catch (e) {
     mediaFail(res, e, 'DELETE /api/files');
   }
-});
-
-/**
- * Byte-identical copies in the data (roster files and ACARS pictures): of each group of copies one stays (the one
- * whose label was saved last, else the first by name), the others and their labels go to trash/<date>/.
- *   GET  /api/files/duplicates          what would go: { roster: [{ name, keep, labeled }], acars: [...], labelsDiffer: n }
- *   POST /api/files/delete-duplicates   { dry?: true } -> the same plus { deleted, failed: [{ name, error }] }
- * `labelsDiffer`: groups whose copies' labels differ in their rows (not only in "_reviewedAt" and such);
- * the kept copy's label wins, the others stay in the trash.
- */
-const labelRows = (label) => JSON.stringify(label, (k, v) => (k.startsWith('_') ? undefined : v));
-async function duplicatePlan() {
-  const plan = { roster: [], acars: [], labelsDiffer: 0 };
-  for (const [key, index, read] of [['roster', await mediaIndex(true), readLabel], ['acars', await acars.mediaIndex(true), acars.readLabel]]) {
-    const labelAt = new Map(index.labels.map(l => [l.name, new Date(l.lastModified || 0).getTime()]));
-    const groups = new Map();
-    for (const f of [...index.files].sort((a, b) => a.name.localeCompare(b.name))) {
-      if (!f.md5) continue;
-      (groups.get(f.md5) || groups.set(f.md5, []).get(f.md5)).push(f.name);
-    }
-    for (const names of groups.values()) {
-      if (names.length < 2) continue;
-      const labeled = names.filter(n => labelAt.has(n));
-      const keep = labeled.sort((a, b) => labelAt.get(b) - labelAt.get(a) || a.localeCompare(b))[0] || names[0];
-      if (labeled.length > 1) {
-        const rows = new Set();
-        for (const n of labeled) rows.add(labelRows(await read(n)));
-        if (rows.size > 1) plan.labelsDiffer += 1;
-      }
-      for (const name of names) if (name !== keep) plan[key].push({ name, keep, labeled: labelAt.has(name) });
-    }
-  }
-  return plan;
-}
-
-router.get('/files/duplicates', async (req, res) => {
-  try { res.json(await duplicatePlan()); } catch (e) { mediaFail(res, e, 'GET /api/files/duplicates'); }
-});
-
-router.post('/files/delete-duplicates', async (req, res) => {
-  try {
-    const plan = await duplicatePlan();
-    if (req.body?.dry) return res.json({ ...plan, deleted: 0, failed: [] });
-    let deleted = 0;
-    const failed = [];
-    for (const { name } of plan.roster) {
-      try { await deleteFile(name); fs.rmSync(path.join(CACHE_DIR, 'parsed', `${name}.json`), { force: true }); deleted += 1; } catch (e) { failed.push({ name, error: e.message }); }
-    }
-    for (const { name } of plan.acars) {
-      try { await acars.deleteFile(name); deleted += 1; } catch (e) { failed.push({ name, error: e.message }); }
-    }
-    res.json({ ...plan, deleted, failed });
-  } catch (e) { mediaFail(res, e, 'POST /api/files/delete-duplicates'); }
 });
 
 // Serve raw image file (dùng cho <img src="/api/raw?name=...">)
@@ -403,53 +339,43 @@ router.get('/predict', async (req, res) => {
   }
 });
 
-// Stop a running AI model benchmark (GET /api/benchmark/model/stream below)
+// Stop a running benchmark (services/bench-jobs.js): it ends after the file it is on, with the score so far.
 router.post('/benchmark/stop', (req, res) => {
   const runId = String(req.query.runId || req.body?.runId || '').trim();
   if (!runId) return res.status(400).json({ ok: false, error: 'Missing runId' });
-
-  const run = activeBenchmarks.get(runId);
-  if (!run) {
-    return res.status(404).json({ ok: false, runId, error: 'Benchmark run not found or already finished' });
-  }
-
-  run.stopRequested = true;
-  run.stoppedAt = Date.now();
+  if (!stopBenchJob(runId)) return res.status(404).json({ ok: false, runId, error: 'Benchmark run not found or already finished' });
   return res.json({ ok: true, runId, stopping: true });
 });
 
 /**
- * Runs one benchmark as a server-sent event stream (start, file per file, done | error);
- * stop it with POST /api/benchmark/stop?runId=… or by closing the stream.
+ * Follows a benchmark run of this kind as a server-sent event stream: `job` { runId, startedAt, running, params } first,
+ * then start, file per file, done | error (the ones so far played back), and `end`. The run belongs to the server
+ * (services/bench-jobs.js): closing the stream (leaving the page) does not stop it; POST /api/benchmark/stop does.
+ *   no run of this kind going: starts one with these settings (?runId=<the page's id>: once per id, so the browser
+ *   reconnecting a stream it already had only follows that run again, never starts a new one)
+ *   ?attach=1: only follows the running (or recently finished) run; `none` when there is none
  */
-async function streamBenchmark(req, res, run) {
-  const runId = String(req.query.runId || `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`);
-  if (activeBenchmarks.has(runId)) return res.status(409).json({ error: `Benchmark runId already active: ${runId}` });
-  const runState = { runId, stopRequested: false, startedAt: Date.now(), stoppedAt: null };
-  activeBenchmarks.set(runId, runState);
-  let closed = false;
-  const send = (event, payload) => {
-    if (closed) return;
-    res.write(`event: ${event}\ndata: ${JSON.stringify({ runId, ...payload })}\n\n`);
-  };
+function streamBenchmark(req, res, kind, params, run) {
+  const nonce = String(req.query.runId || '') || null;
+  let job = benchJob(kind);
+  const again = job && nonce && job.nonce === nonce;
+  if (!job?.running && !again && req.query.attach !== '1') {
+    try { job = startBenchJob(kind, params, run, nonce); } catch (e) { return res.status(e.status || 500).json({ error: e.message }); }
+  }
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
   res.flushHeaders?.();
+  let closed = false;
+  const send = (event, payload) => { if (!closed) res.write(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`); };
+  if (!job) { send('none', {}); return res.end(); }
+  send('job', { runId: job.runId, startedAt: job.startedAt, running: job.running, params: job.params });
   const heartbeat = setInterval(() => { if (!closed) res.write(': keep-alive\n\n'); }, 15000);
-  req.on('close', () => { closed = true; runState.stopRequested = true; clearInterval(heartbeat); });
-  try {
-    await run({
-      shouldStop: () => closed || runState.stopRequested,
-      onEvent: (evt) => send(evt.type, evt),
-    });
-  } catch (e) {
-    send('error', { error: String(e?.message || e) });
-  } finally {
-    clearInterval(heartbeat);
-    activeBenchmarks.delete(runId);
-    if (!closed) res.end();
-  }
+  const stop = follow(job, (e) => {
+    send(e.type, { runId: job.runId, ...e });
+    if (e.type === 'end') { clearInterval(heartbeat); closed = true; res.end(); }
+  });
+  req.on('close', () => { closed = true; clearInterval(heartbeat); stop(); }); // the run goes on
 }
 
 // Labeled files per type, for the /benchmark choices: { image: 75, pdf: 74, csv: 20, ... }; acars: labeled ACARS pictures
@@ -473,18 +399,18 @@ router.get('/benchmark/ocr-server', async (req, res) => {
 
 // Benchmarks read the local mirror of MinIO: bring it up to date first.
 // Text recognition alone: PaddleOCR on every labeled image (services/ocr-benchmark.js).
-router.get('/benchmark/ocr/stream', (req, res) => streamBenchmark(req, res, async (opts) => { await syncMedia({ force: true }); return runOcrBenchmark(opts); }));
+router.get('/benchmark/ocr/stream', (req, res) => streamBenchmark(req, res, 'ocr', {}, async (opts) => { await syncMedia({ force: true }); return runOcrBenchmark(opts); }));
 
 // AI model over the labeled files of the chosen types (?types=image,pdf,csv; default all),
 // as /roster reads them (services/model-benchmark.js).
 router.get('/benchmark/model/stream', (req, res) => {
   const asked = String(req.query.types || '').split(',').map(t => t.trim().toLowerCase()).filter(t => FILE_TYPES.includes(t));
   const types = asked.length ? asked : FILE_TYPES;
-  return streamBenchmark(req, res, async (opts) => { await syncMedia({ force: true }); return runModelBenchmark({ types, ...opts }); });
+  return streamBenchmark(req, res, 'model', { types }, async (opts) => { await syncMedia({ force: true }); return runModelBenchmark({ types, ...opts }); });
 });
 
 // AI model over the labeled ACARS pictures, as /acars reads them (services/acars-benchmark.js).
-router.get('/benchmark/acars/stream', (req, res) => streamBenchmark(req, res, async (opts) => { await acars.syncMedia({ force: true }); return runAcarsBenchmark(opts); }));
+router.get('/benchmark/acars/stream', (req, res) => streamBenchmark(req, res, 'acars', {}, async (opts) => { await acars.syncMedia({ force: true }); return runAcarsBenchmark(opts); }));
 
 // History of the finished runs (services/benchmark-history.js), to compare them on /benchmark.
 //   GET /api/benchmark/history/:kind -> { runs: [summary] } (newest first; kind ocr | model | acars)

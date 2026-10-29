@@ -12,7 +12,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import joblib  # noqa: E402
-from pdf_tagger import doc_features, use_learned_header_words  # noqa: E402,F401  (the pickled model refers to pdf_tagger)
+from pdf_tagger import doc_features, tagger_words_file, use_learned_header_words  # noqa: E402,F401  (the pickled model refers to pdf_tagger)
 
 
 def tag_pages(model, pages):
@@ -32,7 +32,7 @@ def main():
         sys.exit('usage: pdf_tagger_predict.py model_dir  (the app passes the active version, services/ai-models.js)')
     model_dir = sys.argv[1]
     model = joblib.load(os.path.join(model_dir, 'tagger.joblib'))
-    use_learned_header_words(os.path.join(model_dir, 'conventions.json'))  # the header words it was trained with
+    use_learned_header_words(tagger_words_file(model_dir))  # the header words it was trained with
     pages = json.load(sys.stdin)['pages']
     sys.stdout.write(json.dumps({'fields': tag_pages(model, pages)}))
 

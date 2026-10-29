@@ -10,6 +10,8 @@ import toolsApiRouter from './routes/tools-api.js';
 import rosterApiRouter from './routes/roster-api.js';
 import suggestionsApiRouter from './routes/suggestions-api.js';
 import mediaApiRouter from './routes/media-api.js';
+import dashboardApiRouter from './routes/dashboard-api.js';
+import jobsApiRouter from './routes/jobs-api.js';
 import acarsApiRouter from './routes/acars-api.js';
 import authApiRouter, { gate } from './routes/auth-api.js';
 import accountApiRouter from './routes/account-api.js';
@@ -43,7 +45,9 @@ app.use('/api/models', modelsApiRouter); // every model of the pipeline: version
 app.use('/api/airports', airportsApiRouter); // airport search + details + 7-day weather (/airport)
 app.use('/api', rosterApiRouter); // public: POST /api/roster/upload (any roster file type), /api/roster/suggestions
 app.use('/api', suggestionsApiRouter); // admin: correction suggestions, handled on /label
-app.use('/api', mediaApiRouter); // admin: the files + labels in MinIO, the local mirror (/media)
+app.use('/api', mediaApiRouter); // admin: the files + labels in MinIO: upload, delete (/label)
+app.use('/api', jobsApiRouter); // admin: /api/jobs, the training / benchmark runs going on (the status bar of nav.js)
+app.use('/api', dashboardApiRouter); // admin: /api/dashboard, the servers' health, counts, active models (/dashboard)
 app.use('/api', acarsApiRouter); // ACARS pictures: POST /api/acars/read (public, /acars); the dataset (admin, /label)
 app.use('/api', toolsApiRouter); // public tools: /api/night-time/calc, /api/calendar/export
 app.use('/api', apiRouter);
